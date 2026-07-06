@@ -1,0 +1,798 @@
+2026-05-13 00:13:16 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-13 00:13:16 [info] [VM] Loading vmClient (TypeScript) module...
+2026-05-13 00:13:16 [info] [VM] Module loaded successfully
+2026-05-13 00:18:07 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-13 00:23:57 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-17 14:25:47 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-17 14:25:47 [info] [VM] Loading vmClient (TypeScript) module...
+2026-05-17 14:25:47 [info] [VM] Module loaded successfully
+2026-05-17 14:34:34 [info] [VM] Loading vmClient (TypeScript) module...
+2026-05-17 14:34:34 [info] [VM] Module loaded successfully
+2026-05-17 14:34:34 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-17 23:30:28 [info] [VM] Loading vmClient (TypeScript) module...
+2026-05-17 23:30:28 [info] [VM] Module loaded successfully
+2026-05-17 23:30:28 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-23 15:03:13 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-23 15:03:13 [info] [VM] Loading vmClient (TypeScript) module...
+2026-05-23 15:03:13 [info] [VM] Module loaded successfully
+2026-05-23 15:04:14 [info] [VM] Loading vmClient (TypeScript) module...
+2026-05-23 15:04:14 [info] [VM] Module loaded successfully
+2026-05-23 15:04:14 [info] [Bundle:status] rootfs.vhdx missing
+2026-05-25 17:02:07 [info] [VM] Loading vmClient (TypeScript) module...
+2026-05-25 17:02:07 [info] [VM] Module loaded successfully
+2026-05-25 17:02:08 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 00:04:51 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-15 00:04:51 [info] [VM] Module loaded successfully
+2026-06-15 00:04:53 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 00:16:27 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-15 00:16:27 [info] [VM] Module loaded successfully
+2026-06-15 00:16:27 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 00:17:32 [info] [logout] User navigated to /logout, stopping VM
+2026-06-15 00:17:32 [info] [stopVM] stopping VM gracefully
+2026-06-15 00:17:32 [error] [logout] Failed to stop VM on logout: not configured: call 'configure' first
+2026-06-15 00:17:34 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 00:17:46 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 00:17:48 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 00:17:48 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 00:17:48 [info] [Bundle:status] vmlinuz missing
+2026-06-15 00:17:48 [info] [Bundle:status] initrd missing
+2026-06-15 01:10:01 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 01:10:01 [info] [Bundle:status] rootfs.vhdx missing
+2026-06-15 01:10:01 [info] [warm] No warm file found for rootfs.vhdx at current version
+2026-06-15 01:10:01 [info] [cache] No cached compressed file for rootfs.vhdx
+2026-06-15 01:10:01 [info] rootfs.vhdx not found, downloading...
+2026-06-15 01:10:01 [info] Downloading rootfs.vhdx...
+2026-06-15 01:10:01 [info] [KernelBugMonitor] State reset
+2026-06-15 01:10:01 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-15 01:10:01 [info] [VM:start] Bundle version: <blob>
+2026-06-15 01:10:01 [info] [VM:start] VM instance ID: e93ebeca-8b14-4532-800a-87693e4a0dae
+2026-06-15 01:10:01 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-15 01:10:01 [info] [downloadVM] Download already in progress, waiting...
+2026-06-15 01:10:10 [info] [startVM] VM startup already in progress, waiting...
+2026-06-15 01:10:18 [info] [startVM] VM startup already in progress, waiting...
+2026-06-15 01:10:25 [info] [startVM] VM startup already in progress, waiting...
+2026-06-15 01:17:56 [info] rootfs.vhdx.zst checksum validated
+2026-06-15 01:17:56 [info] [downloadVM] Saved compressed rootfs.vhdx to cache
+2026-06-15 01:17:56 [info] [Bundle:status] vmlinuz missing
+2026-06-15 01:17:56 [info] [warm] No warm file found for vmlinuz at current version
+2026-06-15 01:17:56 [info] [cache] No cached compressed file for vmlinuz
+2026-06-15 01:17:56 [info] vmlinuz not found, downloading...
+2026-06-15 01:17:56 [info] Downloading vmlinuz...
+2026-06-15 01:18:00 [info] vmlinuz.zst checksum validated
+2026-06-15 01:18:00 [info] [downloadVM] Saved compressed vmlinuz to cache
+2026-06-15 01:18:00 [info] [Bundle:status] initrd missing
+2026-06-15 01:18:00 [info] [warm] No warm file found for initrd at current version
+2026-06-15 01:18:00 [info] [cache] No cached compressed file for initrd
+2026-06-15 01:18:00 [info] initrd not found, downloading...
+2026-06-15 01:18:00 [info] Downloading initrd...
+2026-06-15 01:18:22 [info] initrd.zst checksum validated
+2026-06-15 01:18:22 [info] [downloadVM] Saved compressed initrd to cache
+2026-06-15 01:18:22 [info] All files ready in <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-15 01:18:22 [info] [VM:steps] download_and_sdk_prepare completed (500361ms)
+2026-06-15 01:18:22 [info] [VM:steps] load_swift_api started
+2026-06-15 01:18:22 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-15 01:18:22 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-15 01:18:22 [info] [Callbacks] VM event callbacks initialized
+2026-06-15 01:18:22 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.12603.1.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-15 01:18:22 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-15 01:18:22 [info] [VM:start] Configuring Windows VM service...
+2026-06-15 01:18:22 [info] [VM:start] Windows VM service configured
+2026-06-15 01:18:22 [info] [VM:steps] create_network started
+2026-06-15 01:18:22 [info] [VM:steps] create_network completed (12ms)
+2026-06-15 01:18:22 [info] [VM:steps] create_vm_config started
+2026-06-15 01:18:22 [info] [VM:steps] create_vm_config completed (116ms)
+2026-06-15 01:18:23 [info] [VM:steps] vm_boot started
+2026-06-15 01:18:23 [info] [VM:steps] vm_boot completed (395ms)
+2026-06-15 01:18:23 [info] [VM:steps] add_plan9_shares started
+2026-06-15 01:18:23 [info] [VM:steps] add_plan9_shares completed (6ms)
+2026-06-15 01:18:33 [info] [VM:start] Still waiting for guest connection... 10159ms elapsed, 21 polls
+2026-06-15 01:18:33 [info] [VM] Network status: CONNECTED
+2026-06-15 01:18:34 [info] [VM:steps] sdk_install started
+2026-06-15 01:18:34 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.170
+2026-06-15 01:18:36 [info] [VM] API reachability: REACHABLE
+2026-06-15 01:18:39 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-15 01:18:39 [info] [VM:steps] sdk_install completed (5370ms)
+2026-06-15 01:18:39 [info] [VM:start] Startup complete, total time: 517602ms
+2026-06-15 13:26:34 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-15 13:26:34 [info] [VM] Module loaded successfully
+2026-06-15 13:31:45 [info] [KernelBugMonitor] State reset
+2026-06-15 13:31:45 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-15 13:31:45 [info] [VM:start] Bundle version: <blob>
+2026-06-15 13:31:45 [info] [VM:start] VM instance ID: 0d0c02ff-9eb6-447e-916f-9dcd6a8c38da
+2026-06-15 13:31:45 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-15 13:31:45 [info] [VM:steps] download_and_sdk_prepare completed (14ms)
+2026-06-15 13:31:45 [info] [VM:steps] load_swift_api started
+2026-06-15 13:31:45 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-15 13:31:45 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-15 13:31:45 [info] [Callbacks] VM event callbacks initialized
+2026-06-15 13:31:45 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.12603.1.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-15 13:31:46 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-15 13:31:46 [info] [VM:start] Configuring Windows VM service...
+2026-06-15 13:31:46 [info] [VM:start] Windows VM service configured
+2026-06-15 13:31:46 [info] [VM:steps] create_network started
+2026-06-15 13:31:46 [info] [VM:steps] create_network completed (25ms)
+2026-06-15 13:31:46 [info] [VM:steps] create_vm_config started
+2026-06-15 13:31:46 [info] [VM:steps] create_vm_config completed (170ms)
+2026-06-15 13:31:46 [info] [VM:steps] vm_boot started
+2026-06-15 13:31:47 [info] [VM:steps] vm_boot completed (508ms)
+2026-06-15 13:31:47 [info] [VM:steps] add_plan9_shares started
+2026-06-15 13:31:47 [info] [VM:steps] add_plan9_shares completed (15ms)
+2026-06-15 13:31:56 [info] [VM] Network status: CONNECTED
+2026-06-15 13:31:56 [info] [VM:steps] sdk_install started
+2026-06-15 13:31:56 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.170
+2026-06-15 13:31:59 [info] [VM] API reachability: REACHABLE
+2026-06-15 13:31:59 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-15 13:31:59 [info] [VM:steps] sdk_install completed (3243ms)
+2026-06-15 13:31:59 [info] [VM:start] Startup complete, total time: 14358ms
+2026-06-15 14:07:24 [info] [startVM] VM already connected
+2026-06-15 14:07:24 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.170
+2026-06-15 14:07:25 [warn] [Keepalive] Already running
+2026-06-15 14:26:22 [info] [startVM] VM already connected
+2026-06-15 14:26:22 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.170
+2026-06-15 14:26:23 [warn] [Keepalive] Already running
+2026-06-15 16:57:58 [info] [VM:shutdown] App quit, stopping VM (instance: 0d0c02ff-9eb6-447e-916f-9dcd6a8c38da)...
+2026-06-15 16:57:58 [info] [Keepalive] Stopping
+2026-06-15 16:57:58 [info] [VM:shutdown] Completed in 303ms
+2026-06-15 17:39:45 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-15 17:39:45 [info] [VM] Module loaded successfully
+2026-06-16 13:42:23 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-16 13:42:23 [info] [VM] Module loaded successfully
+2026-06-16 22:50:47 [info] [KernelBugMonitor] State reset
+2026-06-16 22:50:47 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-16 22:50:47 [info] [VM:start] Bundle version: <blob>
+2026-06-16 22:50:47 [info] [VM:start] VM instance ID: 638c69f0-e68f-4dc0-a0c5-6c4749741c8b
+2026-06-16 22:50:47 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-16 22:50:47 [info] [VM:steps] download_and_sdk_prepare completed (8ms)
+2026-06-16 22:50:47 [info] [VM:steps] load_swift_api started
+2026-06-16 22:50:47 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-16 22:50:47 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-16 22:50:48 [info] [Callbacks] VM event callbacks initialized
+2026-06-16 22:50:48 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.12603.1.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-16 22:50:49 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-16 22:50:49 [info] [VM:start] Configuring Windows VM service...
+2026-06-16 22:50:49 [info] [VM:start] Windows VM service configured
+2026-06-16 22:50:49 [info] [VM:steps] create_network started
+2026-06-16 22:50:49 [info] [VM:steps] create_network completed (4ms)
+2026-06-16 22:50:49 [info] [VM:steps] create_vm_config started
+2026-06-16 22:50:49 [info] [VM:steps] create_vm_config completed (176ms)
+2026-06-16 22:50:49 [info] [VM:steps] vm_boot started
+2026-06-16 22:50:50 [info] [VM:steps] vm_boot completed (404ms)
+2026-06-16 22:50:50 [info] [VM:steps] add_plan9_shares started
+2026-06-16 22:50:50 [info] [VM:steps] add_plan9_shares completed (11ms)
+2026-06-16 22:50:58 [info] [VM] Network status: CONNECTED
+2026-06-16 22:50:58 [info] [VM:steps] sdk_install started
+2026-06-16 22:50:58 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.170
+2026-06-16 22:51:02 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-16 22:51:02 [info] [VM:steps] sdk_install completed (3709ms)
+2026-06-16 22:51:02 [info] [VM:start] Startup complete, total time: 14836ms
+2026-06-16 22:51:02 [info] [VM] API reachability: REACHABLE
+2026-06-17 15:24:54 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-17 15:24:54 [info] [VM] Module loaded successfully
+2026-06-17 15:26:16 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-17 15:26:16 [info] [VM] Module loaded successfully
+2026-06-17 15:26:59 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-17 15:26:59 [info] [VM] Module loaded successfully
+2026-06-17 15:38:19 [info] [warm] Fetching VM hash for version 1.13576.0
+2026-06-17 15:38:20 [info] [warm] VM hash for version 1.13576.0: <blob>
+2026-06-17 15:38:20 [info] [warm] VM SHA matches current version, skipping
+2026-06-17 16:48:07 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-17 16:48:07 [info] [VM] Module loaded successfully
+2026-06-17 22:11:02 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-17 22:11:02 [info] [VM] Module loaded successfully
+2026-06-18 13:42:04 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-18 13:42:04 [info] [VM] Module loaded successfully
+2026-06-18 13:42:16 [info] [warm] Fetching VM hash for version 1.13576.1
+2026-06-18 13:42:16 [info] [warm] VM hash for version 1.13576.1: <blob>
+2026-06-18 13:42:16 [info] [warm] VM SHA matches current version, skipping
+2026-06-18 15:12:52 [info] [warm] Fetching VM hash for version 1.13576.4
+2026-06-18 15:12:52 [info] [warm] VM hash for version 1.13576.4: <blob>
+2026-06-18 15:12:52 [info] [warm] VM SHA matches current version, skipping
+2026-06-18 16:14:06 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-18 16:14:06 [info] [VM] Module loaded successfully
+2026-06-18 19:35:35 [info] [KernelBugMonitor] State reset
+2026-06-18 19:35:35 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-18 19:35:35 [info] [VM:start] Bundle version: <blob>
+2026-06-18 19:35:35 [info] [VM:start] VM instance ID: b293f546-1f3c-4da1-bfda-ceaf13fce341
+2026-06-18 19:35:35 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-18 19:35:49 [info] [VM:steps] download_and_sdk_prepare completed (14391ms)
+2026-06-18 19:35:49 [info] [VM:steps] load_swift_api started
+2026-06-18 19:35:49 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-18 19:35:49 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-18 19:35:50 [info] [Callbacks] VM event callbacks initialized
+2026-06-18 19:35:50 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.13576.4.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-18 19:35:50 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-18 19:35:50 [info] [VM:start] Configuring Windows VM service...
+2026-06-18 19:35:50 [info] [VM:start] Windows VM service configured
+2026-06-18 19:35:50 [info] [VM:steps] create_network started
+2026-06-18 19:35:50 [info] [VM:steps] create_network completed (15ms)
+2026-06-18 19:35:50 [info] [VM:steps] create_vm_config started
+2026-06-18 19:35:50 [info] [VM:steps] create_vm_config completed (132ms)
+2026-06-18 19:35:50 [info] [VM:steps] vm_boot started
+2026-06-18 19:35:51 [info] [VM:steps] vm_boot completed (450ms)
+2026-06-18 19:35:51 [info] [VM:steps] add_plan9_shares started
+2026-06-18 19:35:51 [info] [VM:steps] add_plan9_shares completed (11ms)
+2026-06-18 19:36:01 [info] [VM:start] Still waiting for guest connection... 10217ms elapsed, 21 polls
+2026-06-18 19:36:03 [info] [VM] Network status: CONNECTED
+2026-06-18 19:36:03 [info] [VM:steps] sdk_install started
+2026-06-18 19:36:03 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.177
+2026-06-18 19:36:07 [info] [VM] API reachability: REACHABLE
+2026-06-18 19:36:10 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-18 19:36:10 [info] [VM:steps] sdk_install completed (7090ms)
+2026-06-18 19:36:10 [info] [VM:start] Startup complete, total time: 35368ms
+2026-06-19 04:14:39 [info] [warm] Fetching VM hash for version 1.14271.0
+2026-06-19 04:14:39 [info] [warm] VM hash for version 1.14271.0: <blob>
+2026-06-19 04:14:39 [info] [warm] VM SHA matches current version, skipping
+2026-06-19 12:58:56 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-19 12:58:56 [info] [VM] Module loaded successfully
+2026-06-20 14:11:44 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-20 14:11:44 [info] [VM] Module loaded successfully
+2026-06-23 00:24:42 [info] [KernelBugMonitor] State reset
+2026-06-23 00:24:42 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-23 00:24:42 [info] [VM:start] Bundle version: <blob>
+2026-06-23 00:24:42 [info] [VM:start] VM instance ID: a44e658d-909a-4b8f-ad88-9bb990b2086e
+2026-06-23 00:24:42 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-23 00:24:47 [info] [startVM] VM startup already in progress, waiting...
+2026-06-23 00:24:57 [info] [VM:steps] download_and_sdk_prepare completed (14822ms)
+2026-06-23 00:24:57 [info] [VM:steps] load_swift_api started
+2026-06-23 00:24:57 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-23 00:24:57 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-23 00:24:57 [info] [Callbacks] VM event callbacks initialized
+2026-06-23 00:24:57 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.14271.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-23 00:24:57 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-23 00:24:57 [info] [VM:start] Configuring Windows VM service...
+2026-06-23 00:24:57 [info] [VM:start] Windows VM service configured
+2026-06-23 00:24:57 [info] [VM:steps] create_network started
+2026-06-23 00:24:57 [info] [VM:steps] create_network completed (19ms)
+2026-06-23 00:24:57 [info] [VM:steps] create_vm_config started
+2026-06-23 00:24:57 [info] [VM:steps] create_vm_config completed (189ms)
+2026-06-23 00:24:58 [info] [VM:steps] vm_boot started
+2026-06-23 00:24:58 [info] [VM:steps] vm_boot completed (223ms)
+2026-06-23 00:24:58 [info] [VM:steps] add_plan9_shares started
+2026-06-23 00:24:58 [info] [VM:steps] add_plan9_shares completed (11ms)
+2026-06-23 00:25:08 [info] [VM:start] Still waiting for guest connection... 10207ms elapsed, 21 polls
+2026-06-23 00:25:08 [info] [VM] Network status: CONNECTED
+2026-06-23 00:25:09 [info] [VM:steps] sdk_install started
+2026-06-23 00:25:09 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.181
+2026-06-23 00:25:12 [info] [VM] API reachability: REACHABLE
+2026-06-23 00:25:14 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-23 00:25:14 [info] [VM:steps] sdk_install completed (5826ms)
+2026-06-23 00:25:14 [info] [VM:start] Startup complete, total time: 32513ms
+2026-06-23 17:39:00 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-23 17:39:00 [info] [VM] Module loaded successfully
+2026-06-23 19:27:20 [info] [KernelBugMonitor] State reset
+2026-06-23 19:27:20 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-23 19:27:20 [info] [VM:start] Bundle version: <blob>
+2026-06-23 19:27:20 [info] [VM:start] VM instance ID: ea541e28-f064-4ccf-b033-d94bd9a7f756
+2026-06-23 19:27:20 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-23 19:27:20 [info] [VM:steps] download_and_sdk_prepare completed (40ms)
+2026-06-23 19:27:20 [info] [VM:steps] load_swift_api started
+2026-06-23 19:27:20 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-23 19:27:20 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-23 19:27:21 [info] [Callbacks] VM event callbacks initialized
+2026-06-23 19:27:21 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.14271.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-23 19:27:21 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-23 19:27:21 [info] [VM:start] Configuring Windows VM service...
+2026-06-23 19:27:21 [info] [VM:start] Windows VM service configured
+2026-06-23 19:27:21 [info] [VM:steps] create_network started
+2026-06-23 19:27:21 [info] [VM:steps] create_network completed (22ms)
+2026-06-23 19:27:21 [info] [VM:steps] create_vm_config started
+2026-06-23 19:27:21 [info] [VM:steps] create_vm_config completed (170ms)
+2026-06-23 19:27:22 [info] [VM:steps] vm_boot started
+2026-06-23 19:27:22 [info] [VM:steps] vm_boot completed (485ms)
+2026-06-23 19:27:22 [info] [VM:steps] add_plan9_shares started
+2026-06-23 19:27:22 [info] [VM:steps] add_plan9_shares completed (0ms)
+2026-06-23 19:27:30 [info] [VM] Network status: CONNECTED
+2026-06-23 19:27:30 [info] [VM:steps] sdk_install started
+2026-06-23 19:27:30 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.181
+2026-06-23 19:27:34 [info] [VM] API reachability: REACHABLE
+2026-06-23 19:27:34 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-23 19:27:34 [info] [VM:steps] sdk_install completed (3431ms)
+2026-06-23 19:27:34 [info] [VM:start] Startup complete, total time: 13581ms
+2026-06-23 22:01:48 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-23 22:01:48 [info] [VM] Module loaded successfully
+2026-06-24 18:26:15 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-24 18:26:15 [info] [VM] Module loaded successfully
+2026-06-24 18:27:01 [info] [warm] Fetching VM hash for version 1.15200.0
+2026-06-24 18:27:01 [info] [warm] VM hash for version 1.15200.0: <blob>
+2026-06-24 18:27:01 [info] [warm] VM SHA matches current version, skipping
+2026-06-24 19:55:58 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-24 19:55:58 [info] [VM] Module loaded successfully
+2026-06-25 13:58:42 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-25 13:58:42 [info] [VM] Module loaded successfully
+2026-06-25 16:18:44 [info] [KernelBugMonitor] State reset
+2026-06-25 16:18:44 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-25 16:18:44 [info] [VM:start] Bundle version: <blob>
+2026-06-25 16:18:44 [info] [VM:start] VM instance ID: 3b7fa1d9-3e79-40bf-b625-8a4867d52871
+2026-06-25 16:18:44 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-25 16:18:44 [info] [VM:steps] download_and_sdk_prepare completed (16ms)
+2026-06-25 16:18:44 [info] [VM:steps] load_swift_api started
+2026-06-25 16:18:44 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-25 16:18:44 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-25 16:18:44 [info] [Callbacks] VM event callbacks initialized
+2026-06-25 16:18:44 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.15200.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-25 16:18:44 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-25 16:18:44 [info] [VM:start] Configuring Windows VM service...
+2026-06-25 16:18:44 [info] [VM:start] Windows VM service configured
+2026-06-25 16:18:44 [info] [VM:steps] create_network started
+2026-06-25 16:18:44 [info] [VM:steps] create_network completed (23ms)
+2026-06-25 16:18:44 [info] [VM:steps] create_vm_config started
+2026-06-25 16:18:44 [info] [VM:steps] create_vm_config completed (159ms)
+2026-06-25 16:18:44 [info] [VM:steps] vm_boot started
+2026-06-25 16:18:45 [info] [VM:steps] vm_boot completed (357ms)
+2026-06-25 16:18:45 [info] [VM:steps] add_plan9_shares started
+2026-06-25 16:18:45 [info] [VM:steps] add_plan9_shares completed (12ms)
+2026-06-25 16:18:51 [info] [startVM] VM startup already in progress, waiting...
+2026-06-25 16:18:53 [info] [startVM] VM startup already in progress, waiting...
+2026-06-25 16:18:55 [info] [VM:start] Still waiting for guest connection... 10125ms elapsed, 21 polls
+2026-06-25 16:18:55 [info] [startVM] VM startup already in progress, waiting...
+2026-06-25 16:18:55 [info] [VM] Network status: CONNECTED
+2026-06-25 16:18:55 [info] [VM:steps] sdk_install started
+2026-06-25 16:18:55 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.181
+2026-06-25 16:18:56 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-25 16:18:56 [info] [VM:steps] sdk_install completed (480ms)
+2026-06-25 16:18:56 [info] [VM:start] Startup complete, total time: 12397ms
+2026-06-25 16:18:59 [info] [VM] API reachability: REACHABLE
+2026-06-26 13:15:59 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-26 13:15:59 [info] [VM] Module loaded successfully
+2026-06-26 13:16:00 [info] [KernelBugMonitor] State reset
+2026-06-26 13:16:00 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-26 13:16:00 [info] [VM:start] Bundle version: <blob>
+2026-06-26 13:16:00 [info] [VM:start] VM instance ID: 84fef57d-80b7-4e5b-b9b6-2c38cba7aba4
+2026-06-26 13:16:00 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-26 13:16:00 [info] [VM:steps] download_and_sdk_prepare completed (43ms)
+2026-06-26 13:16:00 [info] [VM:steps] load_swift_api started
+2026-06-26 13:16:00 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-26 13:16:00 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-26 13:16:01 [info] [Callbacks] VM event callbacks initialized
+2026-06-26 13:16:01 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.15200.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-26 13:16:01 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-26 13:16:01 [info] [VM:start] Configuring Windows VM service...
+2026-06-26 13:16:01 [info] [VM:start] Windows VM service configured
+2026-06-26 13:16:01 [info] [VM:steps] create_network started
+2026-06-26 13:16:01 [info] [VM:steps] create_network completed (1ms)
+2026-06-26 13:16:01 [info] [VM:steps] create_vm_config started
+2026-06-26 13:16:01 [info] [VM:steps] create_vm_config completed (300ms)
+2026-06-26 13:16:02 [info] [VM:steps] vm_boot started
+2026-06-26 13:16:03 [info] [VM:steps] vm_boot completed (607ms)
+2026-06-26 13:16:03 [info] [VM:steps] add_plan9_shares started
+2026-06-26 13:16:03 [info] [VM:steps] add_plan9_shares completed (10ms)
+2026-06-26 13:16:13 [info] [VM:start] Still waiting for guest connection... 10190ms elapsed, 21 polls
+2026-06-26 13:16:18 [info] [warm] Fetching VM hash for version 1.15962.0
+2026-06-26 13:16:18 [info] [warm] VM hash for version 1.15962.0: <blob>
+2026-06-26 13:16:18 [info] [warm] VM SHA matches current version, skipping
+2026-06-26 13:16:19 [info] [VM] Network status: CONNECTED
+2026-06-26 13:16:19 [info] [VM:steps] sdk_install started
+2026-06-26 13:16:19 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.181
+2026-06-26 13:16:25 [info] [VM] API reachability: REACHABLE
+2026-06-26 13:16:26 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-26 13:16:26 [info] [VM:steps] sdk_install completed (6539ms)
+2026-06-26 13:16:26 [info] [VM:start] Startup complete, total time: 25671ms
+2026-06-26 13:17:03 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-26 13:17:03 [info] [VM] Module loaded successfully
+2026-06-26 13:17:03 [info] [KernelBugMonitor] State reset
+2026-06-26 13:17:03 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-26 13:17:03 [info] [VM:start] Bundle version: <blob>
+2026-06-26 13:17:03 [info] [VM:start] VM instance ID: 983f1653-eca9-43d2-8886-fec1118533d8
+2026-06-26 13:17:03 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-26 13:17:26 [info] [VM:steps] download_and_sdk_prepare completed (22438ms)
+2026-06-26 13:17:26 [info] [VM:steps] load_swift_api started
+2026-06-26 13:17:26 [info] [VM:steps] load_swift_api completed (1ms)
+2026-06-26 13:17:26 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-26 13:17:26 [info] [Callbacks] VM event callbacks initialized
+2026-06-26 13:17:26 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.15962.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-26 13:17:27 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-26 13:17:27 [info] [VM:start] Configuring Windows VM service...
+2026-06-26 13:17:27 [info] [VM:start] Windows VM service configured
+2026-06-26 13:17:27 [info] [VM:steps] create_network started
+2026-06-26 13:17:27 [info] [VM:steps] create_network completed (2ms)
+2026-06-26 13:17:27 [info] [VM:steps] create_vm_config started
+2026-06-26 13:17:27 [info] [VM:steps] create_vm_config completed (151ms)
+2026-06-26 13:17:28 [info] [VM:steps] vm_boot started
+2026-06-26 13:17:28 [info] [VM:steps] vm_boot completed (256ms)
+2026-06-26 13:17:28 [info] [VM:steps] add_plan9_shares started
+2026-06-26 13:17:28 [info] [VM:steps] add_plan9_shares completed (12ms)
+2026-06-26 13:17:38 [info] [VM:start] Still waiting for guest connection... 10215ms elapsed, 21 polls
+2026-06-26 13:17:45 [info] [VM] Network status: CONNECTED
+2026-06-26 13:17:45 [info] [VM:steps] sdk_install started
+2026-06-26 13:17:45 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-26 13:17:52 [info] [VM] API reachability: REACHABLE
+2026-06-26 13:18:00 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-26 13:18:00 [info] [VM:steps] sdk_install completed (14506ms)
+2026-06-26 13:18:00 [info] [VM:start] Startup complete, total time: 56585ms
+2026-06-26 20:40:02 [warn] [Keepalive] Ping failed: Keep-alive ping timed out
+2026-06-27 11:54:19 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-27 11:54:19 [info] [VM] Module loaded successfully
+2026-06-27 11:54:31 [info] [warm] Fetching VM hash for version 1.15962.1
+2026-06-27 11:54:31 [info] [warm] VM hash for version 1.15962.1: <blob>
+2026-06-27 11:54:31 [info] [warm] VM SHA matches current version, skipping
+2026-06-27 18:47:33 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-27 18:47:33 [info] [VM] Module loaded successfully
+2026-06-28 13:59:34 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-28 13:59:34 [info] [VM] Module loaded successfully
+2026-06-29 18:47:27 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-29 18:47:27 [info] [VM] Module loaded successfully
+2026-06-29 20:18:17 [info] [KernelBugMonitor] State reset
+2026-06-29 20:18:17 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-29 20:18:17 [info] [VM:start] Bundle version: <blob>
+2026-06-29 20:18:17 [info] [VM:start] VM instance ID: 1e0e2e87-c6d6-4450-a04f-969b6cceffb8
+2026-06-29 20:18:17 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-29 20:18:17 [info] [VM:steps] download_and_sdk_prepare completed (18ms)
+2026-06-29 20:18:17 [info] [VM:steps] load_swift_api started
+2026-06-29 20:18:17 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-29 20:18:17 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-29 20:18:17 [info] [Callbacks] VM event callbacks initialized
+2026-06-29 20:18:17 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.15962.1.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-29 20:18:17 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-29 20:18:17 [info] [VM:start] Configuring Windows VM service...
+2026-06-29 20:18:17 [info] [VM:start] Windows VM service configured
+2026-06-29 20:18:17 [info] [VM:steps] create_network started
+2026-06-29 20:18:17 [info] [VM:steps] create_network completed (12ms)
+2026-06-29 20:18:17 [info] [VM:steps] create_vm_config started
+2026-06-29 20:18:17 [info] [VM:steps] create_vm_config completed (152ms)
+2026-06-29 20:18:17 [info] [VM:steps] vm_boot started
+2026-06-29 20:18:18 [info] [VM:steps] vm_boot completed (387ms)
+2026-06-29 20:18:18 [info] [VM:steps] add_plan9_shares started
+2026-06-29 20:18:18 [info] [VM:steps] add_plan9_shares completed (17ms)
+2026-06-29 20:18:19 [info] [startVM] VM startup already in progress, waiting...
+2026-06-29 20:18:28 [info] [VM:start] Still waiting for guest connection... 10222ms elapsed, 21 polls
+2026-06-29 20:18:29 [info] [VM] Network status: CONNECTED
+2026-06-29 20:18:29 [info] [VM:steps] sdk_install started
+2026-06-29 20:18:29 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 20:18:32 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-29 20:18:32 [info] [VM:steps] sdk_install completed (2791ms)
+2026-06-29 20:18:32 [info] [VM:start] Startup complete, total time: 15399ms
+2026-06-29 20:18:32 [info] [VM] API reachability: REACHABLE
+2026-06-29 20:22:59 [info] [startVM] VM already connected
+2026-06-29 20:22:59 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 20:23:00 [warn] [Keepalive] Already running
+2026-06-29 21:15:14 [info] [startVM] VM already connected
+2026-06-29 21:15:14 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:15:16 [warn] [Keepalive] Already running
+2026-06-29 21:15:25 [info] [startVM] VM already connected
+2026-06-29 21:15:25 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:15:26 [warn] [Keepalive] Already running
+2026-06-29 21:15:27 [info] [startVM] VM already connected
+2026-06-29 21:15:27 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:15:27 [warn] [Keepalive] Already running
+2026-06-29 21:15:50 [info] [startVM] VM already connected
+2026-06-29 21:15:50 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:15:50 [warn] [Keepalive] Already running
+2026-06-29 21:15:58 [info] [startVM] VM already connected
+2026-06-29 21:15:58 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:15:58 [warn] [Keepalive] Already running
+2026-06-29 21:16:01 [info] [startVM] VM already connected
+2026-06-29 21:16:01 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:16:01 [warn] [Keepalive] Already running
+2026-06-29 21:16:01 [info] [startVM] VM already connected
+2026-06-29 21:16:01 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:16:01 [warn] [Keepalive] Already running
+2026-06-29 21:22:31 [info] [startVM] VM already connected
+2026-06-29 21:22:31 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:22:31 [warn] [Keepalive] Already running
+2026-06-29 21:22:34 [info] [startVM] VM already connected
+2026-06-29 21:22:34 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:22:34 [warn] [Keepalive] Already running
+2026-06-29 21:22:35 [info] [startVM] VM already connected
+2026-06-29 21:22:35 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-29 21:22:35 [warn] [Keepalive] Already running
+2026-06-30 11:43:33 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-30 11:43:33 [info] [VM] Module loaded successfully
+2026-06-30 11:43:37 [info] [KernelBugMonitor] State reset
+2026-06-30 11:43:37 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-06-30 11:43:37 [info] [VM:start] Bundle version: <blob>
+2026-06-30 11:43:37 [info] [VM:start] VM instance ID: ab33da2f-4e79-4192-a403-0e96b8c78b71
+2026-06-30 11:43:37 [info] [VM:steps] download_and_sdk_prepare started
+2026-06-30 11:43:37 [info] [VM:steps] download_and_sdk_prepare completed (72ms)
+2026-06-30 11:43:37 [info] [VM:steps] load_swift_api started
+2026-06-30 11:43:37 [info] [VM:steps] load_swift_api completed (0ms)
+2026-06-30 11:43:37 [info] [Callbacks] Initializing VM event callbacks...
+2026-06-30 11:43:38 [info] [Callbacks] VM event callbacks initialized
+2026-06-30 11:43:38 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.15962.1.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-06-30 11:43:38 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-06-30 11:43:38 [info] [VM:start] Configuring Windows VM service...
+2026-06-30 11:43:38 [info] [VM:start] Windows VM service configured
+2026-06-30 11:43:38 [info] [VM:steps] create_network started
+2026-06-30 11:43:38 [info] [VM:steps] create_network completed (4ms)
+2026-06-30 11:43:38 [info] [VM:steps] create_vm_config started
+2026-06-30 11:43:38 [info] [VM:steps] create_vm_config completed (162ms)
+2026-06-30 11:43:38 [info] [startVM] VM startup already in progress, waiting...
+2026-06-30 11:43:39 [info] [VM:steps] vm_boot started
+2026-06-30 11:43:39 [info] [VM:steps] vm_boot completed (365ms)
+2026-06-30 11:43:39 [info] [VM:steps] add_plan9_shares started
+2026-06-30 11:43:39 [info] [VM:steps] add_plan9_shares completed (12ms)
+2026-06-30 11:43:46 [info] [VM] Network status: CONNECTED
+2026-06-30 11:43:46 [info] [VM:steps] sdk_install started
+2026-06-30 11:43:46 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-30 11:43:49 [info] [VM] API reachability: REACHABLE
+2026-06-30 11:43:49 [info] [Keepalive] Starting (interval=2000ms)
+2026-06-30 11:43:49 [info] [VM:steps] sdk_install completed (2737ms)
+2026-06-30 11:43:49 [info] [VM:start] Startup complete, total time: 11787ms
+2026-06-30 13:23:28 [info] [startVM] VM already connected
+2026-06-30 13:23:28 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-30 13:23:28 [warn] [Keepalive] Already running
+2026-06-30 13:24:03 [info] [startVM] VM already connected
+2026-06-30 13:24:03 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-06-30 13:24:03 [warn] [Keepalive] Already running
+2026-06-30 13:24:34 [info] [vmOneShot] Running: bash [2 arg(s)] as happy-relaxed-hopper
+2026-06-30 20:00:58 [info] [VM] Loading vmClient (TypeScript) module...
+2026-06-30 20:00:58 [info] [VM] Module loaded successfully
+2026-07-01 15:22:53 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-01 15:22:53 [info] [VM] Module loaded successfully
+2026-07-01 15:25:36 [info] [warm] Fetching VM hash for version 1.17377.1
+2026-07-01 15:25:37 [info] [warm] VM hash for version 1.17377.1: <blob>
+2026-07-01 15:25:37 [info] [warm] VM SHA matches current version, skipping
+2026-07-01 15:44:57 [info] [KernelBugMonitor] State reset
+2026-07-01 15:44:57 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-07-01 15:44:57 [info] [VM:start] Bundle version: <blob>
+2026-07-01 15:44:57 [info] [VM:start] VM instance ID: def0a593-250d-4560-adb1-ab71da551b86
+2026-07-01 15:44:57 [info] [VM:steps] download_and_sdk_prepare started
+2026-07-01 15:44:57 [info] [VM:steps] download_and_sdk_prepare completed (17ms)
+2026-07-01 15:44:57 [info] [VM:steps] load_swift_api started
+2026-07-01 15:44:57 [info] [VM:steps] load_swift_api completed (0ms)
+2026-07-01 15:44:57 [info] [Callbacks] Initializing VM event callbacks...
+2026-07-01 15:44:58 [info] [Callbacks] VM event callbacks initialized
+2026-07-01 15:44:58 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.15962.1.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-07-01 15:44:58 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-07-01 15:44:58 [info] [VM:start] Configuring Windows VM service...
+2026-07-01 15:44:58 [info] [VM:start] Windows VM service configured
+2026-07-01 15:44:58 [info] [VM:steps] create_network started
+2026-07-01 15:44:58 [info] [VM:steps] create_network completed (1ms)
+2026-07-01 15:44:58 [info] [VM:steps] create_vm_config started
+2026-07-01 15:44:58 [info] [VM:steps] create_vm_config completed (143ms)
+2026-07-01 15:44:58 [info] [VM:steps] vm_boot started
+2026-07-01 15:44:58 [info] [VM:steps] vm_boot completed (314ms)
+2026-07-01 15:44:58 [info] [VM:steps] add_plan9_shares started
+2026-07-01 15:44:58 [info] [VM:steps] add_plan9_shares completed (12ms)
+2026-07-01 15:45:06 [info] [VM] Network status: CONNECTED
+2026-07-01 15:45:06 [info] [VM:steps] sdk_install started
+2026-07-01 15:45:06 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-07-01 15:45:09 [info] [VM] API reachability: REACHABLE
+2026-07-01 15:45:09 [info] [Keepalive] Starting (interval=2000ms)
+2026-07-01 15:45:09 [info] [VM:steps] sdk_install completed (3016ms)
+2026-07-01 15:45:09 [info] [VM:start] Startup complete, total time: 11698ms
+2026-07-01 15:47:23 [info] [startVM] VM already connected
+2026-07-01 15:47:23 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-07-01 15:47:23 [warn] [Keepalive] Already running
+2026-07-01 15:47:23 [info] [startVM] VM already connected
+2026-07-01 15:47:23 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-07-01 15:47:23 [warn] [Keepalive] Already running
+2026-07-01 15:50:14 [info] [startVM] VM already connected
+2026-07-01 15:50:14 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.187
+2026-07-01 15:50:14 [warn] [Keepalive] Already running
+2026-07-01 15:54:19 [info] [vmOneShot] Running: bash [2 arg(s)] as bold-serene-babbage
+2026-07-01 15:54:28 [warn] [vm-stderr oneshot-] node:internal/modules/cjs/loader:1433
+  throw err;
+  ^
+
+Error: Cannot find module 'docx'
+Require stack:
+- /sessions/bold-serene-babbage/mnt/<vol>/[eval]
+    at Function._resolveFilename (node:intern…[truncated]
+2026-07-01 15:54:31 [info] [vmOneShot] Running: bash [2 arg(s)] as bold-serene-babbage
+2026-07-01 15:56:53 [info] [vmOneShot] Running: bash [2 arg(s)] as bold-serene-babbage
+2026-07-01 15:56:57 [info] [vmOneShot] Running: bash [2 arg(s)] as bold-serene-babbage
+2026-07-01 15:57:07 [info] [vmOneShot] Running: soffice [7 arg(s)] as office-convert-fbbe0473
+2026-07-01 16:00:18 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-01 16:00:18 [info] [VM] Module loaded successfully
+2026-07-01 16:00:19 [info] [KernelBugMonitor] State reset
+2026-07-01 16:00:19 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-07-01 16:00:19 [info] [VM:start] Bundle version: <blob>
+2026-07-01 16:00:19 [info] [VM:start] VM instance ID: 4411a084-a28d-414e-8908-dcde5c1d159a
+2026-07-01 16:00:19 [info] [VM:steps] download_and_sdk_prepare started
+2026-07-01 16:01:06 [info] [VM:steps] download_and_sdk_prepare completed (47165ms)
+2026-07-01 16:01:06 [info] [VM:steps] load_swift_api started
+2026-07-01 16:01:06 [info] [VM:steps] load_swift_api completed (0ms)
+2026-07-01 16:01:06 [info] [Callbacks] Initializing VM event callbacks...
+2026-07-01 16:01:06 [info] [Callbacks] VM event callbacks initialized
+2026-07-01 16:01:06 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.17377.1.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-07-01 16:01:07 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-07-01 16:01:07 [info] [VM:start] Configuring Windows VM service...
+2026-07-01 16:01:07 [info] [VM:start] Windows VM service configured
+2026-07-01 16:01:07 [info] [VM:steps] create_network started
+2026-07-01 16:01:07 [info] [VM:steps] create_network completed (1ms)
+2026-07-01 16:01:07 [info] [VM:steps] create_vm_config started
+2026-07-01 16:01:07 [info] [VM:steps] create_vm_config completed (111ms)
+2026-07-01 16:01:07 [info] [VM:steps] vm_boot started
+2026-07-01 16:01:07 [info] [VM:steps] vm_boot completed (145ms)
+2026-07-01 16:01:07 [info] [VM:steps] add_plan9_shares started
+2026-07-01 16:01:07 [info] [VM:steps] add_plan9_shares completed (5ms)
+2026-07-01 16:01:15 [info] [VM] Network status: NOT_CONNECTED
+2026-07-01 16:01:15 [info] [VM:network] Not connected, will show error in 30000ms if not resolved
+2026-07-01 16:01:15 [info] [VM] Network status: CONNECTED
+2026-07-01 16:01:16 [info] [VM:steps] sdk_install started
+2026-07-01 16:01:16 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-01 16:01:19 [info] [VM] API reachability: REACHABLE
+2026-07-01 16:01:21 [info] [Keepalive] Starting (interval=2000ms)
+2026-07-01 16:01:21 [info] [VM:steps] sdk_install completed (5529ms)
+2026-07-01 16:01:21 [info] [VM:start] Startup complete, total time: 62309ms
+2026-07-01 16:33:07 [info] [startVM] VM already connected
+2026-07-01 16:33:07 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-01 16:33:08 [warn] [Keepalive] Already running
+2026-07-01 16:56:17 [info] [startVM] VM already connected
+2026-07-01 16:56:17 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-01 16:56:18 [warn] [Keepalive] Already running
+2026-07-01 17:00:28 [info] [vmOneShot] Running: bash [2 arg(s)] as bold-serene-babbage
+2026-07-01 17:00:36 [info] [vmOneShot] Running: soffice [7 arg(s)] as office-convert-e13e8146
+2026-07-01 17:02:02 [info] [startVM] VM already connected
+2026-07-01 17:02:03 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-01 17:02:03 [warn] [Keepalive] Already running
+2026-07-01 17:05:19 [info] [vmOneShot] Running: bash [2 arg(s)] as bold-serene-babbage
+2026-07-01 17:05:26 [info] [vmOneShot] Running: soffice [7 arg(s)] as office-convert-f24bb40f
+2026-07-01 17:05:26 [info] [vmOneShot] Running: soffice [7 arg(s)] as office-convert-aedcf169
+2026-07-02 12:39:24 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-02 12:39:24 [info] [VM] Module loaded successfully
+2026-07-02 12:39:51 [info] [warm] Fetching VM hash for version 1.17377.2
+2026-07-02 12:39:51 [info] [warm] VM hash for version 1.17377.2: <blob>
+2026-07-02 12:39:51 [info] [warm] VM SHA matches current version, skipping
+2026-07-02 13:40:50 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-02 13:40:50 [info] [VM] Module loaded successfully
+2026-07-03 15:11:29 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-03 15:11:29 [info] [VM] Module loaded successfully
+2026-07-03 15:12:12 [info] [warm] Fetching VM hash for version 1.18286.0
+2026-07-03 15:12:12 [info] [warm] VM hash for version 1.18286.0: <blob>
+2026-07-03 15:12:12 [info] [warm] VM SHA matches current version, skipping
+2026-07-03 15:14:56 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-03 15:14:56 [info] [VM] Module loaded successfully
+2026-07-04 03:12:43 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-04 03:12:43 [info] [VM] Module loaded successfully
+2026-07-04 17:23:55 [info] [KernelBugMonitor] State reset
+2026-07-04 17:23:55 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-07-04 17:23:55 [info] [VM:start] Bundle version: <blob>
+2026-07-04 17:23:55 [info] [VM:start] VM instance ID: 55169fde-014c-4af0-b153-21e128fe62f1
+2026-07-04 17:23:55 [info] [VM:steps] download_and_sdk_prepare started
+2026-07-04 17:23:55 [info] [VM:steps] download_and_sdk_prepare completed (17ms)
+2026-07-04 17:23:55 [info] [VM:steps] load_swift_api started
+2026-07-04 17:23:55 [info] [VM:steps] load_swift_api completed (0ms)
+2026-07-04 17:23:55 [info] [Callbacks] Initializing VM event callbacks...
+2026-07-04 17:23:55 [info] [Callbacks] VM event callbacks initialized
+2026-07-04 17:23:55 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.18286.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-07-04 17:23:55 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-07-04 17:23:55 [info] [VM:start] Configuring Windows VM service...
+2026-07-04 17:23:55 [info] [VM:start] Windows VM service configured
+2026-07-04 17:23:55 [info] [VM:steps] create_network started
+2026-07-04 17:23:55 [info] [VM:steps] create_network completed (21ms)
+2026-07-04 17:23:55 [info] [VM:steps] create_vm_config started
+2026-07-04 17:23:56 [info] [VM:steps] create_vm_config completed (149ms)
+2026-07-04 17:23:56 [info] [VM:steps] vm_boot started
+2026-07-04 17:23:56 [info] [VM:steps] vm_boot completed (355ms)
+2026-07-04 17:23:56 [info] [VM:steps] add_plan9_shares started
+2026-07-04 17:23:56 [info] [VM:steps] add_plan9_shares completed (6ms)
+2026-07-04 17:24:04 [info] [VM] Network status: NOT_CONNECTED
+2026-07-04 17:24:04 [info] [VM:network] Not connected, will show error in 30000ms if not resolved
+2026-07-04 17:24:06 [info] [VM] Network status: CONNECTED
+2026-07-04 17:24:06 [info] [VM:steps] sdk_install started
+2026-07-04 17:24:06 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-04 17:24:10 [info] [VM] API reachability: REACHABLE
+2026-07-04 17:24:10 [info] [Keepalive] Starting (interval=2000ms)
+2026-07-04 17:24:10 [info] [VM:steps] sdk_install completed (4560ms)
+2026-07-04 17:24:10 [info] [VM:start] Startup complete, total time: 15599ms
+2026-07-05 11:02:55 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-05 11:02:55 [info] [VM] Module loaded successfully
+2026-07-05 11:04:49 [info] [KernelBugMonitor] State reset
+2026-07-05 11:04:49 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-07-05 11:04:49 [info] [VM:start] Bundle version: <blob>
+2026-07-05 11:04:49 [info] [VM:start] VM instance ID: 7ea5ea0b-f825-4b2b-9335-03a7979f6cef
+2026-07-05 11:04:49 [info] [VM:steps] download_and_sdk_prepare started
+2026-07-05 11:04:49 [info] [VM:steps] download_and_sdk_prepare completed (34ms)
+2026-07-05 11:04:49 [info] [VM:steps] load_swift_api started
+2026-07-05 11:04:49 [info] [VM:steps] load_swift_api completed (0ms)
+2026-07-05 11:04:49 [info] [Callbacks] Initializing VM event callbacks...
+2026-07-05 11:04:50 [info] [Callbacks] VM event callbacks initialized
+2026-07-05 11:04:50 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.18286.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-07-05 11:04:50 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-07-05 11:04:50 [info] [VM:start] Configuring Windows VM service...
+2026-07-05 11:04:50 [info] [VM:start] Windows VM service configured
+2026-07-05 11:04:50 [info] [VM:steps] create_network started
+2026-07-05 11:04:50 [info] [VM:steps] create_network completed (23ms)
+2026-07-05 11:04:50 [info] [VM:steps] create_vm_config started
+2026-07-05 11:04:50 [info] [VM:steps] create_vm_config completed (308ms)
+2026-07-05 11:04:51 [info] [VM:steps] vm_boot started
+2026-07-05 11:04:51 [info] [VM:steps] vm_boot completed (639ms)
+2026-07-05 11:04:51 [info] [VM:steps] add_plan9_shares started
+2026-07-05 11:04:51 [info] [VM:steps] add_plan9_shares completed (17ms)
+2026-07-05 11:04:52 [info] [startVM] VM startup already in progress, waiting...
+2026-07-05 11:05:00 [info] [VM] Network status: NOT_CONNECTED
+2026-07-05 11:05:00 [info] [VM:network] Not connected, will show error in 30000ms if not resolved
+2026-07-05 11:05:02 [info] [VM:start] Still waiting for guest connection... 10160ms elapsed, 21 polls
+2026-07-05 11:05:02 [info] [VM] Network status: CONNECTED
+2026-07-05 11:05:02 [info] [VM:steps] sdk_install started
+2026-07-05 11:05:02 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 11:05:04 [info] [startVM] VM startup already in progress, waiting...
+2026-07-05 11:05:05 [info] [startVM] VM startup already in progress, waiting...
+2026-07-05 11:05:11 [info] [VM] API reachability: REACHABLE
+2026-07-05 11:05:11 [info] [Keepalive] Starting (interval=2000ms)
+2026-07-05 11:05:11 [info] [VM:steps] sdk_install completed (8953ms)
+2026-07-05 11:05:11 [info] [VM:start] Startup complete, total time: 22042ms
+2026-07-05 11:06:35 [info] [startVM] VM already connected
+2026-07-05 11:06:35 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 11:06:35 [warn] [Keepalive] Already running
+2026-07-05 11:42:45 [info] [startVM] VM already connected
+2026-07-05 11:42:45 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 11:42:47 [warn] [Keepalive] Already running
+2026-07-05 18:27:05 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-05 18:27:05 [info] [VM] Module loaded successfully
+2026-07-05 19:03:21 [info] [KernelBugMonitor] State reset
+2026-07-05 19:03:21 [info] [VM:start] Beginning startup, bundlePath=<home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle
+2026-07-05 19:03:21 [info] [VM:start] Bundle version: <blob>
+2026-07-05 19:03:21 [info] [VM:start] VM instance ID: 28fba939-55c5-4347-8371-31dd549226a1
+2026-07-05 19:03:21 [info] [VM:steps] download_and_sdk_prepare started
+2026-07-05 19:03:21 [info] [VM:steps] download_and_sdk_prepare completed (35ms)
+2026-07-05 19:03:21 [info] [VM:steps] load_swift_api started
+2026-07-05 19:03:21 [info] [VM:steps] load_swift_api completed (0ms)
+2026-07-05 19:03:21 [info] [Callbacks] Initializing VM event callbacks...
+2026-07-05 19:03:21 [info] [Callbacks] VM event callbacks initialized
+2026-07-05 19:03:21 [info] [VM:start] Copying smol-bin.x64.vhdx to bundle: <drv>:\Program Files\WindowsApps\Claude_1.18286.0.0_x64__pzs8sxrjxfjjc\app\resources\smol-bin.x64.vhdx -> <home>\AppData\Roaming\Claude\vm_bundles\claudevm.bundle\smol-bin.vhdx
+2026-07-05 19:03:22 [info] [VM:start] smol-bin.x64.vhdx copied successfully
+2026-07-05 19:03:22 [info] [VM:start] Configuring Windows VM service...
+2026-07-05 19:03:22 [info] [VM:start] Windows VM service configured
+2026-07-05 19:03:22 [info] [VM:steps] create_network started
+2026-07-05 19:03:22 [info] [VM:steps] create_network completed (22ms)
+2026-07-05 19:03:22 [info] [VM:steps] create_vm_config started
+2026-07-05 19:03:22 [info] [VM:steps] create_vm_config completed (229ms)
+2026-07-05 19:03:22 [info] [VM:steps] vm_boot started
+2026-07-05 19:03:23 [info] [VM:steps] vm_boot completed (536ms)
+2026-07-05 19:03:23 [info] [VM:steps] add_plan9_shares started
+2026-07-05 19:03:23 [info] [VM:steps] add_plan9_shares completed (35ms)
+2026-07-05 19:03:29 [info] [VM] Network status: NOT_CONNECTED
+2026-07-05 19:03:29 [info] [VM:network] Not connected, will show error in 30000ms if not resolved
+2026-07-05 19:03:30 [info] [VM] Network status: CONNECTED
+2026-07-05 19:03:31 [info] [VM:steps] sdk_install started
+2026-07-05 19:03:31 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:03:38 [info] [VM] API reachability: REACHABLE
+2026-07-05 19:03:39 [info] [Keepalive] Starting (interval=2000ms)
+2026-07-05 19:03:39 [info] [VM:steps] sdk_install completed (7844ms)
+2026-07-05 19:03:39 [info] [VM:start] Startup complete, total time: 17984ms
+2026-07-05 19:15:48 [info] [startVM] VM already connected
+2026-07-05 19:15:48 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:15:48 [warn] [Keepalive] Already running
+2026-07-05 19:33:22 [info] [startVM] VM already connected
+2026-07-05 19:33:22 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:33:23 [warn] [Keepalive] Already running
+2026-07-05 19:33:47 [info] [startVM] VM already connected
+2026-07-05 19:33:47 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:33:47 [warn] [Keepalive] Already running
+2026-07-05 19:33:48 [info] [startVM] VM already connected
+2026-07-05 19:33:48 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:33:48 [warn] [Keepalive] Already running
+2026-07-05 19:33:58 [info] [vmOneShot] Running: bash [2 arg(s)] as beautiful-tender-edison
+2026-07-05 19:34:05 [info] [vmOneShot] Running: bash [2 arg(s)] as beautiful-tender-edison
+2026-07-05 19:43:46 [info] [startVM] VM already connected
+2026-07-05 19:43:46 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:43:46 [warn] [Keepalive] Already running
+2026-07-05 19:45:32 [info] [startVM] VM already connected
+2026-07-05 19:45:32 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:45:32 [warn] [Keepalive] Already running
+2026-07-05 19:45:33 [info] [startVM] VM already connected
+2026-07-05 19:45:33 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:45:34 [warn] [Keepalive] Already running
+2026-07-05 19:45:50 [info] [startVM] VM already connected
+2026-07-05 19:45:50 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:45:50 [warn] [Keepalive] Already running
+2026-07-05 19:45:51 [info] [startVM] VM already connected
+2026-07-05 19:45:51 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:45:51 [warn] [Keepalive] Already running
+2026-07-05 19:46:39 [info] [startVM] VM already connected
+2026-07-05 19:46:39 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:46:39 [warn] [Keepalive] Already running
+2026-07-05 19:50:16 [info] [startVM] VM already connected
+2026-07-05 19:50:16 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:50:16 [warn] [Keepalive] Already running
+2026-07-05 19:50:27 [info] [startVM] VM already connected
+2026-07-05 19:50:27 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 19:50:27 [warn] [Keepalive] Already running
+2026-07-05 20:17:38 [info] [startVM] VM already connected
+2026-07-05 20:17:38 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 20:17:39 [warn] [Keepalive] Already running
+2026-07-05 20:31:04 [info] [startVM] VM already connected
+2026-07-05 20:31:04 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 20:31:04 [warn] [Keepalive] Already running
+2026-07-05 20:31:05 [info] [startVM] VM already connected
+2026-07-05 20:31:05 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 20:31:05 [warn] [Keepalive] Already running
+2026-07-05 20:31:08 [info] [startVM] VM already connected
+2026-07-05 20:31:08 [info] [postConnect] Installing SDK: subpath=c/Users/<user>/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude-code-vm, version=2.1.197
+2026-07-05 20:31:08 [warn] [Keepalive] Already running
+2026-07-05 22:57:13 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-05 22:57:13 [info] [VM] Module loaded successfully
+2026-07-06 12:50:46 [info] [VM] Loading vmClient (TypeScript) module...
+2026-07-06 12:50:46 [info] [VM] Module loaded successfully
