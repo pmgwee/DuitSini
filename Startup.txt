@@ -1,0 +1,18 @@
+As a founder of startup company, senior corporate technology consultant , senior software engineer, senior ai application engineer, and senior ai engineer
+i want to create subscription agent with 2 main features 
+Page 1:
+1) track every subscription especially trial subscription that going to charge me after trial and warn me with notifications as reminders sent to me before renewals
+-Tab panel 1 page:Track every upcoming subscription & recurring bill in one place , do it as a Visual Calendar: Instantly view the current month and upcoming payments on calendar (image and image-2 attached).
+- When user click the spotify menu items in image 2, it should navigate user to edit the spotify subscription details like update the subscription amount,date,become month/year plan or delete the subscription (refer to image-9 attached)
+- a  add button allow me to edit the subscription to remove unsubscribe service plan and also add new subscription plan or update current subscription plan ( in image-1 attached should add a "+" button for it) (add subscription flow and logic can refer to image-7 and image-8)
+-Get heads-up 7 days-3days-1days reminders days before renewals (Send this reminders to my whatsapp / telegram account chat, u can get my whatsapp business account as a automated bot to send this reminders to my main accounts )
+- Tab panel 2 page:See monthly & yearly totals + upcoming charges (image-3 and image-4 attached for month , image-5 for year)
+-a sticky widget that always visible below both of the tab panel 1/2 to display overview all subscription that Organize by categories (streaming, utilities, SaaS, etc.) (see image-6 attached)
+-Add custom icons, notes, and billing cycles
+- Summarize important messages and information in a report every first day of the month with high readiblity and beautiful format like those high standard quality notion template, those information can be for example this month upcoming charges for all my current subscription plan under different category as well as total spending needed for this month , (Send this generated report file to my whatsapp / telegram account chat, u can get my whatsapp business account as a automated bot to send this reminders to my main accounts ), lastly can generate a year report once in a year (last day of the year) to inspect total spendings for this year with all my subscription plan used 
+Page 2:
+2)  track  claude pro plan usage with 5-hour and 7-day windows with reset timers in real-time + current youtube music now-playing with  album art, and playback controls (play/pause, next, previous)+ showing current time like Fliqo Desktop app UI that flip clock displays the time with large white numerals ,three of these should be display like personal dashboard with minimalist awwwards/dribble/godly/apple design awards level UIUX Design that can bring the best visibility and graphic experience for user 
+
+Everythings required login for authentication to gain permissions is fine , this agent is built to everyone and public user to save time and money with highest efficiency and convenience to manage their subscription-related stuffs but the UIUX in apple design awards and awwwards standards to provide the clean and luxury feel. 
+
+So in order to sucess this subscription agent, anythings u suggest to make it more perfect and useful, and what platform u suggest me to do, i dont have a apple dev account which is very costly for publish app store app and i dont want make it as  android apps , suggest a platform to make this agent 
