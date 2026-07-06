@@ -14,6 +14,10 @@ const securityHeaders = [
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",
   },
+  // Cross-origin isolation: cheap, safe side-channel / XS-leak hardening.
+  // COEP is deliberately deferred until cross-origin assets are audited.
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
 ];
 
 const nextConfig: NextConfig = {

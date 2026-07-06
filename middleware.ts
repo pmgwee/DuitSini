@@ -11,6 +11,21 @@ const supabaseKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
 const PROTECTED_PREFIXES = ["/subscriptions", "/dashboard"];
 
 /**
+ * Build a redirect response that also carries any refreshed auth cookies the
+ * Supabase client wrote onto `source`. Redirect branches MUST do this — without
+ * it, a rotated refresh token is dropped, and when the browser re-presents the
+ * now-invalid old token, reuse detection revokes the session and silently logs
+ * the user out.
+ */
+function redirectWithCookies(url: URL, source: NextResponse): NextResponse {
+  const response = NextResponse.redirect(url);
+  for (const cookie of source.cookies.getAll()) {
+    response.cookies.set(cookie.name, cookie.value, cookie);
+  }
+  return response;
+}
+
+/**
  * Refreshes the auth session on every matched request and enforces route
  * protection. `getUser()` validates the JWT against Supabase (server-side) and,
  * when the access token has expired, rotates it — writing the refreshed cookies
@@ -49,21 +64,23 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
   const isLogin = path === "/login";
 
   // Unauthenticated visit to a protected route → send to login, preserving
-  // the intended destination in `next`.
+  // the intended destination in `next`. Carry refreshed cookies in case a
+  // rotation happened.
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";
     url.searchParams.set("next", path);
-    return NextResponse.redirect(url);
+    return redirectWithCookies(url, supabaseResponse);
   }
 
-  // Already-signed-in visit to /login → bounce into the app.
+  // Already-signed-in visit to /login → bounce into the app. Carrying the
+  // rotated cookies here is what prevents the silent-logout footgun.
   if (user && isLogin) {
     const url = request.nextUrl.clone();
     url.pathname = "/subscriptions";
     url.search = "";
-    return NextResponse.redirect(url);
+    return redirectWithCookies(url, supabaseResponse);
   }
 
   return supabaseResponse;

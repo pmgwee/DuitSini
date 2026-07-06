@@ -12,10 +12,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const fullName =
-    (user.user_metadata?.full_name as string | undefined) ??
-    (user.user_metadata?.name as string | undefined) ??
-    null;
+  const rawName = user.user_metadata?.full_name ?? user.user_metadata?.name;
+  const fullName = typeof rawName === "string" ? rawName : null;
 
   return (
     <AppShell user={{ email: user.email ?? null, fullName }}>{children}</AppShell>

@@ -103,6 +103,10 @@ export function LoginForm({
           <span className="font-medium text-foreground">{submittedEmail}</span>, a
           sign-in link is on its way. It expires shortly.
         </p>
+        <p className="mt-3 text-xs text-muted-foreground/80">
+          Open the link in this same browser — the secure sign-in code is bound
+          to it.
+        </p>
         <button
           type="button"
           onClick={() => setStatus("idle")}

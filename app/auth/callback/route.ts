@@ -18,13 +18,17 @@ export async function GET(request: NextRequest) {
   // → back to login with an error flag. No stack details are leaked.
   const errorCode = searchParams.get("error") ?? searchParams.get("error_description");
   if (errorCode || !code) {
-    return NextResponse.redirect(`${origin}/login?error=callback`);
+    return NextResponse.redirect(
+      `${origin}/login?error=callback&next=${encodeURIComponent(next)}`,
+    );
   }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) {
-    return NextResponse.redirect(`${origin}/login?error=callback`);
+    return NextResponse.redirect(
+      `${origin}/login?error=callback&next=${encodeURIComponent(next)}`,
+    );
   }
 
   return NextResponse.redirect(`${origin}${next}`);
