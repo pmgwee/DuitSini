@@ -17,5 +17,8 @@ export function createSupabaseBrowserClient() {
       autoRefreshToken: true,
       persistSession: true,
     },
+    // Mark auth cookies Secure in production (HTTPS); off in dev (http) so
+    // localhost cookies are still accepted.
+    cookieOptions: { secure: process.env.NODE_ENV === "production" },
   });
 }

@@ -36,10 +36,27 @@ export function safeRedirectPath(next?: string | null): string {
  * Absolute callback URL the OAuth/magic-link provider redirects back to, with a
  * sanitized `next` param appended. Must be listed in Supabase's allowed
  * redirect URLs.
+ *
+ * Prefers the **live browser origin** (`window.location.origin`) so the
+ * redirect is correct on every deployment — production, preview, and localhost
+ * — without depending on a build-time `NEXT_PUBLIC_APP_URL`. (A silent
+ * localhost fallback here is exactly what stranded OAuth codes on the home page
+ * in production, so the server-side branch fails loud instead.)
  */
 export function buildCallbackUrl(next?: string | null): string {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
-  const callback = new URL("/auth/callback", appUrl);
+  let origin: string;
+  if (typeof window !== "undefined") {
+    origin = window.location.origin;
+  } else {
+    const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+    if (!configured) {
+      throw new Error(
+        "buildCallbackUrl needs NEXT_PUBLIC_APP_URL for server-side use, or a browser (window) context.",
+      );
+    }
+    origin = configured;
+  }
+  const callback = new URL("/auth/callback", origin);
   callback.searchParams.set("next", safeRedirectPath(next));
   return callback.toString();
 }

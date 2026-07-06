@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import type { Database } from "@/lib/supabase/types";
+import { safeRedirectPath } from "@/lib/auth/redirect";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
 // Newer "publishable" key with a fallback to the legacy anon key name.
@@ -9,6 +10,8 @@ const supabaseKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
 
 /** Routes that require an authenticated session. */
 const PROTECTED_PREFIXES = ["/subscriptions", "/dashboard"];
+
+const isProduction = process.env.NODE_ENV === "production";
 
 /**
  * Build a redirect response that also carries any refreshed auth cookies the
@@ -36,6 +39,7 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
   const supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient<Database>(supabaseUrl, supabaseKey, {
+    cookieOptions: { secure: isProduction },
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -57,11 +61,36 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const path = request.nextUrl.pathname;
+  const { pathname, searchParams } = request.nextUrl;
+
+  // Rescue a stranded OAuth/magic-link handoff. Supabase falls back to the Site
+  // URL when its `redirectTo` isn't allowlisted, dropping the `code` (success)
+  // or `error` (cancel/failure) on a non-callback route — without this the code
+  // is never exchanged and the user appears logged out. Forward it to the
+  // callback. Gated on `!user` so the rescue only fires for a genuine no-session
+  // handoff; future features that put ?code= on a URL for authed visitors are
+  // not hijacked.
+  if (!user && pathname !== "/auth/callback") {
+    const strandedCode = searchParams.get("code");
+    const strandedError = searchParams.get("error") ?? searchParams.get("error_description");
+    if (strandedCode || strandedError) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/auth/callback";
+      url.search = "";
+      if (strandedCode) {
+        url.searchParams.set("code", strandedCode);
+      } else {
+        url.searchParams.set("error", "stranded");
+      }
+      url.searchParams.set("next", safeRedirectPath(pathname));
+      return redirectWithCookies(url, supabaseResponse);
+    }
+  }
+
   const isProtected = PROTECTED_PREFIXES.some(
-    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
-  const isLogin = path === "/login";
+  const isLogin = pathname === "/login";
 
   // Unauthenticated visit to a protected route → send to login, preserving
   // the intended destination in `next`. Carry refreshed cookies in case a
@@ -70,7 +99,7 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";
-    url.searchParams.set("next", path);
+    url.searchParams.set("next", pathname);
     return redirectWithCookies(url, supabaseResponse);
   }
 

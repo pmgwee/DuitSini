@@ -14,6 +14,9 @@ export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
 
   return createServerClient<Database>(supabaseUrl, supabaseKey, {
+    // Mark auth cookies Secure in production (HTTPS). @supabase/ssr's defaults
+    // omit this; setting it is standard defense-in-depth for token cookies.
+    cookieOptions: { secure: process.env.NODE_ENV === "production" },
     cookies: {
       getAll() {
         return cookieStore.getAll();
