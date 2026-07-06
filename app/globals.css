@@ -173,3 +173,18 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Split-flap flip for the dashboard clock digits. */
+@keyframes flip-in {
+  0% {
+    transform: rotateX(-90deg);
+    opacity: 0;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+}

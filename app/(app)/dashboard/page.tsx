@@ -1,7 +1,7 @@
-import { Music4, Timer } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
-import { Card } from "@/components/ui/card";
-import { LiveClock } from "@/features/dashboard/live-clock";
+import { FlipClock } from "@/features/dashboard/flip-clock";
+import { ClaudeUsageTracker } from "@/features/dashboard/claude-usage-tracker";
+import { NowPlaying } from "@/features/dashboard/now-playing";
 
 export default function DashboardPage() {
   return (
@@ -11,30 +11,15 @@ export default function DashboardPage() {
         description="A calm personal command center — usage, music, and time at a glance."
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="p-5 lg:col-span-1">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Timer className="size-4" /> Claude usage
-          </div>
-          <div className="mt-6 grid place-items-center py-10 text-center text-sm text-muted-foreground">
-            Session tracking arrives in Phase 5 — rolling 5-hour and 7-day windows
-            with live reset timers.
-          </div>
-        </Card>
+      {/* Flip clock — hero */}
+      <div className="overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
+        <FlipClock />
+      </div>
 
-        <Card className="overflow-hidden p-0 lg:col-span-2">
-          <LiveClock />
-        </Card>
-
-        <Card className="p-5 lg:col-span-3">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Music4 className="size-4" /> Now playing
-          </div>
-          <div className="mt-6 grid place-items-center py-10 text-center text-sm text-muted-foreground">
-            Connect a music source to see album art, track details, and playback
-            controls.
-          </div>
-        </Card>
+      {/* Claude usage + now playing */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ClaudeUsageTracker />
+        <NowPlaying />
       </div>
     </div>
   );
