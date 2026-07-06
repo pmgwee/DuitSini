@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   Design tokens — dark-first premium palette (OKLCH)
+   :root holds the light theme + shared brand accents.
+   .dark overrides neutrals & semantics. App defaults to dark.
+   ============================================================ */
+:root {
+  --radius: 0.85rem;
+
+  --background: oklch(0.985 0.002 265);
+  --foreground: oklch(0.22 0.01 265);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.975 0.003 265);
+  --muted: oklch(0.955 0.004 265);
+  --muted-foreground: oklch(0.52 0.012 265);
+  --border: oklch(0.905 0.004 265);
+  --input: oklch(0.92 0.004 265);
+  --ring: oklch(0.6 0.15 275);
+  --primary: oklch(0.55 0.17 278);
+  --primary-foreground: oklch(0.99 0 0);
+  --accent: oklch(0.955 0.004 265);
+  --accent-foreground: oklch(0.22 0.01 265);
+  --success: oklch(0.6 0.14 165);
+  --warning: oklch(0.66 0.13 70);
+  --danger: oklch(0.58 0.19 22);
+  --info: oklch(0.58 0.13 245);
+
+  /* Category accents — curated, shared across themes */
+  --cat-streaming: oklch(0.72 0.16 15);
+  --cat-utilities: oklch(0.8 0.12 75);
+  --cat-saas: oklch(0.72 0.13 248);
+  --cat-ai: oklch(0.74 0.15 292);
+  --cat-music: oklch(0.74 0.17 342);
+  --cat-gaming: oklch(0.77 0.15 150);
+  --cat-productivity: oklch(0.79 0.11 205);
+  --cat-finance: oklch(0.78 0.14 142);
+  --cat-education: oklch(0.83 0.13 96);
+  --cat-cloud: oklch(0.79 0.1 232);
+  --cat-other: oklch(0.72 0.02 265);
+}
+
+.dark {
+  --background: oklch(0.155 0.005 274);
+  --foreground: oklch(0.96 0.004 265);
+  --surface: oklch(0.194 0.006 274);
+  --surface-2: oklch(0.23 0.007 274);
+  --muted: oklch(0.248 0.007 274);
+  --muted-foreground: oklch(0.7 0.014 274);
+  --border: oklch(0.3 0.008 274);
+  --input: oklch(0.32 0.008 274);
+  --ring: oklch(0.72 0.12 278);
+  --primary: oklch(0.75 0.13 280);
+  --primary-foreground: oklch(0.16 0.02 280);
+  --accent: oklch(0.27 0.008 274);
+  --accent-foreground: oklch(0.96 0.004 265);
+  --success: oklch(0.8 0.14 165);
+  --warning: oklch(0.84 0.12 84);
+  --danger: oklch(0.72 0.16 20);
+  --info: oklch(0.76 0.1 240);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --color-cat-streaming: var(--cat-streaming);
+  --color-cat-utilities: var(--cat-utilities);
+  --color-cat-saas: var(--cat-saas);
+  --color-cat-ai: var(--cat-ai);
+  --color-cat-music: var(--cat-music);
+  --color-cat-gaming: var(--cat-gaming);
+  --color-cat-productivity: var(--cat-productivity);
+  --color-cat-finance: var(--cat-finance);
+  --color-cat-education: var(--cat-education);
+  --color-cat-cloud: var(--cat-cloud);
+  --color-cat-other: var(--cat-other);
+
+  --radius-sm: calc(var(--radius) - 0.35rem);
+  --radius-md: calc(var(--radius) - 0.2rem);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 0.35rem);
+  --radius-2xl: calc(var(--radius) + 0.75rem);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    min-height: 100dvh;
+    color: var(--foreground);
+    background:
+      radial-gradient(1100px 760px at 12% -12%, color-mix(in oklch, var(--primary) 12%, transparent), transparent 58%),
+      radial-gradient(900px 680px at 112% 6%, color-mix(in oklch, var(--info) 9%, transparent), transparent 54%),
+      var(--background);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 32%, transparent);
+    color: var(--foreground);
+  }
+}
+
+@layer components {
+  .glass {
+    background: color-mix(in oklch, var(--surface) 72%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+  }
+  .card-elevated {
+    box-shadow:
+      0 1px 0 0 color-mix(in oklch, white 6%, transparent) inset,
+      0 20px 40px -24px rgba(0, 0, 0, 0.7);
+  }
+}
+
+/* Refined scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--foreground) 18%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--foreground) 16%, transparent);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--foreground) 26%, transparent);
+  background-clip: content-box;
+}

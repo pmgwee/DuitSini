@@ -1,0 +1,12 @@
+import { createBrowserClient } from "@supabase/ssr";
+import type { Database } from "./types";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+// Supabase's newer "publishable" key; falls back to the legacy anon key name.
+const supabaseKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string;
+
+/** Browser Supabase client (client components). */
+export function createSupabaseBrowserClient() {
+  return createBrowserClient<Database>(supabaseUrl, supabaseKey);
+}
