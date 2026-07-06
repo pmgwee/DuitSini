@@ -39,10 +39,16 @@ and serves it same-origin. Works on your phone too.
 
 ## Setup
 
-1. **Prereqs:** Node 20+ (you have 24). Log in with Claude Code at least once so
-   the credentials file exists, and keep a `claude` session around occasionally
-   so the token stays refreshed (access tokens expire ~hourly; Claude Code
-   refreshes them while running).
+1. **Get a Claude subscription token.** The bridge needs a token for your
+   **Claude Pro/Max** account (that's what `/api/oauth/usage` reports).
+   - **If this machine's Claude Code is logged into your Claude subscription:**
+     the token is already in `~/.claude/.credentials.json` — nothing to do.
+   - **If it isn't** (e.g. Claude Code is routed to another gateway/model, so the
+     creds file has no `claudeAiOauth`): run **`claude setup-token`** (needs a
+     Pro/Max plan), and paste the printed token into `CLAUDE_ACCESS_TOKEN` in
+     `.env`. If your shell has `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` set to
+     a gateway, run `setup-token` in a shell with those unset so it authorizes
+     against the real Anthropic.
 
 2. **On the site (Vercel env vars),** add and redeploy:
    - `CLAUDE_BRIDGE_SECRET` — a long random string.

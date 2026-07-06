@@ -29,6 +29,10 @@ const cfg = {
   userId: process.env.CLAUDE_USER_ID ?? "", // optional if server sets CLAUDE_BRIDGE_USER_ID
   pollMs: Math.max(60_000, Number(process.env.POLL_MS) || 60_000), // clamp ≥60s to respect rate limits
   userAgent: `claude-code/${process.env.CC_VERSION ?? "2.1.0"}`,
+  // A subscription OAuth token pasted directly (from `claude setup-token`).
+  // Takes priority over the credentials file — use this when Claude Code isn't
+  // logged into your Claude subscription (e.g. it's routed to another gateway).
+  accessToken: process.env.CLAUDE_ACCESS_TOKEN ?? "",
   credentialsPath:
     process.env.CLAUDE_CREDENTIALS_PATH ??
     join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), ".credentials.json"),
@@ -41,17 +45,27 @@ function die(msg) {
 if (!cfg.ingestUrl) die("INGEST_URL is required (see README.md / .env.example).");
 if (!cfg.secret) die("BRIDGE_SECRET is required (must match the server's CLAUDE_BRIDGE_SECRET).");
 
-async function readAccessToken() {
+async function resolveToken() {
+  // 1) Explicit token wins (paste from `claude setup-token`).
+  if (cfg.accessToken) return cfg.accessToken;
+
+  // 2) Otherwise read the Claude Code subscription token from the creds file.
   let raw;
   try {
     raw = await readFile(cfg.credentialsPath, "utf8");
   } catch {
     throw new Error(
-      `Could not read ${cfg.credentialsPath}. Log in with Claude Code once (run "claude") so the file exists.`,
+      `No CLAUDE_ACCESS_TOKEN set and could not read ${cfg.credentialsPath}. ` +
+        `Run "claude setup-token" and put the result in CLAUDE_ACCESS_TOKEN.`,
     );
   }
   const oauth = JSON.parse(raw)?.claudeAiOauth;
-  if (!oauth?.accessToken) throw new Error("claudeAiOauth.accessToken not found — log in via Claude Code.");
+  if (!oauth?.accessToken) {
+    throw new Error(
+      "No claudeAiOauth.accessToken in the creds file (this Claude Code isn't logged into a Claude " +
+        'subscription). Run "claude setup-token" and set CLAUDE_ACCESS_TOKEN instead.',
+    );
+  }
   return oauth.accessToken;
 }
 
@@ -101,7 +115,7 @@ let backoff = 0;
 
 async function tick() {
   try {
-    const token = await readAccessToken();
+    const token = await resolveToken();
     const usage = await fetchUsage(token);
     await push(usage);
     backoff = 0;
@@ -122,7 +136,7 @@ async function tick() {
 
 console.log("Claude Usage Bridge (push mode)");
 console.log(`  → ingest:      ${cfg.ingestUrl}`);
-console.log(`  credentials:  ${cfg.credentialsPath}`);
+console.log(`  token source: ${cfg.accessToken ? "CLAUDE_ACCESS_TOKEN (pasted)" : cfg.credentialsPath}`);
 console.log(`  poll every:   ${cfg.pollMs / 1000}s   User-Agent: ${cfg.userAgent}`);
 console.log(`  target user:  ${cfg.userId || "(pinned by server CLAUDE_BRIDGE_USER_ID)"}\n`);
 tick();
