@@ -1,0 +1,13 @@
+{
+  "name": "claude-usage-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local companion that proxies your real Claude Code plan usage to the dashboard.",
+  "scripts": {
+    "start": "node claude-usage-bridge.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
