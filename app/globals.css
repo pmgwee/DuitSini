@@ -161,3 +161,15 @@
   background: color-mix(in oklch, var(--foreground) 26%, transparent);
   background-clip: content-box;
 }
+
+/* Respect users who prefer reduced motion (vestibular sensitivity). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
