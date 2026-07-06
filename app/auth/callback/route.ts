@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { safeRedirectPath } from "@/lib/auth/redirect";
+import { saveGoogleTokens } from "@/lib/google/tokens";
 
 /**
  * PKCE callback for both email magic-link and Google OAuth. The provider
@@ -24,11 +25,25 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) {
     return NextResponse.redirect(
       `${origin}/login?error=callback&next=${encodeURIComponent(next)}`,
     );
+  }
+
+  // Google OAuth sign-ins carry provider tokens exactly once, here. Persist
+  // them (server-only table) so the YouTube sync can mint access tokens later.
+  // Magic-link sessions have no provider tokens — this is skipped for them.
+  const session = data?.session;
+  if (session?.user && session.provider_refresh_token) {
+    await saveGoogleTokens(session.user.id, {
+      accessToken: session.provider_token ?? null,
+      refreshToken: session.provider_refresh_token,
+      scopes: "youtube.readonly",
+    }).catch(() => {
+      /* sync is best-effort; login must still succeed */
+    });
   }
 
   return NextResponse.redirect(`${origin}${next}`);

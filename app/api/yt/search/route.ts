@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import type { MusicTrack } from "@/types/music";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -6,13 +7,6 @@ export const dynamic = "force-dynamic";
 const API_KEY = process.env.YOUTUBE_API_KEY;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — protects the 100 searches/day quota.
 const cache = new Map<string, { at: number; data: unknown[] }>();
-
-export interface YTSearchItem {
-  videoId: string;
-  title: string;
-  channel: string;
-  thumbnail: string | null;
-}
 
 /**
  * Server-side YouTube Data API v3 search. Returns embeddable Music-category
@@ -69,7 +63,7 @@ export async function GET(req: NextRequest) {
     }>;
   };
 
-  const results: YTSearchItem[] = (json.items ?? [])
+  const results: MusicTrack[] = (json.items ?? [])
     .filter((it) => Boolean(it.id?.videoId))
     .map((it) => ({
       videoId: it.id!.videoId as string,

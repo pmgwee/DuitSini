@@ -80,11 +80,14 @@ export function LoginForm({
     setGoogleLoading(true);
     const supabase = createSupabaseBrowserClient();
     // The browser navigates to Google; `redirectTo` brings it back to the
-    // PKCE callback, which exchanges the code server-side.
+    // PKCE callback, which exchanges the code server-side. The extra scope
+    // lets the music widget read the user's YouTube (Music) playlists and
+    // likes; `access_type=offline` + `prompt=consent` mint a refresh token.
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: buildCallbackUrl(next),
+        scopes: "https://www.googleapis.com/auth/youtube.readonly",
         queryParams: { access_type: "offline", prompt: "consent" },
       },
     });

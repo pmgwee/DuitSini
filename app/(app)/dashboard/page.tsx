@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/ui/page-header";
 import { FlipClock } from "@/features/dashboard/flip-clock";
 import { ClaudeUsageTracker } from "@/features/dashboard/claude-usage-tracker";
-import { YouTubePlayer } from "@/features/dashboard/youtube-player";
+import { MusicWidget } from "@/features/dashboard/music/music-widget";
 
 export default function DashboardPage() {
   return (
@@ -19,7 +19,7 @@ export default function DashboardPage() {
       {/* Claude usage + music */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ClaudeUsageTracker />
-        <YouTubePlayer />
+        <MusicWidget />
       </div>
     </div>
   );
