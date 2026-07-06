@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, LayoutDashboard, Sparkles, type LucideIcon } from "lucide-react";
+import { CalendarDays, FileText, LayoutDashboard, Sparkles, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserMenu, type AuthUser } from "@/components/layout/user-menu";
 import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
@@ -13,6 +13,7 @@ type NavItem = { href: string; label: string; icon: LucideIcon };
 const NAV: NavItem[] = [
   { href: "/subscriptions", label: "Subscriptions", icon: CalendarDays },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/reports", label: "Reports", icon: FileText },
 ];
 
 export function AppShell({ children, user }: { children: ReactNode; user?: AuthUser }) {
