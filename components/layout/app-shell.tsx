@@ -3,10 +3,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, LayoutDashboard, Plus, Sparkles, type LucideIcon } from "lucide-react";
+import { CalendarDays, LayoutDashboard, Sparkles, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { UserMenu, type AuthUser } from "@/components/layout/user-menu";
+import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -71,9 +71,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
             Subscription Agent
           </span>
           <div className="ml-auto flex items-center gap-2">
-            <Button size="sm" className="gap-1.5">
-              <Plus className="size-4" /> Add
-            </Button>
+            <AddSubscriptionButton size="sm" label="Add" />
             {user ? <UserMenu user={user} /> : null}
           </div>
         </header>

@@ -11,6 +11,7 @@ import { formatCurrency, roundMoney } from "@/lib/domain/money";
 import { formatLongDate, formatMonthYear, toISODate } from "@/lib/domain/dates";
 import { cn } from "@/lib/utils";
 import { SubscriptionIcon } from "./subscription-icon";
+import { EditSubscriptionButton } from "./subscription-dialogs";
 
 interface DayCharge {
   sub: Subscription;
@@ -256,8 +257,14 @@ function DayDetail({ iso, charges }: { iso: string; charges: DayCharge[] }) {
                   )}
                 </div>
               </div>
-              <div className="text-sm font-medium">
-                {formatCurrency(c.sub.amount, c.sub.currency)}
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium">
+                  {formatCurrency(c.sub.amount, c.sub.currency)}
+                </div>
+                <EditSubscriptionButton
+                  subscription={c.sub}
+                  className="h-7 px-2.5 text-xs"
+                />
               </div>
             </li>
           ))}

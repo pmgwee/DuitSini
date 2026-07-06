@@ -38,8 +38,14 @@ export const subscriptionInputSchema = subscriptionFieldsSchema.refine(
   { message: "Trial subscriptions need a trial end date", path: ["freeTrialEndAt"] },
 );
 
-/** Patch: every field optional; absent keys stay untouched (no defaults applied). */
-export const subscriptionPatchSchema = subscriptionFieldsSchema.partial();
+/** Patch: every field optional; absent keys stay untouched (no defaults applied).
+ * Carries the same trial cross-field check as create, scoped to partials. */
+export const subscriptionPatchSchema = subscriptionFieldsSchema
+  .partial()
+  .refine((data) => data.isTrial !== true || Boolean(data.freeTrialEndAt), {
+    message: "Trial subscriptions need a trial end date",
+    path: ["freeTrialEndAt"],
+  });
 
 export type SubscriptionInput = z.infer<typeof subscriptionInputSchema>;
 export type SubscriptionPatch = z.infer<typeof subscriptionPatchSchema>;

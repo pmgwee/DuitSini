@@ -1,8 +1,7 @@
-import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
-import { Button } from "@/components/ui/button";
 import { getEffectiveUserId, getSubscriptionRepository } from "@/lib/data";
 import { toISODate } from "@/lib/domain/dates";
+import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
 import { SubscriptionsView } from "@/features/subscriptions/subscriptions-view";
 import { CategoryDock } from "@/features/subscriptions/category-dock";
 
@@ -19,12 +18,7 @@ export default async function SubscriptionsPage() {
       <PageHeader
         title="Subscriptions"
         description="Track every renewal, trial, and recurring bill in one calm, visual place."
-        actions={
-          <Button className="gap-1.5">
-            <Plus className="size-4" />
-            Add subscription
-          </Button>
-        }
+        actions={<AddSubscriptionButton />}
       />
 
       <SubscriptionsView subscriptions={subscriptions} todayISO={todayISO} />
