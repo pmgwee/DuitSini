@@ -18,6 +18,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      claude_usage_live: {
+        Row: {
+          five_hour_resets_at: string | null
+          five_hour_utilization: number | null
+          seven_day_resets_at: string | null
+          seven_day_utilization: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          five_hour_resets_at?: string | null
+          five_hour_utilization?: number | null
+          seven_day_resets_at?: string | null
+          seven_day_utilization?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          five_hour_resets_at?: string | null
+          five_hour_utilization?: number | null
+          seven_day_resets_at?: string | null
+          seven_day_utilization?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       claude_usage_sessions: {
         Row: {
           created_at: string

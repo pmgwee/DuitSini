@@ -1,82 +1,84 @@
 # Claude Usage Bridge (local companion)
 
-A tiny **local** Node service that reads your Claude Code OAuth token and proxies
-the real 5-hour / 7-day plan usage to the dashboard. It is **not** part of the
-deployed app — it runs on your own machine, bound to `127.0.0.1`.
+A tiny **local** Node script that reads your Claude Code OAuth token and
+**pushes** your real 5-hour / 7-day plan usage to your Subscription Agent site.
+It is **not** part of the deployed app — it runs on your own machine.
 
-> Personal use only. It uses Anthropic's **unofficial** `/api/oauth/usage`
-> endpoint (the same one Claude Code's `/usage` uses). It impersonates the
-> Claude Code harness via the `User-Agent` header (required to avoid 429s) and
-> may break if Anthropic changes the endpoint or tightens client checks.
+```
+┌── your machine ──────────────┐         ┌── Vercel (your site) ──────┐
+│ Claude Code writes token to  │         │ POST /api/claude-usage/    │
+│ ~/.claude/.credentials.json  │         │      ingest  (secret auth) │
+│            │                 │  HTTPS  │        │                   │
+│  bridge ───┼── reads token ──┼────────▶│   claude_usage_live (DB)   │
+│  (this)    └── GET Anthropic │  push   │        │                   │
+│            /api/oauth/usage  │         │  GET /api/claude-usage/    │
+└──────────────────────────────┘         │      live → dashboard 53%  │
+                                          └────────────────────────────┘
+```
 
-## Why a local process?
+> **Personal use only.** It uses Anthropic's **unofficial** `/api/oauth/usage`
+> endpoint (the same one Claude Code's `/usage` uses) and impersonates the
+> Claude Code harness via the `User-Agent` header (required to avoid 429s).
+> Using a subscription OAuth token outside Claude Code violates the letter of
+> Anthropic's Consumer Terms — fine for reading your own usage on a hobby
+> project, but it may break without notice. The token never leaves your machine;
+> only the utilization %/reset times are sent.
 
-The OAuth token lives only on your machine:
+## Why push (not poll)?
+
+Your token lives only on your machine:
 
 - **Windows:** `%USERPROFILE%\.claude\.credentials.json` (plaintext JSON)
 - **Linux:** `~/.claude/.credentials.json` (perms `0600`)
-- **macOS:** Keychain (`Claude Code-credentials`)
+- **macOS:** `~/.claude/.credentials.json` / Keychain
 
-This bridge reads `claudeAiOauth.accessToken` from there and calls the endpoint
-server-side. A deployed app can never read your local token, so the dashboard
-polls this bridge instead.
+A deployed HTTPS site can't read that, and a browser on the deployed site can't
+reliably reach `http://localhost` (mixed-content + Private Network Access
+blocking). So the bridge pushes outward to the site, which stores the snapshot
+and serves it same-origin. Works on your phone too.
 
-## Prerequisites
+## Setup
 
-- Node.js 18+ (for global `fetch`).
-- You must have logged in with **Claude Code** at least once on this machine so
-  the credentials file exists (`claude` CLI → log in). Keep Claude Code's token
-  fresh by running any `claude` command occasionally (access tokens expire
-  ~hourly and Claude Code auto-refreshes them).
+1. **Prereqs:** Node 20+ (you have 24). Log in with Claude Code at least once so
+   the credentials file exists, and keep a `claude` session around occasionally
+   so the token stays refreshed (access tokens expire ~hourly; Claude Code
+   refreshes them while running).
 
-## Run
+2. **On the site (Vercel env vars),** add and redeploy:
+   - `CLAUDE_BRIDGE_SECRET` — a long random string.
+   - `CLAUDE_BRIDGE_USER_ID` — your Supabase user id (Dashboard → Authentication
+     → Users). Pins writes to your account; recommended.
+   - (`SUPABASE_SERVICE_ROLE_KEY` must already be set — the ingest route needs it.)
 
-From this folder:
+3. **Locally,** in this folder:
+   ```bash
+   cp .env.example .env
+   # edit .env: INGEST_URL (your site), BRIDGE_SECRET (= the server's), CLAUDE_USER_ID
+   node --env-file=.env claude-usage-bridge.mjs
+   ```
 
-```bash
-node claude-usage-bridge.mjs
+You should see a line each cycle:
 ```
-
-It listens on `http://127.0.0.1:4785`. The dashboard auto-detects it and shows
-the **Live (Claude Code)** view; if it isn't running, the dashboard falls back
-to the manual estimate.
-
-### Quick health check
-
-```bash
-curl http://127.0.0.1:4785/usage
+14:32:10  5h=53%  7d=5%  → pushed
 ```
+Open the dashboard → **Claude usage** flips to the green **Live** badge within
+~30s. Stop the bridge and it falls back to the manual estimate after 3 min.
 
-Should return something like:
-
-```json
-{
-  "five_hour": { "utilization": 34.0, "resets_at": "2026-07-06T14:00:00Z" },
-  "seven_day": { "utilization": 66.0, "resets_at": "2026-07-12T18:00:00Z" },
-  "refreshed_at": "2026-07-06T13:05:00.000Z"
-}
-```
-
-If you see `"error": "token_expired"`, run a `claude` command in a terminal to
-refresh the token, then retry.
-
-## Configuration (env vars)
+## Configuration
 
 | Var | Default | Notes |
 | --- | --- | --- |
-| `PORT` | `4785` | Port to listen on (also set `NEXT_PUBLIC_CLAUDE_USAGE_BRIDGE_URL` in the app to match). |
-| `CC_VERSION` | `2.0.0` | The version in the `User-Agent: claude-code/<version>` header. Match your installed Claude Code version if you like. |
-| `CACHE_TTL_MS` | `240000` (4 min) | How long a successful fetch is cached, to avoid 429 rate limits. |
-| `ALLOWED_ORIGINS` | `http://localhost:3000,https://subscription-agent-five.vercel.app` | Comma-separated origins allowed by CORS. |
+| `INGEST_URL` | — (required) | `https://<your-site>/api/claude-usage/ingest`. Use `http://localhost:3000/...` to test against local dev. |
+| `BRIDGE_SECRET` | — (required) | Must equal the site's `CLAUDE_BRIDGE_SECRET`. |
+| `CLAUDE_USER_ID` | — | Your Supabase user id. Optional if the server sets `CLAUDE_BRIDGE_USER_ID`. |
+| `POLL_MS` | `60000` | Fetch+push interval. Clamped to ≥60s to respect Anthropic's rate limit; backs off on 429. |
+| `CC_VERSION` | `2.1.0` | Version in `User-Agent: claude-code/<version>`. |
+| `CLAUDE_CREDENTIALS_PATH` | auto | Override the credentials file path if non-standard. |
 
-## Endpoints
+## Troubleshooting
 
-- `GET /health` → `{ ok: true }`
-- `GET /usage` → `{ five_hour: { utilization, resets_at }, seven_day: { utilization, resets_at }, refreshed_at, cached? }` (or `{ error, message }`)
-
-## Security
-
-- Binds to **`127.0.0.1` only** — not reachable from the network/other devices.
-- The token never leaves this process (never sent to the browser or Vercel).
-  The dashboard only receives the computed percentages + reset times.
-- CORS is restricted to your app origins.
+- **`Token expired`** — run any `claude` command to refresh, then it recovers.
+- **`Ingest returned 401`** — `BRIDGE_SECRET` ≠ server `CLAUDE_BRIDGE_SECRET`.
+- **`Ingest returned 503`** — server missing `SUPABASE_SERVICE_ROLE_KEY` or `CLAUDE_BRIDGE_SECRET`.
+- **`Ingest returned 400` (no target user)** — set `CLAUDE_USER_ID` here or `CLAUDE_BRIDGE_USER_ID` on the server.
+- **Rate limited** — normal occasionally; the bridge backs off and recovers.

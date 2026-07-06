@@ -19,16 +19,20 @@ export interface LiveUsage {
 
 export type LiveStatus = "connecting" | "live" | "error";
 
-/** Where the local Claude Usage Bridge is expected to run. */
-export const CLAUDE_USAGE_BRIDGE_URL =
-  process.env.NEXT_PUBLIC_CLAUDE_USAGE_BRIDGE_URL ?? "http://127.0.0.1:4785";
+/**
+ * Same-origin endpoint that serves the latest snapshot the local Claude Usage
+ * Bridge pushed to the server. The browser never talks to localhost directly —
+ * that avoids mixed-content / Private Network Access blocking on the deployed
+ * HTTPS site and lets the live number show up on any device.
+ */
+export const CLAUDE_USAGE_LIVE_URL = "/api/claude-usage/live";
 
 /**
- * Polls the local Claude Usage Bridge for real plan usage. Returns
- * `connecting` until the first response, then `live` (with data) or `error`
- * (bridge not running / upstream failed). Personal/local use only.
+ * Polls the app's live-usage endpoint. Returns `connecting` until the first
+ * response, then `live` (with fresh data) or `error` (no snapshot yet / stale /
+ * not signed in) which drives the manual fallback. Personal use only.
  */
-export function useClaudeUsageLive(intervalMs = 240_000): {
+export function useClaudeUsageLive(intervalMs = 30_000): {
   status: LiveStatus;
   data?: LiveUsage;
   error?: string;
@@ -43,7 +47,7 @@ export function useClaudeUsageLive(intervalMs = 240_000): {
     let active = true;
     const tick = async () => {
       try {
-        const r = await fetch(`${CLAUDE_USAGE_BRIDGE_URL}/usage`, {
+        const r = await fetch(CLAUDE_USAGE_LIVE_URL, {
           headers: { Accept: "application/json" },
         });
         if (!r.ok) throw new Error(String(r.status));
