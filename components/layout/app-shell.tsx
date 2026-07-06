@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { CalendarDays, LayoutDashboard, Plus, Sparkles, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { UserMenu, type AuthUser } from "@/components/layout/user-menu";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -14,7 +15,7 @@ const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, user }: { children: ReactNode; user?: AuthUser }) {
   const pathname = usePathname();
 
   return (
@@ -73,7 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Button size="sm" className="gap-1.5">
               <Plus className="size-4" /> Add
             </Button>
-            <div className="size-9 rounded-full bg-gradient-to-br from-primary/40 to-info/30 ring-1 ring-border" />
+            {user ? <UserMenu user={user} /> : null}
           </div>
         </header>
 

@@ -8,5 +8,14 @@ const supabaseKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
 
 /** Browser Supabase client (client components). */
 export function createSupabaseBrowserClient() {
-  return createBrowserClient<Database>(supabaseUrl, supabaseKey);
+  return createBrowserClient<Database>(supabaseUrl, supabaseKey, {
+    auth: {
+      // PKCE so OAuth/magic-link codes are exchanged server-side in the
+      // callback route; we don't auto-exchange from the URL fragment.
+      flowType: "pkce",
+      detectSessionInUrl: false,
+      autoRefreshToken: true,
+      persistSession: true,
+    },
+  });
 }
