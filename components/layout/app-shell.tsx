@@ -67,8 +67,8 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
         </nav>
 
         <div className="mt-auto rounded-xl border border-border/60 bg-surface/50 p-3">
-          <div className="text-xs font-medium">Free plan</div>
-          <div className="mt-1 text-xs text-muted-foreground">Up to 10 subscriptions</div>
+          <div className="text-xs font-medium">Beta Versions 0.1</div>
+          <div className="mt-1 text-xs text-muted-foreground">Up to 10 Testers</div>
         </div>
       </aside>
 
