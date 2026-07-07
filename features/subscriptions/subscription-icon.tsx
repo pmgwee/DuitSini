@@ -1,11 +1,14 @@
 import type { Subscription } from "@/types/subscription";
 import { CATEGORY_META } from "@/lib/constants";
 import { getMonogram } from "@/lib/domain/subscription";
+import { findProviderPreset } from "@/lib/providers";
 import { cn } from "@/lib/utils";
 
 /**
- * A subscription's visual mark: a category-tinted monogram chip. Used in
- * calendar day cells, the day detail list, and (later) list rows.
+ * A subscription's visual mark: a brand-tinted monogram chip. The accent color
+ * prefers an explicit `sub.color` (set when a known provider was chosen), then a
+ * matched provider preset's brand color, and finally the category color — so
+ * Netflix reads red, Spotify green, etc., like Wallos/SubAlert.
  */
 export function SubscriptionIcon({
   sub,
@@ -16,7 +19,8 @@ export function SubscriptionIcon({
   size?: "sm" | "md";
   className?: string;
 }) {
-  const color = CATEGORY_META[sub.category].colorVar;
+  const preset = findProviderPreset(sub.provider) ?? findProviderPreset(sub.name);
+  const color = sub.color || preset?.color || CATEGORY_META[sub.category].colorVar;
   return (
     <span
       title={sub.name}

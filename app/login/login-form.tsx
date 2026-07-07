@@ -83,6 +83,12 @@ export function LoginForm({
     // PKCE callback, which exchanges the code server-side. The extra scope
     // lets the music widget read the user's YouTube (Music) playlists and
     // likes; `access_type=offline` + `prompt=consent` mint a refresh token.
+    //
+    // NOTE: YouTube Music's private InnerTube API (algorithmic shelves like
+    // "Listen again") no longer accepts OAuth — Google removed YT Music OAuth
+    // in Nov 2024. That data is reached via an opt-in cookie flow instead
+    // (see lib/google/ytmusic.ts). This scope still powers the official-API
+    // library/likes/playlist sync, which is all it's used for.
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {

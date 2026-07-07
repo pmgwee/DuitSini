@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { MusicPlaylist, MusicTrack } from "@/types/music";
 import { useMusicPlayer } from "./player-context";
+import { CookieConnect } from "./cookie-connect";
 
 type Shelf = "listen" | "playlists" | "liked" | "search";
 
@@ -258,23 +259,28 @@ export function MusicWidget() {
           edge (aligned like the Connect Claude card in the left column). */}
       <div className="flex min-h-[9rem] flex-1 flex-col">
         {shelf === "listen" &&
-          (listenAgain.isLoading ? (
-            <ShelfNote>Loading your listens…</ShelfNote>
-          ) : (listenAgain.data?.tracks.length ?? 0) > 0 ? (
-            <>
-              {listenAgain.data?.seeded && (
-                <p className="mb-1.5 text-[11px] text-muted-foreground/80">
-                  Seeded from your Liked Music — plays in this app take over from here.
-                </p>
+          (connected ? (
+            <div className="flex flex-1 flex-col gap-2">
+              <CookieConnect />
+              {listenAgain.isLoading ? (
+                <ShelfNote>Loading your listens…</ShelfNote>
+              ) : (listenAgain.data?.tracks.length ?? 0) > 0 ? (
+                <>
+                  {listenAgain.data?.seeded && (
+                    <p className="mb-1.5 text-[11px] text-muted-foreground/80">
+                      Seeded from your Liked Music — plays in this app take over from here.
+                    </p>
+                  )}
+                  <TrackList
+                    tracks={listenAgain.data!.tracks}
+                    activeId={player.current?.videoId}
+                    onPlay={(i) => void player.playQueue(listenAgain.data!.tracks, i)}
+                  />
+                </>
+              ) : (
+                <ShelfNote>Play something — this shelf builds itself from your listens.</ShelfNote>
               )}
-              <TrackList
-                tracks={listenAgain.data!.tracks}
-                activeId={player.current?.videoId}
-                onPlay={(i) => void player.playQueue(listenAgain.data!.tracks, i)}
-              />
-            </>
-          ) : connected ? (
-            <ShelfNote>Play something — this shelf builds itself from your listens.</ShelfNote>
+            </div>
           ) : (
             connectHint
           ))}
@@ -431,7 +437,14 @@ function TrackList({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-medium">{t.title}</div>
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-xs font-medium">{t.title}</span>
+                {t.source === "recommended" && (
+                  <span className="shrink-0 rounded-full bg-primary/12 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-primary ring-1 ring-primary/20">
+                    For you
+                  </span>
+                )}
+              </div>
               <div className="truncate text-[11px] text-muted-foreground">{t.channel}</div>
             </div>
           </button>

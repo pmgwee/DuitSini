@@ -1,7 +1,11 @@
+"use client";
+
 import type { Subscription } from "@/types/subscription";
 import { CATEGORIES, CATEGORY_META } from "@/lib/constants";
 import { isActive, monthlyAmount } from "@/lib/domain/subscription";
 import { formatCompactCurrency, formatCurrency, roundMoney } from "@/lib/domain/money";
+import { useMusicPlayer } from "@/features/dashboard/music/player-context";
+import { cn } from "@/lib/utils";
 
 /**
  * The persistent overview dock shown beneath both tabs. Aggregates active
@@ -9,9 +13,14 @@ import { formatCompactCurrency, formatCurrency, roundMoney } from "@/lib/domain/
  * Each row uses its own currency; the global total is only shown when every
  * active subscription shares one currency (no FX layer — sums across unlike
  * currencies would be misleading).
+ *
+ * When the floating music mini-bar is showing (music queued, and this page is
+ * never the dashboard), the dock lifts itself above the bar so the two stack
+ * instead of overlapping.
  */
 export function CategoryDock({ subscriptions }: { subscriptions: Subscription[] }) {
   const active = subscriptions.filter(isActive);
+  const musicActive = useMusicPlayer().queueLength > 0;
 
   const rows = CATEGORIES.map((category) => {
     const subs = active.filter((s) => s.category === category);
@@ -32,7 +41,13 @@ export function CategoryDock({ subscriptions }: { subscriptions: Subscription[] 
     : null;
 
   return (
-    <div className="sticky bottom-20 z-30 lg:bottom-6">
+    <div
+      className={cn(
+        "sticky z-30 transition-[bottom] duration-300",
+        // Lift above the floating music bar when it's showing so they stack.
+        musicActive ? "bottom-36 lg:bottom-24" : "bottom-20 lg:bottom-6",
+      )}
+    >
       <div className="glass card-elevated rounded-2xl border border-border/60 p-4">
         <div className="mb-3 flex items-center justify-between">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

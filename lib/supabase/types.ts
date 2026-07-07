@@ -508,6 +508,27 @@ export type Database = {
         }
         Relationships: []
       }
+      ytm_cookies: {
+        Row: {
+          cookie_header: string
+          last_ok_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cookie_header: string
+          last_ok_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cookie_header?: string
+          last_ok_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

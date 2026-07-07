@@ -26,8 +26,19 @@ import {
 } from "@/lib/data/actions";
 import type { Subscription } from "@/types/subscription";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { toISODate } from "@/lib/domain/dates";
 import { cn } from "@/lib/utils";
+import { ProviderCombobox } from "./provider-combobox";
+import type { ProviderPreset } from "@/lib/providers";
+
+const CATEGORY_OPTIONS = CATEGORIES.map((c) => ({
+  value: c,
+  label: CATEGORY_META[c].label,
+  color: CATEGORY_META[c].colorVar,
+}));
+const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: c }));
+const BILLING_OPTIONS = BILLING_CYCLES.map((c) => ({ value: c, label: BILLING_CYCLE_LABELS[c] }));
 
 const inputClass =
   "h-11 w-full rounded-xl border border-border/60 bg-input/50 px-3 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40";
@@ -45,6 +56,7 @@ interface FieldValues {
   isTrial: boolean;
   freeTrialEndAt: string;
   notes: string;
+  color: string;
 }
 
 /**
@@ -67,6 +79,7 @@ export function SubscriptionForm({
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<FieldValues>({
     resolver: zodResolver(mode === "edit" ? subscriptionPatchSchema : subscriptionInputSchema) as never,
@@ -83,12 +96,31 @@ export function SubscriptionForm({
       isTrial: subscription?.isTrial ?? false,
       freeTrialEndAt: subscription?.freeTrialEndAt ?? "",
       notes: subscription?.notes ?? "",
+      color: subscription?.color ?? "",
     },
   });
 
   const billingCycle = watch("billingCycle");
   const isTrial = watch("isTrial");
+  const name = watch("name");
+  const provider = watch("provider");
+  const category = watch("category");
+  const currency = watch("currency");
   const showInterval = billingCycle === "custom_days" || billingCycle === "custom_months";
+
+  // Choosing a known service from the Provider picker fills its brand color and
+  // (in create mode, if still untouched) its category — both stay editable. If
+  // the required Name is still empty, seed it with the provider name as a
+  // convenience; an existing name is never overwritten (Name stays free-form).
+  const applyPreset = (preset: ProviderPreset) => {
+    setValue("color", preset.color, { shouldDirty: true });
+    if (mode === "create" && category === "other") {
+      setValue("category", preset.category, { shouldDirty: true });
+    }
+    if (!name.trim()) {
+      setValue("name", preset.name, { shouldDirty: true, shouldValidate: true });
+    }
+  };
 
   const onSubmit = async (values: FieldValues) => {
     setSubmitting(true);
@@ -109,22 +141,28 @@ export function SubscriptionForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
+      {/* color rides along in the form state; set by a provider preset. */}
+      <input type="hidden" {...register("color")} />
+
       <Field label="Name" error={errors.name?.message as string | undefined} required>
         <input className={inputClass} placeholder="e.g. Netflix" required {...register("name")} />
       </Field>
 
-      <Field label="Provider" hint="optional">
-        <input className={inputClass} placeholder="e.g. Netflix, Inc." {...register("provider")} />
+      <Field label="Provider" hint="optional · pick a known service or type your own">
+        <ProviderCombobox
+          value={provider}
+          onChange={(v) => setValue("provider", v, { shouldDirty: true })}
+          onPresetSelect={applyPreset}
+        />
       </Field>
 
       <Field label="Category">
-        <select className={inputClass} {...register("category")}>
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {CATEGORY_META[c].label}
-            </option>
-          ))}
-        </select>
+        <Select
+          ariaLabel="Category"
+          value={category}
+          onChange={(v) => setValue("category", v, { shouldDirty: true })}
+          options={CATEGORY_OPTIONS}
+        />
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
@@ -141,25 +179,23 @@ export function SubscriptionForm({
           />
         </Field>
         <Field label="Currency">
-          <select className={inputClass} {...register("currency")}>
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+          <Select
+            ariaLabel="Currency"
+            value={currency}
+            onChange={(v) => setValue("currency", v, { shouldDirty: true })}
+            options={CURRENCY_OPTIONS}
+          />
         </Field>
       </div>
 
       <div className={cn("grid gap-3", showInterval ? "grid-cols-2" : "grid-cols-1")}>
         <Field label="Billing cycle">
-          <select className={inputClass} {...register("billingCycle")}>
-            {BILLING_CYCLES.map((c) => (
-              <option key={c} value={c}>
-                {BILLING_CYCLE_LABELS[c]}
-              </option>
-            ))}
-          </select>
+          <Select
+            ariaLabel="Billing cycle"
+            value={billingCycle}
+            onChange={(v) => setValue("billingCycle", v, { shouldDirty: true })}
+            options={BILLING_OPTIONS}
+          />
         </Field>
         {showInterval && (
           <Field
