@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MusicPlaylist, MusicTrack } from "@/types/music";
-import { useYTPlayer } from "./use-yt-player";
+import { useMusicPlayer } from "./player-context";
 
 type Shelf = "listen" | "playlists" | "liked" | "search";
 
@@ -41,14 +41,21 @@ async function getJSON<T>(url: string, fallback: T): Promise<T> {
   return (await r.json()) as T;
 }
 
+// useLayoutEffect on the client, useEffect during SSR (so the server renderer
+// doesn't warn). Registers/clears the dock slot for the persistent video portal.
+const useDockLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 /**
- * Minimalist YouTube Music widget. Official APIs only: the user's playlists
- * and Liked Music come from the Data API via their Google sign-in, playback
- * is the IFrame player, and "Listen again" is built from plays logged in
- * this app (seeded from Liked Music on day one).
+ * Minimalist YouTube Music library on the dashboard. The live IFrame player is
+ * owned by the persistent MusicPlayerProvider and lives in a fixed portal that
+ * is never reparented. Here we **register** an empty slot in the Music card;
+ * the provider glues the video over that slot's rect so it looks docked inline
+ * (exactly like before cross-page support). Leaving /dashboard unmounts this
+ * component, which clears the slot — the video parks off-screen and keeps
+ * playing, surfaced instead by the floating mini-bar.
  */
 export function MusicWidget() {
-  const queryClient = useQueryClient();
   const [shelf, setShelf] = useState<Shelf>("listen");
   const [openPlaylist, setOpenPlaylist] = useState<MusicPlaylist | null>(null);
   const [query, setQuery] = useState("");
@@ -56,18 +63,16 @@ export function MusicWidget() {
   const [searching, setSearching] = useState(false);
   const [searchConfigured, setSearchConfigured] = useState<boolean | null>(null);
 
-  const logPlay = useCallback(
-    (track: MusicTrack) => {
-      void fetch("/api/yt/plays", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(track),
-      }).then(() => queryClient.invalidateQueries({ queryKey: ["yt", "listen-again"] }));
-    },
-    [queryClient],
-  );
+  const player = useMusicPlayer();
 
-  const player = useYTPlayer(logPlay);
+  // Register the inline slot so the fixed video portal glues itself over it.
+  // The layout effect's cleanup runs before the slot detaches on unmount, so
+  // the portal parks off-screen cleanly (the iframe is never touched/reloaded).
+  const slotRef = useRef<HTMLDivElement>(null);
+  useDockLayoutEffect(() => {
+    player.registerSlot(slotRef.current);
+    return () => player.registerSlot(null);
+  }, [player]);
 
   const library = useQuery({
     queryKey: ["yt", "library"],
@@ -146,14 +151,15 @@ export function MusicWidget() {
         </span>
       </div>
 
-      {/* Player surface (kept visible & unobstructed per YouTube ToS). The
-          placeholder sits over an EMPTY mount — the player is only created on
-          first play, which also avoids YouTube's empty-player error screen. */}
+      {/* Player surface (kept visible & unobstructed per YouTube ToS). This is
+          an empty slot that reserves the video's space; the persistent provider
+          glues the live IFrame over it (rect-tracked) so it looks docked inline.
+          The placeholder shows until a track is playing. */}
       <div className="relative overflow-hidden rounded-xl bg-black/60">
         <div className="aspect-video w-full">
-          <div ref={player.mountRef} className="h-full w-full" />
+          <div ref={slotRef} className="h-full w-full" />
         </div>
-        {!player.playerReady && (
+        {!player.current && (
           <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-surface-2/80 to-black/70">
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <Music4 className="size-8 opacity-60" />
@@ -248,8 +254,9 @@ export function MusicWidget() {
         ))}
       </div>
 
-      {/* Shelf content */}
-      <div className="min-h-[9rem]">
+      {/* Shelf content — grows to fill the card so the list reaches the bottom
+          edge (aligned like the Connect Claude card in the left column). */}
+      <div className="flex min-h-[9rem] flex-1 flex-col">
         {shelf === "listen" &&
           (listenAgain.isLoading ? (
             <ShelfNote>Loading your listens…</ShelfNote>
@@ -297,7 +304,7 @@ export function MusicWidget() {
           ) : library.isLoading ? (
             <ShelfNote>Loading playlists…</ShelfNote>
           ) : (
-            <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto">
+            <ul className="flex max-h-72 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
               {library.data?.playlists.map((p) => (
                 <li key={p.id}>
                   <button
@@ -384,7 +391,7 @@ export function MusicWidget() {
       </div>
 
       <p className="text-center text-[11px] text-muted-foreground/70">
-        Powered by YouTube · official Data &amp; IFrame APIs
+        Powered by YouTube · official Data &amp; IFrame APIs · keeps playing across pages
       </p>
     </div>
   );
@@ -404,7 +411,7 @@ function TrackList({
   onPlay: (index: number) => void;
 }) {
   return (
-    <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto">
+    <ul className="flex max-h-72 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
       {tracks.map((t, i) => (
         <li key={`${t.videoId}-${i}`}>
           <button

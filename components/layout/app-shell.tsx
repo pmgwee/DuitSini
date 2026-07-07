@@ -7,6 +7,8 @@ import { CalendarDays, FileText, LayoutDashboard, Sparkles, type LucideIcon } fr
 import { cn } from "@/lib/utils";
 import { UserMenu, type AuthUser } from "@/components/layout/user-menu";
 import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
+import { useMusicPlayer } from "@/features/dashboard/music/player-context";
+import { MiniPlayer } from "@/features/dashboard/music/mini-player";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -18,6 +20,11 @@ const NAV: NavItem[] = [
 
 export function AppShell({ children, user }: { children: ReactNode; user?: AuthUser }) {
   const pathname = usePathname();
+  const player = useMusicPlayer();
+  // The mini-player floats only on non-dashboard routes (on /dashboard the
+  // live player is docked inline inside the Music card). Reserve bottom space
+  // for the bar only where it actually shows — extra on mobile to clear nav.
+  const musicActive = player.queueLength > 0 && !pathname.startsWith("/dashboard");
 
   return (
     <div className="min-h-dvh">
@@ -77,8 +84,18 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
           </div>
         </header>
 
-        <main className="px-4 pb-28 pt-6 sm:px-6 lg:pb-10">{children}</main>
+        <main
+          className={cn(
+            "px-4 pb-28 pt-6 sm:px-6 lg:pb-10",
+            musicActive && "pb-44 lg:pb-28",
+          )}
+        >
+          {children}
+        </main>
       </div>
+
+      {/* Persistent music bar — survives navigation between app pages */}
+      <MiniPlayer />
 
       {/* Bottom nav — mobile */}
       <nav className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border/60 glass px-2 py-2 lg:hidden">

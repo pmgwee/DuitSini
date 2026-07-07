@@ -4,6 +4,7 @@
 export interface YTPlayer {
   playVideo(): void;
   pauseVideo(): void;
+  stopVideo(): void;
   loadVideoById(videoId: string): void;
   cueVideoById(videoId: string): void;
   nextVideo(): void;
@@ -12,7 +13,12 @@ export interface YTPlayer {
   getCurrentTime(): number;
   getDuration(): number;
   getPlayerState(): number;
+  getVolume(): number;
   setVolume(volume: number): void;
+  mute(): void;
+  unMute(): void;
+  /** The underlying <iframe> — used to reparent the live player across slots. */
+  getIframe(): HTMLIFrameElement;
   destroy(): void;
 }
 

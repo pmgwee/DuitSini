@@ -140,6 +140,117 @@
       0 1px 0 0 color-mix(in oklch, white 6%, transparent) inset,
       0 20px 40px -24px rgba(0, 0, 0, 0.7);
   }
+
+  /* Apple "Liquid Glass" (iOS 26) — a translucent, refracted surface with a
+     soft specular top sheen, an inner highlight rim, and a deep drop shadow.
+     Used by the floating music bar so it reads as a floating glass pill over
+     any page content beneath it. */
+  .liquid-glass {
+    position: relative;
+    background: color-mix(in oklch, var(--surface) 46%, transparent);
+    backdrop-filter: blur(30px) saturate(180%) brightness(1.06);
+    -webkit-backdrop-filter: blur(30px) saturate(180%) brightness(1.06);
+    border: 1px solid color-mix(in oklch, white 16%, transparent);
+    box-shadow:
+      inset 0 1px 0 0 color-mix(in oklch, white 28%, transparent),
+      inset 0 -1px 1px 0 color-mix(in oklch, white 6%, transparent),
+      0 1px 2px 0 rgba(0, 0, 0, 0.18),
+      0 14px 40px -12px rgba(0, 0, 0, 0.55);
+  }
+  /* Specular sheen across the top edge — the "liquid" highlight. */
+  .liquid-glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklch, white 30%, transparent),
+      transparent 38%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* The persistent video portal: one fixed container the iframe never leaves.
+     The iframe fills it; the hook drives the portal's position/size. A short
+     opacity transition softens the dock/undock fade (position is per-frame, so
+     it must NOT be transitioned or it would lag behind scroll). */
+  .yt-video-portal {
+    transition: opacity 0.2s ease;
+    box-shadow: 0 20px 40px -24px rgba(0, 0, 0, 0.7);
+  }
+  .yt-video-portal > iframe {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+    border: 0;
+  }
+
+  /* Thin volume slider for the mini bar. */
+  .vol-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+  }
+  .vol-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--foreground) 18%, transparent);
+  }
+  .vol-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--foreground) 18%, transparent);
+  }
+  .vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    margin-top: -4px;
+    height: 12px;
+    width: 12px;
+    border-radius: 999px;
+    background: var(--foreground);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    transition: transform 0.15s ease;
+  }
+  .vol-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.18);
+  }
+  .vol-slider::-moz-range-thumb {
+    height: 12px;
+    width: 12px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--foreground);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Mini-bar "now playing" equalizer pulse. */
+@keyframes eq-bounce {
+  0%,
+  100% {
+    height: 0.45rem;
+  }
+  50% {
+    height: 0.7rem;
+  }
+}
+.eq-bar {
+  animation: eq-bounce 0.9s ease-in-out infinite;
+  transform-origin: bottom;
+}
+@media (prefers-reduced-motion: reduce) {
+  .eq-bar {
+    animation: none;
+    height: 0.6rem;
+  }
 }
 
 /* Refined scrollbars */
