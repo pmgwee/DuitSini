@@ -50,6 +50,10 @@ export function nextChargeOnOrAfter(
     current = stepDate(current, cycle, intervalCount);
     steps += 1;
   }
+  // If the anchor is so old and the cycle so short that we couldn't step
+  // forward to `from` within the safety bound, bail out rather than return a
+  // date still in the past labelled as the "next" charge.
+  if (current.getTime() < from) return null;
   return toISODate(current);
 }
 
@@ -80,6 +84,8 @@ export function chargesInRange(
     current = stepDate(current, cycle, intervalCount);
     steps += 1;
   }
+  // Couldn't reach the window within the safety bound — no reliable charges.
+  if (current.getTime() < start) return dates;
   while (current.getTime() <= end && steps < MAX_STEPS) {
     dates.push(toISODate(current));
     current = stepDate(current, cycle, intervalCount);

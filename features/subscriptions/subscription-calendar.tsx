@@ -8,10 +8,15 @@ import { CATEGORY_META } from "@/lib/constants";
 import { chargeDatesInRange, isActive } from "@/lib/domain/subscription";
 import { calendarGrid, monthBounds, WEEKDAY_LABELS } from "@/lib/domain/calendar";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
+import { myrEquivalentOf, toMYR } from "@/lib/domain/fx";
 import { formatLongDate, formatMonthYear, toISODate } from "@/lib/domain/dates";
 import { cn } from "@/lib/utils";
+import { Dialog } from "@/components/ui/dialog";
 import { SubscriptionIcon } from "./subscription-icon";
-import { EditSubscriptionButton } from "./subscription-dialogs";
+import {
+  AddSubscriptionButton,
+  EditSubscriptionButton,
+} from "./subscription-dialogs";
 
 interface DayCharge {
   sub: Subscription;
@@ -19,11 +24,15 @@ interface DayCharge {
   isTrialConversion: boolean;
 }
 
+const MAX_ICONS_PER_CELL = 3;
+
 /**
  * Monthly calendar of upcoming charges. `todayISO` is passed from the server so
  * the initial render is deterministic (no `new Date()` in client state → no
- * SSR/hydration mismatch when the server and browser differ on timezone/date).
- * Charge dates for any month are derived client-side via the renewal engine.
+ * SSR/hydration mismatch). Charge dates for any month are derived client-side
+ * via the renewal engine. Each occupied day shows the provider's brand icon
+ * (not just a category dot), and clicking any day opens a modal listing that
+ * day's charges with an MYR total.
  */
 export function SubscriptionCalendar({
   subscriptions,
@@ -37,6 +46,7 @@ export function SubscriptionCalendar({
     return new Date(year, month - 1, 1);
   });
   const [selectedISO, setSelectedISO] = useState<string>(todayISO);
+  const [modalISO, setModalISO] = useState<string | null>(null);
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -75,7 +85,10 @@ export function SubscriptionCalendar({
     return n;
   }, [subscriptions, year, month]);
 
-  const selectedCharges = chargesByDay.get(selectedISO) ?? [];
+  const openDay = (iso: string) => {
+    setSelectedISO(iso);
+    setModalISO(iso);
+  };
 
   const shiftMonth = (delta: number) => {
     const next = addMonths(cursor, delta);
@@ -89,6 +102,8 @@ export function SubscriptionCalendar({
     setCursor(new Date(y, m - 1, 1));
     setSelectedISO(todayISO);
   };
+
+  const modalCharges = modalISO ? chargesByDay.get(modalISO) ?? [] : [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -149,7 +164,7 @@ export function SubscriptionCalendar({
             <button
               key={cell.iso}
               type="button"
-              onClick={() => setSelectedISO(cell.iso)}
+              onClick={() => openDay(cell.iso)}
               aria-label={
                 formatLongDate(cell.iso) +
                 (charges.length
@@ -158,7 +173,7 @@ export function SubscriptionCalendar({
                 (hasTrial ? ", trial converts" : "")
               }
               className={cn(
-                "relative flex min-h-16 flex-col gap-1 rounded-xl border p-1.5 text-left transition-colors sm:min-h-23",
+                "relative flex min-h-16 flex-col gap-1 rounded-xl border p-1.5 text-left transition-colors sm:min-h-24",
                 cell.inMonth ? "bg-surface/40" : "bg-transparent opacity-40",
                 isSelected
                   ? "border-primary/60 ring-1 ring-primary/40"
@@ -176,29 +191,21 @@ export function SubscriptionCalendar({
                 {cell.day}
               </span>
               {charges.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {charges.slice(0, 4).map((c, i) => (
-                    <span
-                      key={c.sub.id + "-" + i}
-                      className={cn("size-1.5 rounded-full", c.isTrialConversion && "animate-pulse")}
-                      style={{
-                        background: c.isTrialConversion
-                          ? "var(--warning)"
-                          : CATEGORY_META[c.sub.category].colorVar,
-                      }}
-                    />
+                <div className="mt-auto flex flex-wrap items-center gap-0.5">
+                  {charges.slice(0, MAX_ICONS_PER_CELL).map((c, i) => (
+                    <SubscriptionIcon key={c.sub.id + "-" + i} sub={c.sub} size="xs" />
                   ))}
+                  {charges.length > MAX_ICONS_PER_CELL && (
+                    <span className="px-0.5 text-[9px] font-semibold text-muted-foreground">
+                      +{charges.length - MAX_ICONS_PER_CELL}
+                    </span>
+                  )}
                 </div>
-              )}
-              {charges.length > 4 && (
-                <span className="text-[9px] font-medium text-muted-foreground">
-                  +{charges.length - 4}
-                </span>
               )}
               {hasTrial && (
                 <span
                   aria-hidden="true"
-                  className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-warning"
+                  className="absolute right-1 top-1 size-1.5 rounded-full bg-warning"
                 />
               )}
             </button>
@@ -206,68 +213,84 @@ export function SubscriptionCalendar({
         })}
       </div>
 
-      <DayDetail iso={selectedISO} charges={selectedCharges} />
+      <p className="text-center text-[11px] text-muted-foreground/70">
+        Tap a day to see its charges · totals in MYR (RM)
+      </p>
+
+      <Dialog
+        open={modalISO !== null}
+        onClose={() => setModalISO(null)}
+        title={modalISO ? formatLongDate(modalISO) : ""}
+      >
+        <DayCharges iso={modalISO ?? todayISO} charges={modalCharges} />
+        <div className="mt-4 flex justify-end border-t border-border/60 pt-4">
+          <AddSubscriptionButton size="sm" label="Add subscription" />
+        </div>
+      </Dialog>
     </div>
   );
 }
 
-function DayDetail({ iso, charges }: { iso: string; charges: DayCharge[] }) {
-  // Only show a combined total when every charge shares one currency; otherwise
-  // the per-line items (each in their own currency) are the honest view.
-  const currencies = new Set(charges.map((c) => c.sub.currency));
-  const showTotal = charges.length > 0 && currencies.size === 1;
-  const total = roundMoney(charges.reduce((sum, c) => sum + c.sub.amount, 0));
-  const currency = charges[0]?.sub.currency ?? "USD";
+function DayCharges({ iso, charges }: { iso: string; charges: DayCharge[] }) {
+  // Total is always MYR: convert every charge (whatever its currency) to MYR,
+  // sum at full precision, round once. Each line keeps its original currency
+  // with an "≈ RM" hint for foreign amounts.
+  const totalMYR = roundMoney(
+    charges.reduce((sum, c) => sum + toMYR(c.sub.amount, c.sub.currency), 0),
+  );
 
   return (
-    <div className="rounded-2xl border border-border/60 bg-surface/40 p-4">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <div>
-          <div className="text-sm font-medium">{formatLongDate(iso)}</div>
-          <div className="text-xs text-muted-foreground">
-            {charges.length === 0
-              ? "No charges"
-              : `${charges.length} ${charges.length === 1 ? "charge" : "charges"}`}
-          </div>
+        <div className="text-xs text-muted-foreground">
+          {charges.length === 0
+            ? "No charges on this date."
+            : `${charges.length} ${charges.length === 1 ? "charge" : "charges"}`}
         </div>
-        {showTotal && (
+        {charges.length > 0 && (
           <div className="text-right">
-            <div className="text-xs text-muted-foreground">Total</div>
-            <div className="text-sm font-semibold">{formatCurrency(total, currency)}</div>
+            <div className="text-[11px] text-muted-foreground">Total</div>
+            <div className="text-sm font-semibold">{formatCurrency(totalMYR, "MYR")}</div>
           </div>
         )}
       </div>
 
       {charges.length > 0 && (
-        <ul className="mt-3 flex flex-col divide-y divide-border/50">
-          {charges.map((c, i) => (
-            <li
-              key={c.sub.id + "-" + i}
-              className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
-            >
-              <SubscriptionIcon sub={c.sub} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{c.sub.name}</div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{CATEGORY_META[c.sub.category].label}</span>
-                  {c.isTrialConversion && (
-                    <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
-                      Trial converts
-                    </span>
-                  )}
+        <ul className="flex flex-col divide-y divide-border/50">
+          {charges.map((c, i) => {
+            const myr = myrEquivalentOf(c.sub.amount, c.sub.currency);
+            return (
+              <li
+                key={c.sub.id + "-" + i}
+                className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
+              >
+                <SubscriptionIcon sub={c.sub} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{c.sub.name}</div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{CATEGORY_META[c.sub.category].label}</span>
+                    {c.isTrialConversion && (
+                      <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                        Trial converts
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-sm font-medium">
-                  {formatCurrency(c.sub.amount, c.sub.currency)}
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    <div className="text-sm font-medium">
+                      {formatCurrency(c.sub.amount, c.sub.currency)}
+                    </div>
+                    {myr && <div className="text-[11px] text-muted-foreground">≈ {myr}</div>}
+                  </div>
+                  <EditSubscriptionButton
+                    subscription={c.sub}
+                    className="h-7 px-2.5 text-xs"
+                  />
                 </div>
-                <EditSubscriptionButton
-                  subscription={c.sub}
-                  className="h-7 px-2.5 text-xs"
-                />
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

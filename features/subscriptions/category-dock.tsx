@@ -3,16 +3,16 @@
 import type { Subscription } from "@/types/subscription";
 import { CATEGORIES, CATEGORY_META } from "@/lib/constants";
 import { isActive, monthlyAmount } from "@/lib/domain/subscription";
-import { formatCompactCurrency, formatCurrency, roundMoney } from "@/lib/domain/money";
+import { formatCompactCurrency, roundMoney } from "@/lib/domain/money";
+import { HOME_CURRENCY, toMYR } from "@/lib/domain/fx";
 import { useMusicPlayer } from "@/features/dashboard/music/player-context";
 import { cn } from "@/lib/utils";
 
 /**
  * The persistent overview dock shown beneath both tabs. Aggregates active
- * subscriptions by category (count + normalized monthly cost) from real data.
- * Each row uses its own currency; the global total is only shown when every
- * active subscription shares one currency (no FX layer — sums across unlike
- * currencies would be misleading).
+ * subscriptions by category (count + normalized monthly cost). Because the app
+ * is MYR-home, every figure — per-category and the global total — is converted
+ * to MYR and shown in ringgit, regardless of how many currencies are present.
  *
  * When the floating music mini-bar is showing (music queued, and this page is
  * never the dashboard), the dock lifts itself above the bar so the two stack
@@ -24,21 +24,20 @@ export function CategoryDock({ subscriptions }: { subscriptions: Subscription[] 
 
   const rows = CATEGORIES.map((category) => {
     const subs = active.filter((s) => s.category === category);
-    const monthly = roundMoney(subs.reduce((sum, s) => sum + monthlyAmount(s), 0));
+    const monthly = roundMoney(
+      subs.reduce((sum, s) => sum + toMYR(monthlyAmount(s), s.currency), 0),
+    );
     return {
       category,
       ...CATEGORY_META[category],
       count: subs.length,
       monthly,
-      currency: subs[0]?.currency ?? "USD",
     };
   }).filter((r) => r.count > 0);
 
-  const currencySet = new Set(active.map((s) => s.currency));
-  const sharedCurrency = currencySet.size === 1 ? [...currencySet][0] : null;
-  const totalMonthly = sharedCurrency
-    ? roundMoney(active.reduce((sum, s) => sum + monthlyAmount(s), 0))
-    : null;
+  const totalMonthly = roundMoney(
+    active.reduce((sum, s) => sum + toMYR(monthlyAmount(s), s.currency), 0),
+  );
 
   return (
     <div
@@ -54,10 +53,7 @@ export function CategoryDock({ subscriptions }: { subscriptions: Subscription[] 
             Overview by category
           </span>
           <span className="text-xs text-muted-foreground">
-            {active.length} active
-            {sharedCurrency && totalMonthly !== null
-              ? ` · ${formatCurrency(totalMonthly, sharedCurrency)}/mo`
-              : ""}
+            {active.length} active · {formatCompactCurrency(totalMonthly, HOME_CURRENCY)}/mo
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -73,7 +69,7 @@ export function CategoryDock({ subscriptions }: { subscriptions: Subscription[] 
                 {r.label}
                 <span className="text-muted-foreground">{r.count}</span>
                 <span className="text-muted-foreground/70">
-                  · {formatCompactCurrency(r.monthly, r.currency)}
+                  · {formatCompactCurrency(r.monthly, HOME_CURRENCY)}
                 </span>
               </span>
             ))

@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const FOCUSABLE =
   'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * Stack of currently-open dialogs (most recently opened last). Esc only
+ * dismisses the TOPMOST one, so a dialog opened from inside another (e.g. the
+ * Edit/Add forms nested inside the calendar day modal) closes on Esc without
+ * also dismissing the dialog beneath it. Each instance pushes an entry on open
+ * and removes it on close/unmount.
+ */
+const openStack: Array<{ onClose: () => void }> = [];
 
 /**
  * Lightweight accessible modal: portal to body, click-backdrop / Esc to close,
@@ -31,16 +40,22 @@ export function Dialog({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
+    const entry = { onClose };
+    openStack.push(entry);
     previouslyFocused.current = document.activeElement as HTMLElement | null;
     // Move focus into the panel on open.
     panelRef.current?.focus();
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        // Only the topmost open dialog dismisses on Esc (supports nesting).
+        if (openStack[openStack.length - 1] === entry) {
+          onClose();
+        }
         return;
       }
       if (e.key === "Tab") {
@@ -68,6 +83,8 @@ export function Dialog({
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
+      const idx = openStack.indexOf(entry);
+      if (idx >= 0) openStack.splice(idx, 1);
       // Restore focus to whatever opened the dialog.
       previouslyFocused.current?.focus();
     };
@@ -88,7 +105,7 @@ export function Dialog({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
           "relative z-10 max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-border/60 glass card-elevated p-6 outline-none sm:max-w-lg sm:rounded-3xl",
@@ -97,7 +114,7 @@ export function Dialog({
       >
         <header className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+            <h2 id={titleId} className="text-lg font-semibold tracking-tight">{title}</h2>
             {description ? (
               <p className="mt-1 text-sm text-muted-foreground">{description}</p>
             ) : null}

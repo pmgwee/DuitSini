@@ -8,6 +8,7 @@ import type { Subscription } from "@/types/subscription";
 import { CATEGORIES, CATEGORY_COLOR, CATEGORY_META } from "@/lib/constants";
 import {
   chargeDatesInRange,
+  grossMonthlyCost,
   isActive,
   isTrialConvertingWithin,
   monthlyAmount,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/domain/subscription";
 import { monthBounds } from "@/lib/domain/calendar";
 import { formatCompactCurrency, formatCurrency, roundMoney } from "@/lib/domain/money";
+import { HOME_CURRENCY, myrEquivalentOf, toMYR } from "@/lib/domain/fx";
 import { toISODate } from "@/lib/domain/dates";
 import { SubscriptionIcon } from "./subscription-icon";
 
@@ -22,35 +24,45 @@ import { SubscriptionIcon } from "./subscription-icon";
  * Page 1 / Tab 2: spending analytics. Monthly/yearly/average, upcoming 30-day
  * charges, a category ring, a 6-month cash-flow trend, trial conversions, and
  * savings from cancelled subscriptions. All derived from the subscription list.
+ *
+ * Every AGGREGATE is reported in the home currency (MYR): each subscription's
+ * contribution is converted to MYR at full float precision, summed, then
+ * rounded once. Line items keep their original currency with an "≈ RM" hint.
  */
 export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subscription[] }) {
-  const currency = useMemo(
-    () => subscriptions.find((s) => !s.isCancelled)?.currency ?? subscriptions[0]?.currency ?? "USD",
-    [subscriptions],
-  );
-
   const stats = useMemo(() => {
     const active = subscriptions.filter(isActive);
     const cancelled = subscriptions.filter((s) => s.isCancelled);
 
-    const monthly = roundMoney(active.reduce((sum, s) => sum + monthlyAmount(s), 0));
-    const yearly = roundMoney(active.reduce((sum, s) => sum + yearlyAmount(s), 0));
+    const monthly = roundMoney(
+      active.reduce((sum, s) => sum + toMYR(monthlyAmount(s), s.currency), 0),
+    );
+    const yearly = roundMoney(
+      active.reduce((sum, s) => sum + toMYR(yearlyAmount(s), s.currency), 0),
+    );
 
     const todayISO = toISODate(new Date());
     const horizonEnd = toISODate(addDays(new Date(), 30));
     const upcoming = active.flatMap((sub) =>
       chargeDatesInRange(sub, todayISO, horizonEnd).map((iso) => ({ sub, iso })),
     );
-    const upcomingTotal = roundMoney(upcoming.reduce((sum, x) => sum + x.sub.amount, 0));
+    const upcomingTotal = roundMoney(
+      upcoming.reduce((sum, x) => sum + toMYR(x.sub.amount, x.sub.currency), 0),
+    );
 
     const trialsConverting = active.filter((s) => isTrialConvertingWithin(s, 30));
-    const savedMonthly = roundMoney(cancelled.reduce((sum, s) => sum + monthlyAmount(s), 0));
+    // grossMonthlyCost ignores the cancelled state, so this is the would-be
+    // monthly spend the user is no longer paying — the actual "saved" figure.
+    // (monthlyAmount returns 0 for cancelled subs, which would always read $0.)
+    const savedMonthly = roundMoney(
+      cancelled.reduce((sum, s) => sum + toMYR(grossMonthlyCost(s), s.currency), 0),
+    );
 
     const ring = CATEGORIES.map((category) => {
       const value = roundMoney(
         active
           .filter((s) => s.category === category)
-          .reduce((sum, s) => sum + monthlyAmount(s), 0),
+          .reduce((sum, s) => sum + toMYR(monthlyAmount(s), s.currency), 0),
       );
       return { category, label: CATEGORY_META[category].label, color: CATEGORY_COLOR[category], value };
     }).filter((r) => r.value > 0);
@@ -62,7 +74,10 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
       const total = roundMoney(
         active.reduce(
           (sum, sub) =>
-            sum + chargeDatesInRange(sub, startISO, endISO).reduce((a) => a + sub.amount, 0),
+            sum + chargeDatesInRange(sub, startISO, endISO).reduce(
+              (a) => a + toMYR(sub.amount, sub.currency),
+              0,
+            ),
           0,
         ),
       );
@@ -88,30 +103,35 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
 
   return (
     <div className="flex flex-col gap-4">
+      <p className="text-xs text-muted-foreground">
+        All totals shown in Malaysian Ringgit (RM). Foreign-currency subscriptions are converted at
+        approximate rates.
+      </p>
+
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           icon={TrendingUp}
           label="Monthly equivalent"
-          value={formatCurrency(stats.monthly, currency)}
+          value={formatCurrency(stats.monthly, HOME_CURRENCY)}
           hint="normalized across cycles"
         />
         <StatCard
           icon={CalendarClock}
           label="Yearly equivalent"
-          value={formatCurrency(stats.yearly, currency)}
+          value={formatCurrency(stats.yearly, HOME_CURRENCY)}
           hint={`${stats.active.length} active`}
         />
         <StatCard
           icon={Sparkles}
           label="Next 30 days"
-          value={formatCurrency(stats.upcomingTotal, currency)}
+          value={formatCurrency(stats.upcomingTotal, HOME_CURRENCY)}
           hint={`${stats.upcomingCount} ${stats.upcomingCount === 1 ? "charge" : "charges"}`}
         />
         <StatCard
           icon={PiggyBank}
           label="Saved / month"
-          value={formatCurrency(stats.savedMonthly, currency)}
+          value={formatCurrency(stats.savedMonthly, HOME_CURRENCY)}
           hint="from cancelled"
           accent="success"
         />
@@ -149,7 +169,7 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
                         a && payload && payload.length ? (
                           <TooltipBody
                             label={String(payload[0].name)}
-                            value={formatCurrency(Number(payload[0].value), currency)}
+                            value={formatCurrency(Number(payload[0].value), HOME_CURRENCY)}
                           />
                         ) : null
                       }
@@ -160,7 +180,7 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
                   <div className="text-center">
                     <div className="text-[11px] text-muted-foreground">/ month</div>
                     <div className="text-sm font-semibold">
-                      {formatCompactCurrency(stats.monthly, currency)}
+                      {formatCompactCurrency(stats.monthly, HOME_CURRENCY)}
                     </div>
                   </div>
                 </div>
@@ -177,7 +197,7 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
                       />
                       <span className="flex-1 text-muted-foreground">{r.label}</span>
                       <span className="font-medium">
-                        {formatCurrency(r.value, currency)}
+                        {formatCurrency(r.value, HOME_CURRENCY)}
                       </span>
                     </li>
                   ))}
@@ -190,13 +210,13 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
         <div className="rounded-2xl border border-border/60 bg-surface/40 p-5">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-medium">Last 6 months</h3>
-            <span className="text-xs text-muted-foreground">actual charges</span>
+            <span className="text-xs text-muted-foreground">actual charges (MYR)</span>
           </div>
           {stats.active.length === 0 ? (
             <EmptyChart label="No active subscriptions to trend" />
           ) : (
             <div className="h-44 w-full">
-              <BarTrend data={stats.trend} currency={currency} />
+              <BarTrend data={stats.trend} />
             </div>
           )}
         </div>
@@ -210,22 +230,28 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
             {stats.trialsConverting.length} trial{stats.trialsConverting.length === 1 ? "" : "s"} converting within 30 days
           </div>
           <ul className="flex flex-col divide-y divide-warning/15">
-            {stats.trialsConverting.map((sub) => (
-              <li key={sub.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                <SubscriptionIcon sub={sub} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{sub.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    Converts on{" "}
-                    {new Date(sub.freeTrialEndAt ?? Date.now()).toLocaleDateString(undefined, {
-                      day: "numeric",
-                      month: "short",
-                    })}
+            {stats.trialsConverting.map((sub) => {
+              const myr = myrEquivalentOf(sub.amount, sub.currency);
+              return (
+                <li key={sub.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <SubscriptionIcon sub={sub} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{sub.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Converts on{" "}
+                      {new Date(sub.freeTrialEndAt ?? Date.now()).toLocaleDateString(undefined, {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </div>
                   </div>
-                </div>
-                <div className="text-sm font-medium">{formatCurrency(sub.amount, sub.currency)}</div>
-              </li>
-            ))}
+                  <div className="text-right">
+                    <div className="text-sm font-medium">{formatCurrency(sub.amount, sub.currency)}</div>
+                    {myr && <div className="text-[11px] text-muted-foreground">≈ {myr}</div>}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -282,13 +308,12 @@ function EmptyChart({ label }: { label: string }) {
 /**
  * Lightweight CSS-bar "trend" — avoids pulling the full Recharts BarChart
  * (keeps the tab bundle smaller) while still reading as a calm premium chart.
+ * All bars are in MYR (converted before summing), so months are comparable.
  */
 function BarTrend({
   data,
-  currency,
 }: {
   data: { label: string; total: number; isCurrent: boolean }[];
-  currency: string;
 }) {
   const max = Math.max(1, ...data.map((d) => d.total));
   return (
@@ -298,7 +323,7 @@ function BarTrend({
         return (
           <div key={d.label} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
             <div className="text-[10px] text-muted-foreground">
-              {d.total > 0 ? formatCompactCurrency(d.total, currency) : ""}
+              {d.total > 0 ? formatCompactCurrency(d.total, HOME_CURRENCY) : ""}
             </div>
             <div className="flex w-full flex-1 items-end">
               <div
@@ -306,7 +331,7 @@ function BarTrend({
                   d.isCurrent ? "bg-primary/70" : "bg-primary/25"
                 }`}
                 style={{ height: `${heightPct}%` }}
-                title={`${d.label}: ${formatCurrency(d.total, currency)}`}
+                title={`${d.label}: ${formatCurrency(d.total, HOME_CURRENCY)}`}
               />
             </div>
             <div className={`text-[11px] ${d.isCurrent ? "font-medium text-foreground" : "text-muted-foreground"}`}>

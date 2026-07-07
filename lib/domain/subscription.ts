@@ -43,6 +43,16 @@ export function yearlyAmount(sub: Subscription): number {
   return yearlyEquivalent(sub.amount, sub.billingCycle, sub.intervalCount);
 }
 
+/**
+ * Monthly cost IGNORING pause/cancel state — used to show how much a now-
+ * cancelled (or paused) subscription was costing, i.e. the "saved" figure.
+ * (`monthlyAmount` returns 0 for inactive subs, which is correct everywhere
+ * except the savings calculation, where we specifically want the would-be cost.)
+ */
+export function grossMonthlyCost(sub: Subscription): number {
+  return monthlyEquivalent(sub.amount, sub.billingCycle, sub.intervalCount);
+}
+
 /** Charge dates for an active subscription within a civil-date range. */
 export function chargeDatesInRange(
   sub: Subscription,
