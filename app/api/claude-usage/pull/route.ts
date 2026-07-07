@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
-import { bridgeSecretAuthorized } from "@/lib/claude-usage/bridge-auth";
+import { resolveBridgeUserId } from "@/lib/claude-usage/bridge-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,16 +40,12 @@ export async function POST() {
  * requested since it last checked. Cheap: no Anthropic call, just a column read.
  */
 export async function GET(req: NextRequest) {
-  if (!process.env.CLAUDE_BRIDGE_SECRET || !isAdminConfigured()) {
+  if (!isAdminConfigured()) {
     return NextResponse.json({ pull_requested_at: null }, { status: 503 });
   }
-  if (!bridgeSecretAuthorized(req.headers.get("authorization"))) {
-    return NextResponse.json({ pull_requested_at: null }, { status: 401 });
-  }
-  const targetUser =
-    process.env.CLAUDE_BRIDGE_USER_ID || req.nextUrl.searchParams.get("user_id");
+  const targetUser = await resolveBridgeUserId(req.headers.get("authorization"));
   if (!targetUser) {
-    return NextResponse.json({ pull_requested_at: null }, { status: 400 });
+    return NextResponse.json({ pull_requested_at: null }, { status: 401 });
   }
 
   const admin = createSupabaseAdminClient();

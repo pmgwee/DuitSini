@@ -18,6 +18,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      bridge_tokens: {
+        Row: {
+          created_at: string
+          last_used_at: string | null
+          token_hash: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          last_used_at?: string | null
+          token_hash: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          last_used_at?: string | null
+          token_hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       claude_usage_live: {
         Row: {
           five_hour_resets_at: string | null

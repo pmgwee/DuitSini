@@ -1,9 +1,9 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Constant-time check of a bearer secret against CLAUDE_BRIDGE_SECRET. Used by
- * the bridge-facing endpoints (ingest, pull) which authenticate the local
- * companion by a shared secret rather than a user session.
+ * Constant-time check of a bearer secret against CLAUDE_BRIDGE_SECRET (the
+ * owner's legacy single-secret path).
  */
 export function bridgeSecretAuthorized(header: string | null): boolean {
   const secret = process.env.CLAUDE_BRIDGE_SECRET;
@@ -12,4 +12,45 @@ export function bridgeSecretAuthorized(header: string | null): boolean {
   const a = Buffer.from(provided);
   const b = Buffer.from(secret);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function extractToken(header: string | null): string | null {
+  if (!header) return null;
+  const t = header.startsWith("Bearer ") ? header.slice(7) : header;
+  return t.trim() || null;
+}
+
+/** SHA-256 hex of a bridge token — what we store/look up (never the plaintext). */
+export function hashBridgeToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Resolve which user a bridge request belongs to. Multi-tenant:
+ *   1) Per-user bridge token → looked up (by hash) in `bridge_tokens`.
+ *   2) Legacy shared CLAUDE_BRIDGE_SECRET → pinned CLAUDE_BRIDGE_USER_ID.
+ * Returns the user_id, or null if unauthenticated.
+ */
+export async function resolveBridgeUserId(header: string | null): Promise<string | null> {
+  const token = extractToken(header);
+  if (!token) return null;
+
+  // 1) Per-user token (group members).
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data } = await admin
+      .from("bridge_tokens")
+      .select("user_id")
+      .eq("token_hash", hashBridgeToken(token))
+      .maybeSingle();
+    if (data?.user_id) return data.user_id;
+  } catch {
+    // fall through to the legacy path
+  }
+
+  // 2) Legacy shared secret → pinned user (the owner's existing bridge).
+  if (bridgeSecretAuthorized(header) && process.env.CLAUDE_BRIDGE_USER_ID) {
+    return process.env.CLAUDE_BRIDGE_USER_ID;
+  }
+  return null;
 }

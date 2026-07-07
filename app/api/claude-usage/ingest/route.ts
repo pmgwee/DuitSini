@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
-import { bridgeSecretAuthorized } from "@/lib/claude-usage/bridge-auth";
+import { resolveBridgeUserId } from "@/lib/claude-usage/bridge-auth";
 import type { Json } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -37,27 +37,20 @@ const bodySchema = z.object({
  * CLAUDE_BRIDGE_USER_ID when set (recommended), else taken from the body.
  */
 export async function POST(req: NextRequest) {
-  if (!isAdminConfigured() || !process.env.CLAUDE_BRIDGE_SECRET) {
+  if (!isAdminConfigured()) {
     return NextResponse.json(
       { ok: false, error: "Live bridge not configured on the server." },
       { status: 503 },
     );
   }
-  if (!bridgeSecretAuthorized(req.headers.get("authorization"))) {
+  const targetUser = await resolveBridgeUserId(req.headers.get("authorization"));
+  if (!targetUser) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ ok: false, error: "bad body" }, { status: 400 });
-  }
-
-  const targetUser = process.env.CLAUDE_BRIDGE_USER_ID || parsed.data.user_id;
-  if (!targetUser) {
-    return NextResponse.json(
-      { ok: false, error: "No target user (set CLAUDE_BRIDGE_USER_ID or send user_id)." },
-      { status: 400 },
-    );
   }
 
   const { five_hour, seven_day, limits } = parsed.data;
