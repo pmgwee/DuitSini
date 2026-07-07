@@ -77,9 +77,14 @@ Open the dashboard → **Claude usage** flips to the green **Live** badge within
 | `INGEST_URL` | — (required) | `https://<your-site>/api/claude-usage/ingest`. Use `http://localhost:3000/...` to test against local dev. |
 | `BRIDGE_SECRET` | — (required) | Must equal the site's `CLAUDE_BRIDGE_SECRET`. |
 | `CLAUDE_USER_ID` | — | Your Supabase user id. Optional if the server sets `CLAUDE_BRIDGE_USER_ID`. |
-| `POLL_MS` | `60000` | Fetch+push interval. Clamped to ≥60s to respect Anthropic's rate limit; backs off on 429. |
+| `POLL_MS` | `30000` | Regular fetch+push interval. Clamped to ≥15s to respect Anthropic's rate limit; backs off on 429. |
+| `COMMAND_MS` | `4000` | How often to check the cheap "Pull latest" signal (no Anthropic call), so the site's button feels near-instant. |
 | `CC_VERSION` | `2.1.0` | Version in `User-Agent: claude-code/<version>`. |
 | `CLAUDE_CREDENTIALS_PATH` | auto | Override the credentials file path if non-standard. |
+
+The bridge fetches Anthropic on the `POLL_MS` cadence **and** immediately when the
+site's **Pull latest** button is pressed (bounded to at most once per ~9s, so
+rapid clicks can't trip a 429).
 
 ## Troubleshooting
 

@@ -22,6 +22,8 @@ export type Database = {
         Row: {
           five_hour_resets_at: string | null
           five_hour_utilization: number | null
+          limits_json: Json | null
+          pull_requested_at: string | null
           seven_day_resets_at: string | null
           seven_day_utilization: number | null
           updated_at: string
@@ -30,6 +32,8 @@ export type Database = {
         Insert: {
           five_hour_resets_at?: string | null
           five_hour_utilization?: number | null
+          limits_json?: Json | null
+          pull_requested_at?: string | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
           updated_at?: string
@@ -38,6 +42,8 @@ export type Database = {
         Update: {
           five_hour_resets_at?: string | null
           five_hour_utilization?: number | null
+          limits_json?: Json | null
+          pull_requested_at?: string | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
           updated_at?: string

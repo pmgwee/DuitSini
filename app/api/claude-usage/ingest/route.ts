@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { createSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
+import { bridgeSecretAuthorized } from "@/lib/claude-usage/bridge-auth";
+import type { Json } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,21 +14,21 @@ const windowSchema = z
   })
   .nullable();
 
+const limitSchema = z.object({
+  key: z.string().max(64),
+  label: z.string().max(80),
+  group: z.enum(["session", "weekly"]),
+  percent: z.number().min(0).max(1000).nullable(),
+  resets_at: z.string().max(64).nullable(),
+  severity: z.string().max(32).nullable().optional(),
+});
+
 const bodySchema = z.object({
   user_id: z.string().uuid().optional(),
   five_hour: windowSchema.optional(),
   seven_day: windowSchema.optional(),
+  limits: z.array(limitSchema).max(40).nullable().optional(),
 });
-
-/** Constant-time bearer check against CLAUDE_BRIDGE_SECRET. */
-function authorized(header: string | null): boolean {
-  const secret = process.env.CLAUDE_BRIDGE_SECRET;
-  if (!secret || !header) return false;
-  const provided = header.startsWith("Bearer ") ? header.slice(7) : header;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(secret);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 /**
  * Ingest endpoint for the local Claude Usage Bridge. Authenticated by a shared
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
       { status: 503 },
     );
   }
-  if (!authorized(req.headers.get("authorization"))) {
+  if (!bridgeSecretAuthorized(req.headers.get("authorization"))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
@@ -59,16 +60,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { five_hour, seven_day } = parsed.data;
+  const { five_hour, seven_day, limits } = parsed.data;
   const admin = createSupabaseAdminClient();
-  const { error } = await admin.from("claude_usage_live").upsert({
+  const base = {
     user_id: targetUser,
     five_hour_utilization: five_hour?.utilization ?? null,
     five_hour_resets_at: five_hour?.resets_at ?? null,
     seven_day_utilization: seven_day?.utilization ?? null,
     seven_day_resets_at: seven_day?.resets_at ?? null,
     updated_at: new Date().toISOString(),
-  });
+  };
+
+  let { error } = await admin
+    .from("claude_usage_live")
+    .upsert({ ...base, limits_json: (limits ?? null) as Json });
+  // Degrade gracefully if the limits_json column migration isn't applied yet:
+  // still store the session/weekly totals so the widget keeps working.
+  if (error && /limits_json/i.test(error.message)) {
+    ({ error } = await admin.from("claude_usage_live").upsert(base));
+  }
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }

@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Loader2, Play, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { useClaudeUsage, type UsageState } from "@/lib/stores/claude-usage";
-import { useClaudeUsageLive, type LiveUsage, type LiveUsageWindow } from "./use-claude-usage-live";
+import {
+  useClaudeUsageLive,
+  type LiveUsage,
+  type LiveUsageWindow,
+  type UsageLimit,
+} from "./use-claude-usage-live";
 import { useNow } from "./use-now";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -44,7 +49,9 @@ export function ClaudeUsageTracker() {
     mode === "live" &&
     live.status === "live" &&
     live.data &&
-    (hasWindow(live.data.five_hour) || hasWindow(live.data.seven_day));
+    (hasWindow(live.data.five_hour) ||
+      hasWindow(live.data.seven_day) ||
+      (Array.isArray(live.data.limits) && live.data.limits.length > 0));
 
   return (
     <WidgetShell>
@@ -68,7 +75,7 @@ export function ClaudeUsageTracker() {
       </header>
 
       {liveReady && live.data ? (
-        <LiveView data={live.data} now={now} />
+        <LiveView data={live.data} now={now} onPull={live.pull} pulling={live.pulling} />
       ) : (
         <ManualView now={now} liveStatus={live.status} liveError={live.error} />
       )}
@@ -105,76 +112,101 @@ function formatUntil(iso: string | null | undefined, now: number): string {
 /* Live view — real plan usage from the local Claude Usage Bridge      */
 /* ------------------------------------------------------------------ */
 
-function LiveView({ data, now }: { data: LiveUsage; now: number }) {
-  const five = data.five_hour;
-  const seven = data.seven_day;
-  const fivePct = five?.utilization ?? null;
+function LiveView({
+  data,
+  now,
+  onPull,
+  pulling,
+}: {
+  data: LiveUsage;
+  now: number;
+  onPull: () => void;
+  pulling: boolean;
+}) {
+  const limits = Array.isArray(data.limits) ? data.limits : [];
+
+  // Prefer the structured `limits` array; fall back to the raw windows so the
+  // widget still works before the bridge/migration carry the richer data.
+  const session: UsageLimit | null =
+    limits.find((l) => l.group === "session") ??
+    (data.five_hour
+      ? windowToLimit("session", "Current session", "session", data.five_hour)
+      : null);
+
+  const weeklyFromLimits = limits.filter((l) => l.group === "weekly");
+  const weekly: UsageLimit[] =
+    weeklyFromLimits.length > 0
+      ? weeklyFromLimits
+      : data.seven_day
+        ? [windowToLimit("weekly_all", "All models", "weekly", data.seven_day)]
+        : [];
+
+  const gauges = [session, ...weekly].filter((l): l is UsageLimit => l !== null);
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center gap-4">
-        {fivePct !== null ? (
-          <ProgressRing progress={(fivePct ?? 0) / 100} color={utilizationColor(fivePct)}>
-            <div className="text-center">
-              <div className="text-lg font-semibold tabular-nums">{Math.round(fivePct)}%</div>
-              <div className="text-[11px] text-muted-foreground">5-hour</div>
-            </div>
-          </ProgressRing>
-        ) : (
-          <div className="grid size-32 place-items-center rounded-full border border-dashed border-border/60 text-center text-[11px] text-muted-foreground">
-            not on a
-            <br />
-            5h plan
-          </div>
-        )}
-        <div className="flex-1">
-          <div className="text-sm">
-            Resets in <span className="font-medium">{formatUntil(five?.resets_at, now)}</span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Rolling 5-hour session window, synced live from your local Claude Code companion.
-          </p>
-        </div>
+      <div className="grid grid-cols-3 gap-2">
+        {gauges.map((l) => (
+          <UsageGauge key={l.key} limit={l} now={now} />
+        ))}
       </div>
 
-      <LiveWindow
-        label="7-day weekly window"
-        pct={seven?.utilization ?? null}
-        resetsAt={seven?.resets_at}
-        now={now}
-      />
-
-      <p className="text-[11px] text-muted-foreground/70">
-        Live · {data.cached ? "cached" : "fresh"} · unofficial endpoint (may change without notice).
+      <div className="flex items-center justify-between border-t border-border/50 pt-3">
+        <span className="text-[11px] text-muted-foreground/80">
+          Last updated: {formatAgo(data.refreshed_at, now)}
+        </span>
+        <button
+          type="button"
+          onClick={onPull}
+          disabled={pulling}
+          aria-label="Pull latest usage from the bridge"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+        >
+          <RefreshCw className={cn("size-3.5", pulling && "animate-spin")} />
+          {pulling ? "Pulling…" : "Pull latest"}
+        </button>
+      </div>
+      <p className="-mt-2 text-[11px] text-muted-foreground/60">
+        Live · updates automatically · unofficial endpoint (may change without notice).
       </p>
     </div>
   );
 }
 
-function LiveWindow({
-  label,
-  pct,
-  resetsAt,
-  now,
-}: {
-  label: string;
-  pct: number | null;
-  resetsAt: string | null | undefined;
-  now: number;
-}) {
+/** Adapt a raw usage window into a UsageLimit row for the fallback path. */
+function windowToLimit(
+  key: string,
+  label: string,
+  group: "session" | "weekly",
+  w: LiveUsageWindow,
+): UsageLimit {
+  return { key, label, group, percent: w.utilization, resets_at: w.resets_at, severity: null };
+}
+
+function formatAgo(iso: string | null | undefined, now: number): string {
+  if (!iso) return "—";
+  const diff = Math.max(0, now - new Date(iso).getTime());
+  if (diff < 45_000) return "just now";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** One compact ring gauge — used for each limit (session + weekly models). */
+function UsageGauge({ limit, now }: { limit: UsageLimit; now: number }) {
+  const pct = limit.percent;
   return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between text-xs">
-        <span className="font-medium text-muted-foreground">{label}</span>
-        <span className="text-muted-foreground">
-          {pct === null ? "—" : `${Math.round(pct)}%`} · resets in {formatUntil(resetsAt, now)}
-        </span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full transition-[width] duration-500"
-          style={{ width: `${Math.min(100, pct ?? 0)}%`, background: utilizationColor(pct) }}
-        />
+    <div className="flex flex-col items-center gap-1.5 text-center">
+      <ProgressRing progress={(pct ?? 0) / 100} color={utilizationColor(pct)} size={92} stroke={8}>
+        <div className="text-sm font-semibold tabular-nums">
+          {pct == null ? "—" : `${Math.round(pct)}%`}
+        </div>
+      </ProgressRing>
+      <div className="text-[11px] font-medium leading-tight">{limit.label}</div>
+      <div className="text-[10px] text-muted-foreground">
+        resets {formatUntil(limit.resets_at, now)}
       </div>
     </div>
   );
