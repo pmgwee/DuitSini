@@ -86,10 +86,27 @@ The bridge fetches Anthropic on the `POLL_MS` cadence **and** immediately when t
 site's **Pull latest** button is pressed (bounded to at most once per ~9s, so
 rapid clicks can't trip a 429).
 
+## Token refresh (runs unattended, incl. across sleep/wake)
+
+When it reads the token from `.credentials.json`, the bridge **refreshes it
+itself** — 5 minutes before expiry, or reactively on a 401 — using the stored
+`refreshToken`, and writes the rotated tokens back to the file (atomically,
+preserving `mcpOAuth` and other fields). So you no longer need Claude Code
+running to keep it alive: start the bridge once and leave it.
+
+- Refreshes are throttled (the endpoint is rate-limited) and fall back to the
+  still-valid token if a refresh is briefly 429'd.
+- You'll see `token refreshed (valid ~60m)` in the log when it happens.
+- Re-login (`claude`) is only needed if the **refresh token** itself is revoked
+  — rare: an explicit `claude logout`, an Anthropic security action, or a
+  deleted/corrupted credentials file.
+- If you pasted a static `CLAUDE_ACCESS_TOKEN` (from `claude setup-token`), no
+  refresh happens — that token is already long-lived (~1 year).
+
 ## Troubleshooting
 
-- **`Token expired`** — run any `claude` command to refresh, then it recovers.
 - **`Ingest returned 401`** — `BRIDGE_SECRET` ≠ server `CLAUDE_BRIDGE_SECRET`.
 - **`Ingest returned 503`** — server missing `SUPABASE_SERVICE_ROLE_KEY` or `CLAUDE_BRIDGE_SECRET`.
 - **`Ingest returned 400` (no target user)** — set `CLAUDE_USER_ID` here or `CLAUDE_BRIDGE_USER_ID` on the server.
+- **`fetch failed` right after wake** — transient (network not up yet); it retries and recovers on its own.
 - **Rate limited** — normal occasionally; the bridge backs off and recovers.

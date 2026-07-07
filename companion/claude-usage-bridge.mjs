@@ -16,12 +16,23 @@
  *
  * Run:  node --env-file=.env claude-usage-bridge.mjs
  */
-import { readFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const MAX_BACKOFF_MS = 300_000; // cap 429 backoff at 5 min
+
+// OAuth token refresh — lets the bridge survive sleep/wake and run indefinitely
+// without Claude Code running to keep the token fresh. Anthropic moved the
+// endpoint to platform.claude.com; console.anthropic.com is a fallback.
+const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const TOKEN_ENDPOINTS = [
+  "https://platform.claude.com/v1/oauth/token",
+  "https://console.anthropic.com/v1/oauth/token",
+];
+const EXPIRY_BUFFER_MS = 5 * 60 * 1000; // refresh this long before expiry
+const REFRESH_MIN_INTERVAL_MS = 45_000; // throttle attempts (endpoint is rate-limited)
 
 const cfg = {
   ingestUrl: process.env.INGEST_URL, // e.g. https://your-app.vercel.app/api/claude-usage/ingest
@@ -55,28 +66,105 @@ if (!cfg.secret) die("BRIDGE_SECRET is required (must match the server's CLAUDE_
 // The pull-signal endpoint sits next to the ingest endpoint.
 cfg.pullUrl = cfg.ingestUrl.replace(/\/ingest\/?$/, "/pull");
 
+let lastRefreshAttemptAt = 0;
+
+/** Atomically write the credentials file (temp + rename) to avoid corruption. */
+async function writeCredentialsAtomic(creds) {
+  const tmp = `${cfg.credentialsPath}.bridge.tmp`;
+  await writeFile(tmp, JSON.stringify(creds, null, 2), "utf8");
+  await rename(tmp, cfg.credentialsPath);
+}
+
+/**
+ * Exchange the refresh token for a fresh access token (rotating the refresh
+ * token too) and persist both back to the credentials file — exactly what
+ * Claude Code does. Other fields (mcpOAuth, scopes, …) are preserved.
+ */
+async function refreshCredentials(creds) {
+  const refreshToken = creds.claudeAiOauth?.refreshToken;
+  if (!refreshToken) throw new Error("No refreshToken available to refresh with.");
+  let lastErr;
+  for (const url of TOKEN_ENDPOINTS) {
+    let resp;
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": cfg.userAgent },
+        body: JSON.stringify({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: OAUTH_CLIENT_ID,
+        }),
+      });
+    } catch (e) {
+      lastErr = e; // network error — try the next endpoint
+      continue;
+    }
+    if (resp.status === 404) {
+      lastErr = new Error(`${url} → 404`); // wrong host — try the fallback
+      continue;
+    }
+    if (resp.status === 429) {
+      throw Object.assign(new Error("Token refresh rate limited (429)."), { code: 429 });
+    }
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      throw new Error(`Token refresh ${resp.status}${body ? `: ${body.slice(0, 140)}` : ""}`);
+    }
+    const j = await resp.json();
+    if (!j.access_token) throw new Error("Token refresh response had no access_token.");
+    creds.claudeAiOauth.accessToken = j.access_token;
+    if (j.refresh_token) creds.claudeAiOauth.refreshToken = j.refresh_token;
+    creds.claudeAiOauth.expiresAt = Date.now() + (j.expires_in ?? 3600) * 1000;
+    await writeCredentialsAtomic(creds);
+    console.log(`${stamp()}  token refreshed (valid ~${Math.round((j.expires_in ?? 3600) / 60)}m)`);
+    return creds.claudeAiOauth.accessToken;
+  }
+  throw lastErr ?? new Error("Token refresh failed on all endpoints.");
+}
+
 async function resolveToken() {
-  // 1) Explicit token wins (paste from `claude setup-token`).
+  // 1) Explicit static token wins (paste from `claude setup-token`) — no refresh.
   if (cfg.accessToken) return cfg.accessToken;
 
-  // 2) Otherwise read the Claude Code subscription token from the creds file.
-  let raw;
+  // 2) Read the Claude Code subscription token from the creds file.
+  let creds;
   try {
-    raw = await readFile(cfg.credentialsPath, "utf8");
+    creds = JSON.parse(await readFile(cfg.credentialsPath, "utf8"));
   } catch {
     throw new Error(
       `No CLAUDE_ACCESS_TOKEN set and could not read ${cfg.credentialsPath}. ` +
         `Run "claude setup-token" and put the result in CLAUDE_ACCESS_TOKEN.`,
     );
   }
-  const oauth = JSON.parse(raw)?.claudeAiOauth;
-  if (!oauth?.accessToken) {
+  const o = creds.claudeAiOauth;
+  if (!o?.accessToken || !o?.refreshToken) {
     throw new Error(
-      "No claudeAiOauth.accessToken in the creds file (this Claude Code isn't logged into a Claude " +
+      "No claudeAiOauth tokens in the creds file (this Claude Code isn't logged into a Claude " +
         'subscription). Run "claude setup-token" and set CLAUDE_ACCESS_TOKEN instead.',
     );
   }
-  return oauth.accessToken;
+
+  const now = Date.now();
+  const exp = typeof o.expiresAt === "number" ? o.expiresAt : 0;
+  if (now < exp - EXPIRY_BUFFER_MS) return o.accessToken; // comfortably valid
+
+  // Near expiry or expired → refresh, throttled (the endpoint is rate-limited).
+  if (now - lastRefreshAttemptAt >= REFRESH_MIN_INTERVAL_MS) {
+    lastRefreshAttemptAt = now;
+    try {
+      return await refreshCredentials(creds);
+    } catch (e) {
+      // Still within the pre-expiry buffer → keep using the valid token, retry later.
+      if (now < exp) {
+        console.warn(`${stamp()}  refresh failed (${e.message}); using current token for now`);
+        return o.accessToken;
+      }
+      throw e;
+    }
+  }
+  if (now < exp) return o.accessToken; // valid within buffer, refresh cooling down
+  throw new Error("Access token expired; refresh cooling down, will retry shortly.");
 }
 
 async function fetchUsage(token) {
@@ -91,7 +179,7 @@ async function fetchUsage(token) {
     },
   });
   if (resp.status === 401)
-    throw Object.assign(new Error('Token expired — run any "claude" command to refresh it.'), { code: 401 });
+    throw Object.assign(new Error("Access token rejected (401) — will refresh."), { code: 401 });
   if (resp.status === 429) throw Object.assign(new Error("Rate limited by Anthropic."), { code: 429 });
   if (!resp.ok) throw new Error(`Usage endpoint returned ${resp.status}.`);
   return resp.json();
@@ -159,6 +247,14 @@ const stamp = () => new Date().toLocaleTimeString();
 let backoff = 0;
 let lastFetchAt = 0;
 let lastPullSeen = 0;
+let lastWarn = "";
+
+/** Warn, but suppress consecutive duplicates so an outage doesn't spam the log. */
+function warnOnce(msg) {
+  if (msg === lastWarn) return;
+  lastWarn = msg;
+  console.warn(`${stamp()}  ${msg}`);
+}
 
 /** Cheap check (no Anthropic call): has the site requested a fresh pull? */
 async function checkPullRequest() {
@@ -176,11 +272,25 @@ async function checkPullRequest() {
 }
 
 async function fetchAndPush(reason) {
-  const token = await resolveToken();
-  const usage = await fetchUsage(token);
+  let token = await resolveToken();
+  let usage;
+  try {
+    usage = await fetchUsage(token);
+  } catch (e) {
+    // Reactive refresh: token looked valid but was rejected → force a refresh once.
+    if (e.code === 401 && !cfg.accessToken && Date.now() - lastRefreshAttemptAt >= REFRESH_MIN_INTERVAL_MS) {
+      lastRefreshAttemptAt = Date.now();
+      const creds = JSON.parse(await readFile(cfg.credentialsPath, "utf8"));
+      token = await refreshCredentials(creds);
+      usage = await fetchUsage(token);
+    } else {
+      throw e;
+    }
+  }
   await push(usage);
   lastFetchAt = Date.now();
   backoff = 0;
+  lastWarn = "";
   const f = usage.five_hour?.utilization;
   const s = usage.seven_day?.utilization;
   const scoped = Array.isArray(usage.limits)
@@ -206,10 +316,10 @@ async function loop() {
     }
   } catch (e) {
     if (e.code === 429) {
-      backoff = Math.min(MAX_BACKOFF_MS, (backoff || cfg.pushMs) * 2);
-      console.warn(`${stamp()}  rate limited — backing off ${Math.round(backoff / 1000)}s`);
+      backoff = Math.min(MAX_BACKOFF_MS, Math.max(45_000, (backoff || cfg.pushMs) * 2));
+      warnOnce(`rate limited — backing off ${Math.round(backoff / 1000)}s`);
     } else {
-      console.warn(`${stamp()}  ${e.message}`);
+      warnOnce(e.message);
     }
   } finally {
     setTimeout(loop, backoff || cfg.commandMs);
@@ -218,7 +328,9 @@ async function loop() {
 
 console.log("Claude Usage Bridge (push mode)");
 console.log(`  → ingest:      ${cfg.ingestUrl}`);
-console.log(`  token source: ${cfg.accessToken ? "CLAUDE_ACCESS_TOKEN (pasted)" : cfg.credentialsPath}`);
+console.log(
+  `  token source: ${cfg.accessToken ? "CLAUDE_ACCESS_TOKEN (static)" : `${cfg.credentialsPath} (auto-refreshing)`}`,
+);
 console.log(`  push every:   ${cfg.pushMs / 1000}s · pull-check ${cfg.commandMs / 1000}s · UA ${cfg.userAgent}`);
 console.log(`  target user:  ${cfg.userId || "(pinned by server CLAUDE_BRIDGE_USER_ID)"}\n`);
 loop();
