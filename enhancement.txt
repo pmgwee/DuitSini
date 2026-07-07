@@ -1,0 +1,16 @@
+- finalize live claude usage for public user use (bridge for everyone)
+So basically if i switch to zai provider in cc switch without logging out and change to Anthropic console (image 1) , the claude usage bridge will still working and able to fetch my claude usage , the only things that will encounter failure to get claude usage is when i switch accounts (login with different accounts) from claude.ai subscription to Anthropic console, and switch to zai provider in cc switch so that i can  connect my GLM-routed claude code , it will have erros in claude bridge cmd:1:59:03 pm  No claudeAiOauth tokens in the creds file (this Claude Code isn't logged into a Claude subscription). Run "claude setup-token" and set CLAUDE_ACCESS_TOKEN instead.
+
+is this ur current implemented z.ai/GLM provider-aware bridge switching able to cater this scenario?where u should display the subscribed plan account's claude usage when it is official claude ai subscription login  with default provider in cc switch vice versa if i switch to anthropic console with zai provider in cc switch u should display the claude usage for my Zai,  when research and answer my question , do not enhance any code yet 
+
+
+- Subscription 
+ 	-add list of popular and most well-known provider as preset or user self type in-> Defined category
+ 	-fixed dropdown UI
+	- fix the UI problem of the floating music player clash with the Overview by category floating bar at the bottom, 
+
+
+- Boost up UIUX design
+- Copy youtube listen again mechanims that will automatically recommend songs in the listen again lists based on ur recent frequently played songs , I think it is the youtube algorithms working behind because everytime refresh the youtube music the lists will change and update, so we can fetch the data from youtube music ,meaning what my youtube music recommend me in the listen again lists, fetch it and paste into my website music player's listen again lists, evaluate any extra api needed to intergrate it into my website, do not manually or hard code the list again lists ,so when the user choose a song, that song that last previously play will keep stacking up at the top of listen again lists like which exactly what our current music player acting.
+
+
