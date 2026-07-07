@@ -44,6 +44,7 @@ export async function GET() {
     five_hour: { utilization: data.five_hour_utilization, resets_at: data.five_hour_resets_at },
     seven_day: { utilization: data.seven_day_utilization, resets_at: data.seven_day_resets_at },
     limits: data.limits_json ?? null,
+    provider: data.provider_json ?? null,
     refreshed_at: data.updated_at,
     cached: !fresh,
   };

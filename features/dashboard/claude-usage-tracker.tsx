@@ -8,6 +8,7 @@ import {
   type LiveUsage,
   type LiveUsageWindow,
   type UsageLimit,
+  type UsageProvider,
 } from "./use-claude-usage-live";
 import { useNow } from "./use-now";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,7 @@ export function ClaudeUsageTracker() {
               Live
             </span>
           ) : null}
+          {liveReady ? <ProviderBadge provider={live.data?.provider} /> : null}
         </div>
         <div className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-surface/40 p-0.5 text-xs">
           <ModeTab active={mode === "live"} onClick={() => setMode("live")}>
@@ -462,6 +464,24 @@ function ModeTab({
 
 function WidgetShell({ children }: { children: React.ReactNode }) {
   return <div className="rounded-2xl border border-border/60 bg-surface/40 p-5">{children}</div>;
+}
+
+/**
+ * Shown only when the bridge machine has cc-switch routed to a non-Anthropic
+ * gateway (e.g. GLM/z.ai) for Claude Code's coding requests. Purely
+ * informational — the usage % above always reflects the real Claude account,
+ * regardless of which gateway is currently handling prompts.
+ */
+function ProviderBadge({ provider }: { provider?: UsageProvider | null }) {
+  if (!provider || provider.official) return null;
+  return (
+    <span
+      title={`Claude Code is currently routed through ${provider.gateway_host ?? "a gateway"} for coding requests. This usage % still reflects your real Claude account.`}
+      className="rounded-full bg-info/15 px-1.5 py-0.5 text-[10px] font-medium text-info"
+    >
+      via {provider.name ?? provider.gateway_host ?? "gateway"}
+    </span>
+  );
 }
 
 function ProgressRing({

@@ -23,11 +23,23 @@ const limitSchema = z.object({
   severity: z.string().max(32).nullable().optional(),
 });
 
+const providerSchema = z
+  .object({
+    name: z.string().max(80).nullable(),
+    gateway_host: z.string().max(120).nullable(),
+    official: z.boolean(),
+  })
+  .nullable();
+
 const bodySchema = z.object({
   user_id: z.string().uuid().optional(),
   five_hour: windowSchema.optional(),
   seven_day: windowSchema.optional(),
   limits: z.array(limitSchema).max(40).nullable().optional(),
+  // Which cc-switch provider was active on the sender's machine when this
+  // snapshot was taken — purely informational (see bridge-auth.ts / bridge
+  // README). Absent for older bridge scripts that predate this field.
+  provider: providerSchema.optional(),
 });
 
 /**
@@ -53,7 +65,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "bad body" }, { status: 400 });
   }
 
-  const { five_hour, seven_day, limits } = parsed.data;
+  const { five_hour, seven_day, limits, provider } = parsed.data;
   const admin = createSupabaseAdminClient();
   const base = {
     user_id: targetUser,
@@ -64,11 +76,18 @@ export async function POST(req: NextRequest) {
     updated_at: new Date().toISOString(),
   };
 
-  let { error } = await admin
-    .from("claude_usage_live")
-    .upsert({ ...base, limits_json: (limits ?? null) as Json });
-  // Degrade gracefully if the limits_json column migration isn't applied yet:
+  let { error } = await admin.from("claude_usage_live").upsert({
+    ...base,
+    limits_json: (limits ?? null) as Json,
+    provider_json: (provider ?? null) as Json,
+  });
+  // Degrade gracefully if either JSON column's migration isn't applied yet:
   // still store the session/weekly totals so the widget keeps working.
+  if (error && /provider_json/i.test(error.message)) {
+    ({ error } = await admin
+      .from("claude_usage_live")
+      .upsert({ ...base, limits_json: (limits ?? null) as Json }));
+  }
   if (error && /limits_json/i.test(error.message)) {
     ({ error } = await admin.from("claude_usage_live").upsert(base));
   }

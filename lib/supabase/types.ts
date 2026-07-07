@@ -44,6 +44,7 @@ export type Database = {
           five_hour_resets_at: string | null
           five_hour_utilization: number | null
           limits_json: Json | null
+          provider_json: Json | null
           pull_requested_at: string | null
           seven_day_resets_at: string | null
           seven_day_utilization: number | null
@@ -54,6 +55,7 @@ export type Database = {
           five_hour_resets_at?: string | null
           five_hour_utilization?: number | null
           limits_json?: Json | null
+          provider_json?: Json | null
           pull_requested_at?: string | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
@@ -64,6 +66,7 @@ export type Database = {
           five_hour_resets_at?: string | null
           five_hour_utilization?: number | null
           limits_json?: Json | null
+          provider_json?: Json | null
           pull_requested_at?: string | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
@@ -651,3 +654,53 @@ export type Enums<
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
     : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  public: {
+    Enums: {
+      billing_cycle: [
+        "weekly",
+        "monthly",
+        "quarterly",
+        "semiannual",
+        "annual",
+        "custom_days",
+        "custom_months",
+        "one_off",
+      ],
+      delivery_status: ["pending", "sent", "failed", "skipped"],
+      notification_channel: ["telegram", "whatsapp", "email", "in_app"],
+      subscription_category: [
+        "streaming",
+        "utilities",
+        "saas",
+        "ai",
+        "music",
+        "gaming",
+        "productivity",
+        "finance",
+        "education",
+        "cloud",
+        "other",
+      ],
+      usage_state: ["light", "medium", "heavy"],
+    },
+  },
+} as const

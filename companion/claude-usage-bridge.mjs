@@ -54,6 +54,11 @@ const cfg = {
   credentialsPath:
     process.env.CLAUDE_CREDENTIALS_PATH ??
     join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), ".credentials.json"),
+  // Optional: cc-switch's local SQLite DB, read-only, to detect which provider
+  // (Claude official vs. a GLM/other gateway) is currently active — purely
+  // informational, never affects which account /api/oauth/usage reports on.
+  ccSwitchDbPath:
+    process.env.CC_SWITCH_DB_PATH ?? join(homedir(), ".cc-switch", "cc-switch.db"),
 };
 
 function die(msg) {
@@ -225,12 +230,117 @@ function normalizeLimits(usage) {
   });
 }
 
-async function push(usage) {
+/**
+ * Best-effort, read-only peek at cc-switch's local SQLite DB to see which
+ * provider is currently selected for Claude Code (e.g. official Anthropic vs.
+ * a GLM/other gateway routed through ANTHROPIC_BASE_URL). This is PURELY
+ * informational for the dashboard badge — /api/oauth/usage always reports on
+ * whatever Claude account is in ~/.claude/.credentials.json regardless of
+ * which gateway cc-switch has routed coding traffic through, so a wrong or
+ * missing read here never affects the usage numbers themselves.
+ *
+ * Every failure mode (cc-switch not installed, DB locked, schema changed,
+ * node:sqlite unavailable on older Node) is swallowed and yields `null`.
+ */
+async function detectProvider() {
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(cfg.ccSwitchDbPath, { readOnly: true });
+    try {
+      const row = db
+        .prepare(
+          "select name, settings_config from providers where app_type = 'claude' and is_current = 1 limit 1",
+        )
+        .get();
+      if (!row) return null;
+      let env = {};
+      try {
+        env = JSON.parse(row.settings_config ?? "{}").env || {};
+      } catch {
+        // malformed settings_config — still report the provider name.
+      }
+      const baseUrl = env.ANTHROPIC_BASE_URL || null;
+      const host = baseUrl ? safeHostname(baseUrl) : null;
+      const official = !host || host === "anthropic.com" || host.endsWith(".anthropic.com");
+      // GLM Coding Plan gateways (z.ai global, bigmodel.cn CN) expose the same
+      // /api/monitor/usage/quota/limit endpoint.
+      const isGlm = !!host && (host === "z.ai" || host.endsWith(".z.ai") || host.includes("bigmodel"));
+      return {
+        name: row.name ?? null,
+        gateway_host: official ? null : host,
+        official,
+        source: official ? "anthropic" : isGlm ? "zai" : "other",
+        // Local-only, NEVER pushed to the server (see safeProvider()).
+        authToken: env.ANTHROPIC_AUTH_TOKEN || null,
+        monitorUrl: host ? `https://${host}/api/monitor/usage/quota/limit` : null,
+      };
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null; // cc-switch not present, wrong Node version, DB locked, etc.
+  }
+}
+
+function safeHostname(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/** Public subset of a provider that's safe to send to the server (no token). */
+function safeProvider(provider) {
+  if (!provider) return null;
+  return { name: provider.name, gateway_host: provider.gateway_host, official: provider.official };
+}
+
+/**
+ * Fetch GLM Coding Plan usage from a z.ai/bigmodel gateway. Uses the provider's
+ * own key (Authorization with NO "Bearer" prefix — that's what the endpoint
+ * wants). Maps the token windows to our shape: unit=3/number=5 is the 5-hour
+ * window, unit=6/number=1 is the weekly window. TIME_LIMIT rows (MCP tools) are
+ * ignored. The key never leaves this machine — only the percentages are pushed.
+ */
+async function fetchGlmUsage(provider) {
+  const r = await fetch(provider.monitorUrl, {
+    method: "GET",
+    headers: {
+      Authorization: provider.authToken,
+      "Accept-Language": "en-US,en",
+      "Content-Type": "application/json",
+    },
+  });
+  if (r.status === 401 || r.status === 403)
+    throw new Error(`GLM provider rejected the key (${r.status}).`);
+  if (r.status === 429) throw Object.assign(new Error("GLM provider rate limited."), { code: 429 });
+  if (!r.ok) throw new Error(`GLM usage endpoint returned ${r.status}.`);
+  const j = await r.json();
+  const rows = j?.data?.limits;
+  const list = Array.isArray(rows) ? rows : [];
+  let five = null;
+  let week = null;
+  for (const l of list) {
+    if (l.type !== "TOKENS_LIMIT") continue; // skip TIME_LIMIT (MCP tools)
+    const pct = typeof l.percentage === "number" ? l.percentage : null;
+    const resets = typeof l.nextResetTime === "number" ? new Date(l.nextResetTime).toISOString() : null;
+    if (l.unit === 3 && l.number === 5) five = { utilization: pct, resets_at: resets };
+    else if (l.unit === 6 && l.number === 1) week = { utilization: pct, resets_at: resets };
+  }
+  const limits = [];
+  if (five) limits.push({ key: "session", label: "Current session", group: "session", percent: five.utilization, resets_at: five.resets_at, severity: null });
+  if (week) limits.push({ key: "weekly_all", label: "Weekly", group: "weekly", percent: week.utilization, resets_at: week.resets_at, severity: null });
+  return { five_hour: five, seven_day: week, limits: limits.length ? limits : null };
+}
+
+async function push(snapshot, provider) {
   const body = {
     ...(cfg.userId ? { user_id: cfg.userId } : {}),
-    five_hour: pickWindow(usage.five_hour),
-    seven_day: pickWindow(usage.seven_day),
-    limits: normalizeLimits(usage),
+    five_hour: snapshot.five_hour,
+    seven_day: snapshot.seven_day,
+    limits: snapshot.limits,
+    provider: safeProvider(provider),
   };
   const resp = await fetch(cfg.ingestUrl, {
     method: "POST",
@@ -271,7 +381,20 @@ async function checkPullRequest() {
   }
 }
 
-async function fetchAndPush(reason) {
+/** Does the local creds file have a usable Claude subscription token? */
+async function hasClaudeSubscription() {
+  if (cfg.accessToken) return true; // an explicit setup-token counts
+  try {
+    const creds = JSON.parse(await readFile(cfg.credentialsPath, "utf8"));
+    const o = creds.claudeAiOauth;
+    return !!(o && o.accessToken && o.refreshToken);
+  } catch {
+    return false;
+  }
+}
+
+/** Fetch real Anthropic subscription usage and shape it like a GLM snapshot. */
+async function fetchAnthropicSnapshot() {
   let token = await resolveToken();
   let usage;
   try {
@@ -287,17 +410,45 @@ async function fetchAndPush(reason) {
       throw e;
     }
   }
-  await push(usage);
+  return {
+    five_hour: pickWindow(usage.five_hour),
+    seven_day: pickWindow(usage.seven_day),
+    limits: normalizeLimits(usage),
+  };
+}
+
+/**
+ * Provider-aware fetch. If cc-switch is routed to a GLM gateway AND there's no
+ * Claude subscription token to read, report the GLM plan's usage (its own key,
+ * its own quota endpoint). Otherwise report the Claude subscription usage as
+ * before. This keeps the rings meaningful across a cc-switch/account switch
+ * instead of erroring out when the subscription login is gone.
+ */
+async function fetchAndPush(reason) {
+  const provider = await detectProvider();
+  const subscribed = await hasClaudeSubscription();
+
+  let snapshot;
+  let sourceLabel;
+  if (provider && provider.source === "zai" && provider.authToken && !subscribed) {
+    // GLM-routed and no Claude subscription token available → GLM usage.
+    snapshot = await fetchGlmUsage(provider);
+    sourceLabel = "GLM";
+  } else {
+    // Claude subscription (default, or GLM-routed but still logged into Claude).
+    snapshot = await fetchAnthropicSnapshot();
+    sourceLabel = "Claude";
+  }
+
+  await push(snapshot, provider);
   lastFetchAt = Date.now();
   backoff = 0;
   lastWarn = "";
-  const f = usage.five_hour?.utilization;
-  const s = usage.seven_day?.utilization;
-  const scoped = Array.isArray(usage.limits)
-    ? usage.limits.filter((l) => l.kind === "weekly_scoped").length
-    : 0;
+  const f = snapshot.five_hour?.utilization;
+  const s = snapshot.seven_day?.utilization;
+  const via = provider ? `  via ${provider.name}${provider.official ? "" : ` (${provider.gateway_host})`}` : "";
   console.log(
-    `${stamp()}  5h=${f ?? "—"}%  7d=${s ?? "—"}%${scoped ? `  +${scoped} scoped` : ""}  → pushed${reason ? ` (${reason})` : ""}`,
+    `${stamp()}  [${sourceLabel}] 5h=${f ?? "—"}%  7d=${s ?? "—"}%  → pushed${reason ? ` (${reason})` : ""}${via}`,
   );
 }
 

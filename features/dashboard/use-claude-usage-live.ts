@@ -19,10 +19,18 @@ export interface UsageLimit {
   severity?: string | null;
 }
 
+/** Which cc-switch provider was active on the bridge machine for this snapshot. */
+export interface UsageProvider {
+  name: string | null;
+  gateway_host: string | null;
+  official: boolean;
+}
+
 export interface LiveUsage {
   five_hour?: LiveUsageWindow | null;
   seven_day?: LiveUsageWindow | null;
   limits?: UsageLimit[] | null;
+  provider?: UsageProvider | null;
   error?: string;
   message?: string;
   cached?: boolean;

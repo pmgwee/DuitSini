@@ -81,6 +81,21 @@ Open the dashboard → **Claude usage** flips to the green **Live** badge within
 | `COMMAND_MS` | `4000` | How often to check the cheap "Pull latest" signal (no Anthropic call), so the site's button feels near-instant. |
 | `CC_VERSION` | `2.1.0` | Version in `User-Agent: claude-code/<version>`. |
 | `CLAUDE_CREDENTIALS_PATH` | auto | Override the credentials file path if non-standard. |
+| `CC_SWITCH_DB_PATH` | `~/.cc-switch/cc-switch.db` | Override if [cc-switch](https://github.com) is installed somewhere non-standard. |
+
+## Provider-aware (cc-switch) badge
+
+If you use **cc-switch** to flip between the official Anthropic provider and a
+routed gateway (e.g. GLM/z.ai) for Claude Code's *coding* requests, the bridge
+reads cc-switch's local `cc-switch.db` (read-only) each push and reports which
+provider is currently selected. The dashboard shows this as a small "via …"
+badge next to the usage rings.
+
+This is purely informational. `/api/oauth/usage` always reports on the real
+Claude account signed into `~/.claude/.credentials.json` — switching cc-switch's
+`ANTHROPIC_BASE_URL` reroutes where your *prompts* go, not which account the
+usage numbers describe. If cc-switch isn't installed, or its DB can't be read,
+the badge is simply omitted — usage still reports normally.
 
 The bridge fetches Anthropic on the `POLL_MS` cadence **and** immediately when the
 site's **Pull latest** button is pressed (bounded to at most once per ~9s, so
