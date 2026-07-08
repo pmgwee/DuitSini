@@ -39,7 +39,11 @@ export function MiniPlayer() {
     <div
       aria-hidden={!visible}
       className={cn(
-        "fixed inset-x-0 bottom-14 z-30 px-3 transition-all duration-300 ease-out sm:bottom-3 lg:bottom-4",
+        // Anchored above the mobile bottom nav (bottom-14, ~nav height) up to
+        // lg where the nav disappears; offset past the 248px sidebar on lg so
+        // the bar lives in (and aligns with) the content column instead of
+        // overlaying the navbar on iPad/desktop-width viewports.
+        "fixed bottom-20 left-0 right-0 z-30 px-3 transition-all duration-300 ease-out sm:px-6 lg:bottom-3 lg:left-62",
         visible
           ? "translate-y-0 opacity-100"
           : "pointer-events-none translate-y-8 opacity-0",

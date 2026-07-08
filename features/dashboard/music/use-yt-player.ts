@@ -63,7 +63,7 @@ export function useYTPlayer(
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playerReady, setPlayerReady] = useState(false);
-  const [volume, setVolumeState] = useState(100);
+  const [volume, setVolumeState] = useState(50);
   const [muted, setMuted] = useState(false);
 
   // Which on-screen slot the video is docked into (the dashboard card), or null
@@ -92,6 +92,9 @@ export function useYTPlayer(
   volumeRef.current = volume;
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
+  // Debounce timer for persisting volume to the server (one request per drag,
+  // not one per pixel).
+  const saveTimerRef = useRef<number | null>(null);
   // Whether the portal should be shown (a track is loaded) vs. hidden.
   const hasVideoRef = useRef(false);
   hasVideoRef.current = playerReady && current !== null;
@@ -121,6 +124,28 @@ export function useYTPlayer(
       p.setVolume(v);
     }
   }, []);
+
+  // Load the user's saved volume once on mount (default 50 until it arrives),
+  // so their chosen level survives sessions and devices. The volume also lives
+  // in React state for the life of the provider (which wraps the whole app
+  // shell), so it never resets when crossing pages — only on a full reload,
+  // which this fetch re-hydrates.
+  useEffect(() => {
+    let active = true;
+    fetch("/api/yt/volume", { headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!active || typeof d?.volume !== "number") return;
+        setVolumeState(d.volume);
+        applyVolume(d.volume, false);
+      })
+      .catch(() => {
+        /* best-effort: stay at the 50 default */
+      });
+    return () => {
+      active = false;
+    };
+  }, [applyVolume]);
 
   /**
    * Glue the fixed portal over the docked slot's rect (so the video looks
@@ -309,6 +334,19 @@ export function useYTPlayer(
         if (muted) setMuted(false);
         applyVolume(clamped, false);
       }
+      // Persist (debounced) so the chosen level is recalled next session. The
+      // value already lives in state for the life of the provider, so this only
+      // needs to survive full reloads / other devices.
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = window.setTimeout(() => {
+        void fetch("/api/yt/volume", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ volume: clamped }),
+        }).catch(() => {
+          /* best-effort persistence */
+        });
+      }, 500);
     },
     [applyVolume, muted],
   );

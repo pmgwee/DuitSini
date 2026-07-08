@@ -310,7 +310,7 @@ export function MusicWidget() {
           ) : library.isLoading ? (
             <ShelfNote>Loading playlists…</ShelfNote>
           ) : (
-            <ul className="flex max-h-72 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+            <ul className="flex max-h-83 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
               {library.data?.playlists.map((p) => (
                 <li key={p.id}>
                   <button
@@ -417,9 +417,11 @@ function TrackList({
   onPlay: (index: number) => void;
 }) {
   return (
-    // Sized to exactly 6 rows (52px row + 4px gap → 6*52 + 5*4 = 332px = max-h-83)
-    // so 6 tracks are visible at once with no clipped partial row; more scroll
-    // into view within this list rather than being hidden entirely.
+    // Shared by every shelf so the cap is identical across all of them. Rows
+    // are compact (py-1 + 40px thumb ≈ 48px) so 6 rows + gaps (~308px) sit
+    // comfortably under the max-h-83 cap with buffer — the 6th row is never
+    // clipped, even in the Playlists shelf where the back-button trims the
+    // list's available height. Anything beyond 6 scrolls into view.
     <ul className="flex max-h-83 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
       {tracks.map((t, i) => (
         <li key={`${t.videoId}-${i}`}>

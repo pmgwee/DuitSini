@@ -81,6 +81,24 @@ export type Database = {
         }
         Relationships: []
       }
+      music_settings: {
+        Row: {
+          user_id: string
+          volume: number
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          volume?: number
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          volume?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       claude_usage_sessions: {
         Row: {
           created_at: string
