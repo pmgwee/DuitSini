@@ -311,3 +311,87 @@
     opacity: 1;
   }
 }
+
+/* ============================================================
+   Route-transition feedback — instant response on navigation
+   ============================================================ */
+
+/* Skeleton shimmer: a sheen sweeping across a muted placeholder. Theme-aware
+   via currentColor-independent tokens; used by loading.tsx skeletons. */
+@keyframes skeleton-sheen {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--foreground) 7%, transparent);
+  border-radius: var(--radius);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--foreground) 9%, transparent),
+    transparent
+  );
+  animation: skeleton-sheen 1.5s ease-in-out infinite;
+}
+
+/* Top progress bar. Two-stage: a fast "creep" toward ~85% on navigation start
+   (so the click feels instantly acknowledged even before data arrives), then a
+   quick fill + fade on settle. Driven by a data attribute on the element. */
+@keyframes route-bar-creep {
+  0% {
+    transform: scaleX(0.02);
+  }
+  40% {
+    transform: scaleX(0.35);
+  }
+  75% {
+    transform: scaleX(0.68);
+  }
+  100% {
+    transform: scaleX(0.9);
+  }
+}
+.route-bar {
+  transform-origin: 0 50%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--primary) 70%, transparent),
+    var(--primary),
+    var(--ring)
+  );
+  box-shadow: 0 0 10px color-mix(in oklch, var(--primary) 60%, transparent);
+  will-change: transform, opacity;
+}
+.route-bar[data-state="loading"] {
+  opacity: 1;
+  animation: route-bar-creep 8s cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
+}
+.route-bar[data-state="done"] {
+  opacity: 0;
+  transform: scaleX(1);
+  transition:
+    transform 0.2s ease-out,
+    opacity 0.35s ease-out 0.15s;
+}
+.route-bar[data-state="idle"] {
+  opacity: 0;
+  transform: scaleX(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-bar[data-state="loading"] {
+    animation: none;
+    transform: scaleX(0.9);
+  }
+  .skeleton::after {
+    animation: none;
+  }
+}
