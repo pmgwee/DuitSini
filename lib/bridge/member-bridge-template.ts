@@ -64,11 +64,18 @@ async function safeFetch(url, opts) {
   opts.headers = Object.assign({}, opts.headers || {}, { connection: "close" });
   let lastErr;
   for (let i = 0; i < 3; i++) {
-    try { return await fetch(url, opts); }
+    // Per-attempt deadline. A server that accepts the socket but never
+    // responds (a function hanging until the platform kills it, or a stalled
+    // gateway) would otherwise leave this fetch pending until the OS drops it
+    // minutes later - which is what surfaced as a long "fetch failed". Aborting
+    // at 12s lets the loop retry promptly and, failing that, report fast.
+    const ctrl = new AbortController();
+    const timer = setTimeout(function () { ctrl.abort(); }, 12000);
+    try { const r = await fetch(url, Object.assign({}, opts, { signal: ctrl.signal })); return r; }
     catch (e) {
       lastErr = e;
       if (i < 2) await new Promise(function (r) { setTimeout(r, 1500 + i * 1500); });
-    }
+    } finally { clearTimeout(timer); }
   }
   throw lastErr;
 }

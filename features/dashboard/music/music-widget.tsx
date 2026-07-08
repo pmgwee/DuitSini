@@ -417,7 +417,10 @@ function TrackList({
   onPlay: (index: number) => void;
 }) {
   return (
-    <ul className="flex max-h-72 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+    // Sized to exactly 6 rows (52px row + 4px gap → 6*52 + 5*4 = 332px = max-h-83)
+    // so 6 tracks are visible at once with no clipped partial row; more scroll
+    // into view within this list rather than being hidden entirely.
+    <ul className="flex max-h-83 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
       {tracks.map((t, i) => (
         <li key={`${t.videoId}-${i}`}>
           <button
