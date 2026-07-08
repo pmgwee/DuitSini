@@ -48,6 +48,31 @@ let lastFetchAt = 0, lastPullSeen = 0, lastRefreshAt = 0, lastWarn = "", backoff
 const stamp = () => new Date().toLocaleTimeString();
 function warnOnce(m) { if (m === lastWarn) return; lastWarn = m; console.warn("  " + stamp() + "  " + m); }
 
+// fetch() wrapper that fixes the recurring "fetch failed" after sleep/wake or a
+// network change:
+//   (a) sends "connection: close" so undici NEVER reuses a pooled socket. Node
+//       pools keep-alive sockets per host; when the OS tears them down during
+//       sleep/WiFi blips, the pool still holds them as "alive" and the next
+//       cycle reuses a dead socket -> instant TypeError "fetch failed", which
+//       undici does not reliably retry on. connection: close makes every fetch
+//       open a fresh socket, so there is nothing stale to reuse.
+//   (b) retries transient network-layer failures a few times (short delays) so
+//       the brief window right after wake, where DNS/the stack isn't ready,
+//       self-heals instead of surfacing as an error.
+async function safeFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers || {}, { connection: "close" });
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    try { return await fetch(url, opts); }
+    catch (e) {
+      lastErr = e;
+      if (i < 2) await new Promise(function (r) { setTimeout(r, 1500 + i * 1500); });
+    }
+  }
+  throw lastErr;
+}
+
 // Candidate paths for a Claude Code SUBSCRIPTION login, most-specific first.
 // The dedicated dirs (CLAUDE_SUB_CONFIG_DIR, ~/.claude-pro, ~/.claude-sub) keep
 // a stable Pro/Max token even when cc-switch re-routes the main ~/.claude CLI
@@ -89,7 +114,7 @@ async function refresh(creds, path) {
   let lastErr;
   for (const url of TOKEN_ENDPOINTS) {
     let resp;
-    try { resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rt, client_id: OAUTH_CLIENT_ID }) }); }
+    try { resp = await safeFetch(url, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rt, client_id: OAUTH_CLIENT_ID }) }); }
     catch (e) { lastErr = e; continue; }
     if (resp.status === 404) { lastErr = new Error("token endpoint 404"); continue; }
     if (resp.status === 429) { throw Object.assign(new Error("Anthropic busy; will retry."), { code: 429 }); }
@@ -121,7 +146,7 @@ async function getToken(creds, path) {
 }
 
 async function fetchUsage(token) {
-  const r = await fetch(USAGE_ENDPOINT, { headers: { Authorization: "Bearer " + token, "anthropic-beta": "oauth-2025-04-20", "User-Agent": UA, "Content-Type": "application/json" } });
+  const r = await safeFetch(USAGE_ENDPOINT, { headers: { Authorization: "Bearer " + token, "anthropic-beta": "oauth-2025-04-20", "User-Agent": UA, "Content-Type": "application/json" } });
   if (r.status === 401) throw Object.assign(new Error("Sign-in rejected; will refresh."), { code: 401 });
   if (r.status === 429) throw Object.assign(new Error("Anthropic busy; will retry."), { code: 429 });
   if (r.status === 403) throw new Error("Usage is only available on a Claude Pro or Max plan (not a free plan or a different provider).");
@@ -181,7 +206,7 @@ async function fetchAnthropicSnapshot(creds, path) {
 // window; unit=6/number=1 is the weekly window. TIME_LIMIT rows (MCP tools) are
 // skipped. The key stays on this machine - only the percentages are sent.
 async function fetchGlmUsage(provider) {
-  const r = await fetch(provider.monitorUrl, { headers: { Authorization: provider.authToken, "Accept-Language": "en-US,en", "Content-Type": "application/json" } });
+  const r = await safeFetch(provider.monitorUrl, { headers: { Authorization: provider.authToken, "Accept-Language": "en-US,en", "Content-Type": "application/json" } });
   if (r.status === 401 || r.status === 403) throw new Error("Your GLM plan key was rejected (" + r.status + ").");
   if (r.status === 429) throw Object.assign(new Error("GLM provider busy; will retry."), { code: 429 });
   if (!r.ok) throw new Error("GLM usage check failed (" + r.status + ").");
@@ -210,12 +235,12 @@ async function pushStreams(streams) {
     five_hour: primary.five_hour, seven_day: primary.seven_day, limits: primary.limits, provider: primary.provider,
     streams: streams,
   };
-  const r = await fetch(INGEST_URL, { method: "POST", headers: { Authorization: "Bearer " + BRIDGE_TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const r = await safeFetch(INGEST_URL, { method: "POST", headers: { Authorization: "Bearer " + BRIDGE_TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) { const t = await r.text().catch(function () { return ""; }); throw new Error("Sending to dashboard failed (" + r.status + ")" + (t ? ": " + t.slice(0, 120) : "")); }
 }
 
 async function checkPull() {
-  try { const r = await fetch(PULL_URL, { headers: { Authorization: "Bearer " + BRIDGE_TOKEN } }); if (!r.ok) return 0; const j = await r.json(); return j.pull_requested_at ? Date.parse(j.pull_requested_at) : 0; }
+  try { const r = await safeFetch(PULL_URL, { headers: { Authorization: "Bearer " + BRIDGE_TOKEN } }); if (!r.ok) return 0; const j = await r.json(); return j.pull_requested_at ? Date.parse(j.pull_requested_at) : 0; }
   catch { return 0; }
 }
 
@@ -255,8 +280,18 @@ async function loop() {
     const since = Date.now() - lastFetchAt;
     if ((pull || since >= PUSH_MS) && since >= MIN_GAP_MS) { await fetchAndPush(pull ? "refresh requested" : ""); backoff = 0; }
   } catch (e) {
-    if (e.code === 429) { backoff = Math.min(300000, Math.max(45000, (backoff || PUSH_MS) * 2)); warnOnce("busy - waiting " + Math.round(backoff / 1000) + "s"); }
-    else warnOnce(e.message);
+    if (e && e.code === 429) {
+      backoff = Math.min(300000, Math.max(45000, (backoff || PUSH_MS) * 2));
+      warnOnce("busy - waiting " + Math.round(backoff / 1000) + "s");
+    } else {
+      // Network/server error (typical after sleep/wake or a transient blip).
+      // Retry SOON rather than climbing the 429 ladder - we can't be "busy" if
+      // we never reached the server. Capped short so the bridge recovers within
+      // seconds once the connection is back, instead of sitting dormant for
+      // minutes (which is what made restarts feel necessary).
+      backoff = 15000;
+      warnOnce((e && e.message) || "fetch failed");
+    }
   } finally { setTimeout(loop, backoff || COMMAND_MS); }
 }
 
