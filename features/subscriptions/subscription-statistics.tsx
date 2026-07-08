@@ -196,7 +196,7 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
                         style={{ background: r.color }}
                       />
                       <span className="flex-1 text-muted-foreground">{r.label}</span>
-                      <span className="font-medium">
+                      <span className="text-right font-medium tabular-nums">
                         {formatCurrency(r.value, HOME_CURRENCY)}
                       </span>
                     </li>

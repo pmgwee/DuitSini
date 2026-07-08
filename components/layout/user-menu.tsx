@@ -54,7 +54,7 @@ export function UserMenu({ user }: { user: AuthUser }) {
         aria-expanded={open}
         className="flex items-center gap-2 rounded-full border border-border/60 bg-surface/50 py-1 pl-1 pr-2 transition-colors hover:bg-accent"
       >
-        <span className="grid size-7 place-items-center rounded-full bg-gradient-to-br from-primary/45 to-info/30 text-[11px] font-semibold text-primary-foreground ring-1 ring-border">
+        <span className="grid size-7 place-items-center rounded-full bg-gradient-to-br from-primary to-info text-[11px] font-semibold text-primary-foreground ring-1 ring-border">
           {initials}
         </span>
         <ChevronDown className="size-3.5 text-muted-foreground" />

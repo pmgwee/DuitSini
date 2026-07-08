@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Children, cloneElement, useId, useState, type ReactElement } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Ban, Loader2, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
@@ -405,21 +405,28 @@ function Field({
   hint?: string;
   error?: string;
   required?: boolean;
-  children: React.ReactNode;
+  children: ReactElement;
 }) {
+  // Render the label as a SIBLING of the control (linked via htmlFor), NOT a
+  // wrapping <label>. A wrapping <label> forwards a synthetic click to its
+  // first labelable control — so clicking a dropdown option would re-toggle
+  // the Select/Combobox open right after it closed. A sibling label avoids that
+  // while keeping the accessible name and click-label-to-focus for native inputs.
+  const fieldId = useId();
+  const child = Children.only(children) as ReactElement<{ id?: string }>;
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-2 text-sm font-medium">
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={fieldId} className="flex items-center gap-2 text-sm font-medium">
         {label}
         {required ? <span className="text-danger">*</span> : null}
         {hint ? <span className="text-xs font-normal text-muted-foreground">{hint}</span> : null}
-      </span>
-      {children}
+      </label>
+      {cloneElement(child, { id: child.props.id ?? fieldId })}
       {error ? (
         <span role="alert" className="text-xs text-danger">
           {error}
         </span>
       ) : null}
-    </label>
+    </div>
   );
 }

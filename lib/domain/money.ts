@@ -2,10 +2,20 @@ import type { BillingCycle } from "@/lib/constants";
 
 const ZERO_DECIMAL_CURRENCIES = new Set(["JPY", "KRW", "VND", "CLP", "ISK"]);
 
+/**
+ * Fixed locale for currency formatting. Passing `undefined` means "use the
+ * runtime default locale", which makes the server (Node) and the browser format
+ * the same value differently — e.g. Node's "MYR 40.05" vs a browser's
+ * "RM 40.05" — and React flags that as a hydration mismatch on SSR'd totals.
+ * en-US gives the familiar symbols ($, RM, €, £, ¥, S$) and is identical on
+ * both runtimes.
+ */
+const CURRENCY_LOCALE = "en-US";
+
 export function formatCurrency(amount: number, currency: string): string {
   const maximumFractionDigits = ZERO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(CURRENCY_LOCALE, {
       style: "currency",
       currency,
       maximumFractionDigits,
@@ -20,7 +30,7 @@ export function formatCurrency(amount: number, currency: string): string {
 export function formatCompactCurrency(amount: number, currency: string): string {
   if (Math.abs(amount) < 1000) return formatCurrency(amount, currency);
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(CURRENCY_LOCALE, {
       style: "currency",
       currency,
       notation: "compact",

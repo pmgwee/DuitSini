@@ -161,7 +161,7 @@ export function MusicWidget() {
           <div ref={slotRef} className="h-full w-full" />
         </div>
         {!player.current && (
-          <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-surface-2/80 to-black/70">
+          <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-surface-2/80 to-background">
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <Music4 className="size-8 opacity-60" />
               <span className="text-xs">Pick a track to start listening</span>

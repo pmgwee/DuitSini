@@ -49,7 +49,7 @@ function FlipDigit({ value }: { value: string }) {
   return (
     <span
       aria-hidden="true"
-      className="relative grid min-w-13 place-items-center rounded-xl bg-surface-2 px-3 py-3 ring-1 ring-inset ring-white/5 sm:min-w-18 sm:px-4 sm:py-4"
+      className="relative grid min-w-13 place-items-center rounded-xl bg-surface-2 px-3 py-3 ring-1 ring-inset ring-foreground/5 sm:min-w-18 sm:px-4 sm:py-4"
       style={{ perspective: "500px" }}
     >
       <span

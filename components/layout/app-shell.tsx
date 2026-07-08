@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { CalendarDays, FileText, LayoutDashboard, Sparkles, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserMenu, type AuthUser } from "@/components/layout/user-menu";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
 import { useMusicPlayer } from "@/features/dashboard/music/player-context";
 import { MiniPlayer } from "@/features/dashboard/music/mini-player";
@@ -79,6 +80,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
             Subscription Agent
           </span>
           <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
             <AddSubscriptionButton size="sm" label="Add" />
             {user ? <UserMenu user={user} /> : null}
           </div>

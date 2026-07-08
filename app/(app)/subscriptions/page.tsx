@@ -3,7 +3,6 @@ import { getEffectiveUserId, getSubscriptionRepository } from "@/lib/data";
 import { toISODate } from "@/lib/domain/dates";
 import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
 import { SubscriptionsView } from "@/features/subscriptions/subscriptions-view";
-import { CategoryDock } from "@/features/subscriptions/category-dock";
 
 export default async function SubscriptionsPage() {
   const userId = await getEffectiveUserId();
@@ -22,8 +21,6 @@ export default async function SubscriptionsPage() {
       />
 
       <SubscriptionsView subscriptions={subscriptions} todayISO={todayISO} />
-
-      <CategoryDock subscriptions={subscriptions} />
     </div>
   );
 }

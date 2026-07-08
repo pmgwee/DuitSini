@@ -7,6 +7,7 @@ import type { Subscription } from "@/types/subscription";
 import { cn } from "@/lib/utils";
 import { SubscriptionCalendar } from "./subscription-calendar";
 import { SubscriptionList } from "./subscription-list";
+import { CategoryDock } from "./category-dock";
 
 // Lazy-load so Recharts is only fetched when the Statistics tab is opened.
 const SubscriptionStatistics = dynamic(
@@ -93,7 +94,12 @@ export function SubscriptionsView({
         role="tabpanel"
         aria-labelledby={`subscriptions-tab-${tab}`}
         tabIndex={0}
-        className="focus-visible:outline-none"
+        className={cn(
+          "focus-visible:outline-none",
+          // When the dock is fixed (Statistics), reserve space so the last chart
+          // row can scroll clear of the pinned bar.
+          tab === "statistics" && "pb-28",
+        )}
       >
         {tab === "calendar" ? (
           <SubscriptionCalendar subscriptions={subscriptions} todayISO={todayISO} />
@@ -103,6 +109,8 @@ export function SubscriptionsView({
           <SubscriptionStatistics subscriptions={subscriptions} />
         )}
       </div>
+
+      <CategoryDock subscriptions={subscriptions} pinned={tab === "statistics"} />
     </div>
   );
 }

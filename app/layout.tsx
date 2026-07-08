@@ -4,6 +4,8 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { Providers } from "./providers";
+import { Analytics } from '@vercel/analytics/next';
+
 
 export const metadata: Metadata = {
   title: {
@@ -16,8 +18,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  colorScheme: "dark",
-  themeColor: "#0b0b12",
+  colorScheme: "dark light",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f8" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0b12" },
+  ],
 };
 
 export default function RootLayout({
@@ -26,11 +31,12 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark ${GeistSans.variable} ${GeistMono.variable}`}
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
       suppressHydrationWarning
     >
       <body>
         <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
   );
