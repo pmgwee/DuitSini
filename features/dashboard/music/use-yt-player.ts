@@ -147,6 +147,21 @@ export function useYTPlayer(
     };
   }, [applyVolume]);
 
+  /** Debounced persist of volume to the server — shared by our slider and the
+      iframe-sync poll so changes made via either control are saved. */
+  const persistVolume = useCallback((v: number) => {
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      void fetch("/api/yt/volume", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volume: v }),
+      }).catch(() => {
+        /* best-effort persistence */
+      });
+    }, 500);
+  }, []);
+
   /**
    * Glue the fixed portal over the docked slot's rect (so the video looks
    * inline in the card), or park it off-screen when there's no slot. Never
@@ -334,21 +349,10 @@ export function useYTPlayer(
         if (muted) setMuted(false);
         applyVolume(clamped, false);
       }
-      // Persist (debounced) so the chosen level is recalled next session. The
-      // value already lives in state for the life of the provider, so this only
-      // needs to survive full reloads / other devices.
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = window.setTimeout(() => {
-        void fetch("/api/yt/volume", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ volume: clamped }),
-        }).catch(() => {
-          /* best-effort persistence */
-        });
-      }, 500);
+      // Persist (debounced) so the chosen level is recalled next session.
+      persistVolume(clamped);
     },
-    [applyVolume, muted],
+    [applyVolume, muted, persistVolume],
   );
 
   const toggleMute = useCallback(() => {
@@ -370,6 +374,31 @@ export function useYTPlayer(
     }, 1000);
     return () => window.clearInterval(id);
   }, [isPlaying]);
+
+  // Mirror the iframe's actual volume/mute into state on a slow cadence,
+  // whenever the player exists — so changes made via YouTube's own UI (e.g. the
+  // docked dashboard player, which has no slider of ours) propagate to the
+  // mini-player on other pages and persist. Values that match our state are
+  // skipped, so there's no feedback loop with our own setVolume.
+  useEffect(() => {
+    if (!playerReady) return;
+    const id = window.setInterval(() => {
+      const p = playerRef.current;
+      if (!p) return;
+      try {
+        const iv = Math.round(p.getVolume());
+        if (Number.isFinite(iv) && iv >= 0 && iv <= 100 && iv !== volumeRef.current) {
+          setVolumeState(iv);
+          persistVolume(iv);
+        }
+        const im = p.isMuted();
+        if (im !== mutedRef.current) setMuted(im);
+      } catch {
+        /* getters can be briefly unavailable right after load */
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [playerReady, persistVolume]);
 
   return {
     registerSlot,

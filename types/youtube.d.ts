@@ -17,6 +17,7 @@ export interface YTPlayer {
   setVolume(volume: number): void;
   mute(): void;
   unMute(): void;
+  isMuted(): boolean;
   /** The underlying <iframe> — used to reparent the live player across slots. */
   getIframe(): HTMLIFrameElement;
   destroy(): void;

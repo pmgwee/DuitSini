@@ -12,6 +12,9 @@ import {
   Pause,
   Play,
   Search,
+  Volume1,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MusicPlaylist, MusicTrack } from "@/types/music";
@@ -119,6 +122,7 @@ export function MusicWidget() {
   };
 
   const pct = player.duration > 0 ? Math.min(100, (player.position / player.duration) * 100) : 0;
+  const VolIcon = player.muted || player.volume === 0 ? VolumeX : player.volume >= 50 ? Volume2 : Volume1;
 
   const connectHint = (
     <div className="rounded-xl border border-border/60 bg-surface-2/40 px-3 py-3 text-xs text-muted-foreground">
@@ -195,7 +199,11 @@ export function MusicWidget() {
           <span>{formatTime(player.duration)}</span>
         </div>
 
-        <div className="mt-2 flex items-center justify-center gap-3">
+        <div className="mt-2 flex items-center gap-3">
+          {/* Balance spacer keeps the transport centered; the volume control
+              sits at the right edge, mirroring the floating mini-player so the
+              two stay visually consistent across pages. */}
+          <div className="flex-1" aria-hidden="true" />
           <button
             type="button"
             aria-label="Previous"
@@ -229,6 +237,26 @@ export function MusicWidget() {
           >
             <ChevronRight className="size-5" />
           </button>
+          <div className="flex flex-1 items-center justify-end gap-1">
+            <button
+              type="button"
+              aria-label={player.muted ? "Unmute" : "Mute"}
+              onClick={player.toggleMute}
+              className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <VolIcon className="size-4" />
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              aria-label="Volume"
+              value={player.muted ? 0 : player.volume}
+              onChange={(e) => player.setVolume(Number(e.target.value))}
+              className="vol-slider h-1 w-20 cursor-pointer accent-primary sm:w-24"
+            />
+          </div>
         </div>
       </div>
 
