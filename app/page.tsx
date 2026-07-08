@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, CalendarDays, LayoutDashboard, Laptop } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HeroVideo } from "@/components/hero-video";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function Home() {
@@ -20,17 +21,7 @@ export default async function Home() {
       {/* Background video — fullscreen, autoplay/muted/loop/playsinline, no audio.
           Decorative: aria-hidden + pointer-events-none so it never steals focus or
           clicks from the foreground content. */}
-      <video
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-        src="/upscaled-video%20(1).mp4"
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
-        aria-hidden="true"
-        tabIndex={-1}
-      />
+      <HeroVideo src="/upscaled-video%20(1).mp4" />
       {/* Video is at 100% opacity — no scrim. Foreground legibility comes from
           white text + per-element drop-shadows, and a dark badge chip. */}
 
