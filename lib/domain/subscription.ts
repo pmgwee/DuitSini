@@ -75,12 +75,17 @@ export function isTrialConvertingWithin(sub: Subscription, days: number): boolea
   return d >= 0 && d <= days;
 }
 
+/** Two-letter monogram for arbitrary text (used when no brand logo is known). */
+export function monogramFor(source: string): string {
+  const s = (source || "").trim();
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return s.slice(0, 2).toUpperCase() || "??";
+}
+
 /** Two-letter monogram used when no provider icon is available. */
 export function getMonogram(sub: Subscription): string {
-  const source = (sub.provider || sub.name).trim();
-  const parts = source.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return source.slice(0, 2).toUpperCase() || "??";
+  return monogramFor(sub.provider || sub.name);
 }
 
 /** Fields needed to derive the cached `next_renewal_at` instant. */

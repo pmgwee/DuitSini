@@ -567,6 +567,8 @@ export type Database = {
         | "finance"
         | "education"
         | "cloud"
+        | "news"
+        | "health"
         | "other"
       usage_state: "light" | "medium" | "heavy"
     }
@@ -719,6 +721,8 @@ export const Constants = {
         "finance",
         "education",
         "cloud",
+        "news",
+        "health",
         "other",
       ],
       usage_state: ["light", "medium", "heavy"],

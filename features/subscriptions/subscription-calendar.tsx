@@ -173,7 +173,7 @@ export function SubscriptionCalendar({
                 (hasTrial ? ", trial converts" : "")
               }
               className={cn(
-                "relative flex min-h-16 flex-col gap-1 rounded-xl border p-1.5 text-left transition-colors sm:min-h-24",
+                "group relative flex min-h-16 flex-col gap-1 rounded-xl border p-1.5 text-left transition-colors sm:min-h-24",
                 cell.inMonth ? "bg-surface/40" : "bg-transparent opacity-40",
                 isSelected
                   ? "border-primary/60 ring-1 ring-primary/40"
@@ -191,12 +191,38 @@ export function SubscriptionCalendar({
                 {cell.day}
               </span>
               {charges.length > 0 && (
-                <div className="mt-auto flex flex-wrap items-center gap-0.5">
+                <div className="mt-auto flex items-center">
                   {charges.slice(0, MAX_ICONS_PER_CELL).map((c, i) => (
-                    <SubscriptionIcon key={c.sub.id + "-" + i} sub={c.sub} size="xs" />
+                    <SubscriptionIcon
+                      key={c.sub.id + "-" + i}
+                      sub={c.sub}
+                      size="sm"
+                      className="ring-0 transition-transform duration-150 ease-out group-hover:-translate-y-0.5"
+                      style={{
+                        // Leftmost icon sits on top of the stack (matches the
+                        // reference overlap), each later icon tucks behind.
+                        zIndex: MAX_ICONS_PER_CELL - i,
+                        marginLeft: i === 0 ? 0 : -10,
+                        // A crisp high-contrast separator ring (dark in light
+                        // mode, white in dark mode via light-dark()) so each
+                        // icon reads as a distinct overlapping avatar, plus a
+                        // soft drop shadow for depth. This is what makes the
+                        // stack visibly "premium" instead of blending into the
+                        // cell — the earlier bg-tinted ring was nearly invisible.
+                        boxShadow:
+                          "0 1px 2px rgba(0,0,0,0.3), 0 0 0 1.5px light-dark(rgba(0,0,0,0.82), rgba(255,255,255,0.95))",
+                      }}
+                    />
                   ))}
                   {charges.length > MAX_ICONS_PER_CELL && (
-                    <span className="px-0.5 text-[9px] font-semibold text-muted-foreground">
+                    <span
+                      className="ml-1.5 rounded-full px-1.5 py-px text-[9px] font-semibold leading-none text-muted-foreground"
+                      style={{
+                        zIndex: 1,
+                        backgroundColor: "color-mix(in oklch, var(--surface) 70%, transparent)",
+                        boxShadow: "0 0 0 1px var(--border)",
+                      }}
+                    >
                       +{charges.length - MAX_ICONS_PER_CELL}
                     </span>
                   )}
@@ -224,7 +250,11 @@ export function SubscriptionCalendar({
       >
         <DayCharges iso={modalISO ?? todayISO} charges={modalCharges} />
         <div className="mt-4 flex justify-end border-t border-border/60 pt-4">
-          <AddSubscriptionButton size="sm" label="Add subscription" />
+          <AddSubscriptionButton
+            size="sm"
+            label="Add subscription"
+            defaultStartDate={modalISO ?? todayISO}
+          />
         </div>
       </Dialog>
     </div>

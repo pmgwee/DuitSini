@@ -8,6 +8,7 @@ import {
   searchProviderPresets,
   type ProviderPreset,
 } from "@/lib/providers";
+import { ProviderMark } from "./provider-mark";
 
 /**
  * Name field with a preset picker. Users type freely (the value is always their
@@ -151,15 +152,13 @@ export function ProviderCombobox({
                   isActive ? "bg-accent text-foreground" : "text-foreground/90",
                 )}
               >
-                <span
-                  className="grid size-6 shrink-0 place-items-center rounded-md text-[10px] font-semibold ring-1 ring-inset ring-white/10"
-                  style={{
-                    backgroundColor: `color-mix(in oklch, ${preset.color} 24%, transparent)`,
-                    color: preset.color,
-                  }}
-                >
-                  {preset.name.slice(0, 2).toUpperCase()}
-                </span>
+                <ProviderMark
+                  name={preset.name}
+                  color={preset.color}
+                  slug={preset.icon}
+                  domain={preset.domain}
+                  size="sm"
+                />
                 <span className="flex-1 truncate">{preset.name}</span>
                 {isChosen ? <Check className="size-4 shrink-0 text-primary" /> : null}
               </li>

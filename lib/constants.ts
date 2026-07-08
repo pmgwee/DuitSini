@@ -9,6 +9,8 @@ export const CATEGORIES = [
   "finance",
   "education",
   "cloud",
+  "news",
+  "health",
   "other",
 ] as const;
 
@@ -25,6 +27,8 @@ export const CATEGORY_META: Record<Category, { label: string; colorVar: string }
   finance: { label: "Finance", colorVar: "var(--cat-finance)" },
   education: { label: "Education", colorVar: "var(--cat-education)" },
   cloud: { label: "Cloud", colorVar: "var(--cat-cloud)" },
+  news: { label: "News", colorVar: "var(--cat-news)" },
+  health: { label: "Health", colorVar: "var(--cat-health)" },
   other: { label: "Other", colorVar: "var(--cat-other)" },
 };
 
@@ -44,6 +48,8 @@ export const CATEGORY_COLOR: Record<Category, string> = {
   finance: "oklch(0.78 0.14 142)",
   education: "oklch(0.83 0.13 96)",
   cloud: "oklch(0.79 0.1 232)",
+  news: "oklch(0.58 0.14 257)",
+  health: "oklch(0.74 0.14 165)",
   other: "oklch(0.72 0.02 265)",
 };
 

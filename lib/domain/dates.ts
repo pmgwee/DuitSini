@@ -26,15 +26,25 @@ export function daysUntil(value: string, from: Date = new Date()): number {
   return Math.round((target - base) / 86_400_000);
 }
 
+/**
+ * Fixed locale for all date formatting. Passing `undefined` means "use the
+ * runtime default locale", which makes the server (Node) and the browser format
+ * the same date differently — e.g. Node's "29 Jun 2026" vs a US browser's
+ * "Jun 29, 2026" — and React flags that as a hydration mismatch (the calendar
+ * cells render `formatLongDate` into their aria-label during SSR). en-GB gives
+ * day-first dates (29 Jun 2026), matching the Malaysian convention.
+ */
+const DATE_LOCALE = "en-GB";
+
 export function formatShortDate(value: string): string {
-  return parseISODate(value).toLocaleDateString(undefined, {
+  return parseISODate(value).toLocaleDateString(DATE_LOCALE, {
     day: "numeric",
     month: "short",
   });
 }
 
 export function formatLongDate(value: string): string {
-  return parseISODate(value).toLocaleDateString(undefined, {
+  return parseISODate(value).toLocaleDateString(DATE_LOCALE, {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -42,7 +52,7 @@ export function formatLongDate(value: string): string {
 }
 
 export function formatMonthYear(date: Date): string {
-  return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  return date.toLocaleDateString(DATE_LOCALE, { month: "long", year: "numeric" });
 }
 
 /** Relative phrasing for a civil date, e.g. "in 3 days", "today", "2 days ago". */

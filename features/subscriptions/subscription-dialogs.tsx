@@ -13,10 +13,13 @@ export function AddSubscriptionButton({
   className,
   size,
   label = "Add subscription",
+  defaultStartDate,
 }: {
   className?: string;
   size?: "sm" | "default" | "lg";
   label?: string;
+  /** Initial start date (e.g. the calendar day the user clicked "Add" from). */
+  defaultStartDate?: string;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -36,7 +39,10 @@ export function AddSubscriptionButton({
         title="Add subscription"
         description="Track a new recurring charge, trial, or bill."
       >
-        <SubscriptionForm onDone={() => setOpen(false)} />
+        <SubscriptionForm
+          defaultStartDate={defaultStartDate}
+          onDone={() => setOpen(false)}
+        />
       </Dialog>
     </>
   );

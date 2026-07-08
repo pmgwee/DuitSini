@@ -67,9 +67,12 @@ interface FieldValues {
 export function SubscriptionForm({
   subscription,
   onDone,
+  defaultStartDate,
 }: {
   subscription?: Subscription | null;
   onDone: () => void;
+  /** Initial start date for the create flow (e.g. the clicked calendar day). */
+  defaultStartDate?: string;
 }) {
   const mode: "create" | "edit" = subscription ? "edit" : "create";
   const [submitting, setSubmitting] = useState(false);
@@ -92,7 +95,7 @@ export function SubscriptionForm({
       billingCycle: subscription?.billingCycle ?? "monthly",
       intervalCount: subscription?.intervalCount ?? 1,
       planType: subscription?.planType ?? "",
-      startDate: subscription?.startDate ?? toISODate(new Date()),
+      startDate: subscription?.startDate ?? defaultStartDate ?? toISODate(new Date()),
       isTrial: subscription?.isTrial ?? false,
       freeTrialEndAt: subscription?.freeTrialEndAt ?? "",
       notes: subscription?.notes ?? "",
