@@ -88,6 +88,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { name: "Adobe", category: "saas", color: "#eb1000", domain: "adobe.com", keywords: ["creative cloud", "photoshop", "illustrator", "lightroom", "acrobat"] },
   { name: "Canva", category: "saas", color: "#00c4cc", domain: "canva.com", keywords: [] },
   { name: "Slack", category: "saas", color: "#611f69", domain: "slack.com", keywords: [] },
+  { name: "Meta", category: "other", color: "#0467df", icon: "meta", domain: "meta.com", keywords: ["facebook", "instagram", "whatsapp", "threads", "meta verified", "meta quest", "quest", "horizon", "oculus"] },
   { name: "Zoom", category: "saas", color: "#2d8cff", icon: "zoom", domain: "zoom.us", keywords: [] },
   { name: "Linear", category: "saas", color: "#5e6ad2", icon: "linear", domain: "linear.app", keywords: [] },
   { name: "Dropbox", category: "cloud", color: "#0061ff", icon: "dropbox", domain: "dropbox.com", keywords: [] },
@@ -167,21 +168,36 @@ export function findProviderPreset(name: string | null | undefined): ProviderPre
 }
 
 /**
- * Rank presets against a free-text query for the combobox. Empty query returns
- * the full list (in catalog order). Prefix matches rank above substring matches.
+ * Split text into lowercase alphanumeric word tokens (e.g. "New York Times" →
+ * ["new","york","times"], "iCloud+" → ["icloud"]). Used for word-boundary
+ * matching so a query matches the START of any word, not any mid-word substring.
  */
-export function searchProviderPresets(query: string, limit = 8): ProviderPreset[] {
+function tokenize(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * Rank presets against a free-text query for the combobox. An EMPTY query
+ * returns the WHOLE catalog (the list scrolls). A typed query matches only on
+ * PREFIXES / WORD BOUNDARIES — never loose mid-word substrings — so:
+ *   • "ob"   → Obsidian (starts with "ob"), NOT Adobe (which merely contains "ob")
+ *   • "new"  → New York Times
+ *   • "york" → New York Times (matches the word "York")
+ *   • "prime"/"aws" → Amazon (keyword words)
+ * Score 0 = the query is a prefix of the full name; score 1 = a prefix of some
+ * word in the name or keywords. Capped at `limit`.
+ */
+export function searchProviderPresets(query: string, limit = 16): ProviderPreset[] {
   const q = normalize(query);
-  if (!q) return PROVIDER_PRESETS.slice(0, limit);
+  if (!q) return PROVIDER_PRESETS;
 
   const scored: Array<{ p: ProviderPreset; score: number }> = [];
   for (const p of PROVIDER_PRESETS) {
-    const haystacks = [p.name, ...(p.keywords ?? [])].map(normalize);
+    const fullName = normalize(p.name);
+    const tokens = [...tokenize(p.name), ...(p.keywords ?? []).flatMap(tokenize)];
     let best = Infinity;
-    for (const h of haystacks) {
-      if (h.startsWith(q)) best = Math.min(best, 0);
-      else if (h.includes(q)) best = Math.min(best, 1);
-    }
+    if (fullName.startsWith(q)) best = 0;
+    else if (tokens.some((t) => t.startsWith(q))) best = 1;
     if (best !== Infinity) scored.push({ p, score: best });
   }
   scored.sort((a, b) => a.score - b.score);

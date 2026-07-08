@@ -36,7 +36,7 @@ export function ProviderCombobox({
   const listRef = useRef<HTMLUListElement>(null);
   const listboxId = useId();
 
-  const matches = searchProviderPresets(value, 8);
+  const matches = searchProviderPresets(value);
   // Show a check on the row when the typed value is exactly a known provider.
   const exact = findProviderPreset(value);
 
@@ -131,7 +131,7 @@ export function ProviderCombobox({
           id={listboxId}
           role="listbox"
           tabIndex={-1}
-          className="absolute left-0 top-[calc(100%+0.25rem)] z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-border/60 bg-surface p-1 shadow-xl shadow-black/40"
+          className="absolute left-0 top-[calc(100%+0.25rem)] z-50 max-h-30 w-full overflow-y-auto rounded-xl border border-border/60 bg-surface p-1 shadow-xl shadow-black/40"
         >
           {matches.map((preset, i) => {
             const isActive = i === activeIndex;

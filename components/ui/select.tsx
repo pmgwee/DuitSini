@@ -156,7 +156,7 @@ export function Select({
           aria-label={ariaLabel}
           tabIndex={-1}
           className={cn(
-            "absolute left-0 z-50 max-h-64 w-full overflow-y-auto rounded-xl border border-border/60 bg-surface p-1 shadow-xl shadow-black/40 outline-none",
+            "absolute left-0 z-50 max-h-30 w-full overflow-y-auto rounded-xl border border-border/60 bg-surface p-1 shadow-xl shadow-black/40 outline-none",
             flipUp ? "bottom-[calc(100%+0.25rem)]" : "top-[calc(100%+0.25rem)]",
           )}
         >
