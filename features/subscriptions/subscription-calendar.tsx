@@ -5,7 +5,7 @@ import { addMonths } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Subscription } from "@/types/subscription";
 import { CATEGORY_META } from "@/lib/constants";
-import { chargeDatesInRange, isActive } from "@/lib/domain/subscription";
+import { chargeDatesInRange, isActive, subscriptionsChargingInRange } from "@/lib/domain/subscription";
 import { calendarGrid, monthBounds, WEEKDAY_LABELS } from "@/lib/domain/calendar";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
 import { myrEquivalentOf, toMYR } from "@/lib/domain/fx";
@@ -13,6 +13,7 @@ import { formatLongDate, formatMonthYear, toISODate } from "@/lib/domain/dates";
 import { cn } from "@/lib/utils";
 import { Dialog } from "@/components/ui/dialog";
 import { SubscriptionIcon } from "./subscription-icon";
+import { SubscriptionRow } from "./subscription-list";
 import {
   AddSubscriptionButton,
   EditSubscriptionButton,
@@ -243,6 +244,8 @@ export function SubscriptionCalendar({
         Tap a day to see its charges · totals in MYR (RM)
       </p>
 
+      <MonthChargeList subscriptions={subscriptions} year={year} month={month} />
+
       <Dialog
         open={modalISO !== null}
         onClose={() => setModalISO(null)}
@@ -257,6 +260,49 @@ export function SubscriptionCalendar({
           />
         </div>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * The focused month's charging subscriptions, listed as the same cards used in
+ * the "All" tab. Renders below the calendar so the month's renewals are
+ * readable as a list (the grid shows them as day icons). Synced to the
+ * calendar's cursor — navigating months updates the list.
+ */
+function MonthChargeList({
+  subscriptions,
+  year,
+  month,
+}: {
+  subscriptions: Subscription[];
+  year: number;
+  month: number;
+}) {
+  const items = useMemo(() => {
+    const { startISO, endISO } = monthBounds(year, month);
+    return subscriptionsChargingInRange(subscriptions, startISO, endISO).sort((a, b) =>
+      a.dates[0].localeCompare(b.dates[0]),
+    );
+  }, [subscriptions, year, month]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-2 flex flex-col gap-3">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold tracking-tight">
+          {formatMonthYear(new Date(year, month, 1))} renewals
+        </h3>
+        <span className="text-xs text-muted-foreground">
+          {items.length} {items.length === 1 ? "subscription" : "subscriptions"}
+        </span>
+      </div>
+      <ul className="flex flex-col divide-y divide-border/50 rounded-2xl border border-border/60 bg-surface/40">
+        {items.map((it) => (
+          <SubscriptionRow key={it.sub.id} sub={it.sub} />
+        ))}
+      </ul>
     </div>
   );
 }

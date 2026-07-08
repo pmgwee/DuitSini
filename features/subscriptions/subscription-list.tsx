@@ -119,7 +119,7 @@ export function SubscriptionList({ subscriptions }: { subscriptions: Subscriptio
   );
 }
 
-function SubscriptionRow({ sub }: { sub: Subscription }) {
+export function SubscriptionRow({ sub }: { sub: Subscription }) {
   const status = getStatus(sub);
   const meta = STATUS_META[status];
   const monthlyMYR = roundMoney(toMYR(grossMonthlyCost(sub), sub.currency));

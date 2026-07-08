@@ -94,12 +94,7 @@ export function SubscriptionsView({
         role="tabpanel"
         aria-labelledby={`subscriptions-tab-${tab}`}
         tabIndex={0}
-        className={cn(
-          "focus-visible:outline-none",
-          // When the dock is fixed (Statistics), reserve space so the last chart
-          // row can scroll clear of the pinned bar.
-          tab === "statistics" && "pb-28",
-        )}
+        className="focus-visible:outline-none"
       >
         {tab === "calendar" ? (
           <SubscriptionCalendar subscriptions={subscriptions} todayISO={todayISO} />
@@ -110,7 +105,11 @@ export function SubscriptionsView({
         )}
       </div>
 
-      <CategoryDock subscriptions={subscriptions} pinned={tab === "statistics"} />
+      {/* The dock is only relevant where there are charges to summarize — hide
+          it on Statistics (charts carry their own totals there). */}
+      {tab !== "statistics" ? (
+        <CategoryDock subscriptions={subscriptions} todayISO={todayISO} />
+      ) : null}
     </div>
   );
 }

@@ -1,31 +1,39 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { Subscription } from "@/types/subscription";
 import { CATEGORIES, CATEGORY_META } from "@/lib/constants";
-import { isActive, monthlyAmount } from "@/lib/domain/subscription";
-import { formatCompactCurrency, roundMoney } from "@/lib/domain/money";
+import {
+  isActive,
+  monthlyAmount,
+  subscriptionsChargingInRange,
+} from "@/lib/domain/subscription";
+import { formatCompactCurrency, formatCurrency, roundMoney } from "@/lib/domain/money";
 import { HOME_CURRENCY, toMYR } from "@/lib/domain/fx";
+import { monthBounds } from "@/lib/domain/calendar";
 import { useMusicPlayer } from "@/features/dashboard/music/player-context";
 import { cn } from "@/lib/utils";
 
 /**
- * The persistent overview dock shown beneath both tabs. Aggregates active
- * subscriptions by category (count + normalized monthly cost). Because the app
- * is MYR-home, every figure — per-category and the global total — is converted
- * to MYR and shown in ringgit, regardless of how many currencies are present.
+ * The persistent overview dock shown beneath the Calendar and All tabs. It
+ * surfaces two differentiated cost figures plus a per-category breakdown.
  *
- * Positioning: `sticky` by default (Calendar/All) — it sits at the end of the
- * page content. When `pinned` (Statistics), it's `fixed` to the viewport bottom
- * so it stays visible while scrolling the tall charts. When the floating music
- * mini-bar is showing (music queued, and this page is never the dashboard), the
- * dock lifts itself above the bar so the two stack instead of overlapping.
+ *   - "This month" — the ACTUAL count + MYR total of charges landing in the
+ *     current calendar month (a sub may charge more than once; an annual sub
+ *     only counts in the month it renews). Derived from the renewal engine.
+ *   - "Recurring" — the NORMALIZED monthly cost (any billing cycle smoothed to
+ *     a /mo figure, e.g. an annual plan shown as 1/12 of its price each month).
+ *
+ * The two diverge whenever a sub isn't monthly (annual/quarterly/weekly), so
+ * both are shown side by side. The app is MYR-home: every figure is converted
+ * to ringgit. Sticky; lifts above the floating music bar when it's active.
  */
 export function CategoryDock({
   subscriptions,
-  pinned = false,
+  todayISO,
 }: {
   subscriptions: Subscription[];
-  pinned?: boolean;
+  todayISO: string;
 }) {
   const active = subscriptions.filter(isActive);
   const musicActive = useMusicPlayer().queueLength > 0;
@@ -43,59 +51,96 @@ export function CategoryDock({
     };
   }).filter((r) => r.count > 0);
 
+  // Recurring: normalized monthly cost of every active subscription.
   const totalMonthly = roundMoney(
     active.reduce((sum, s) => sum + toMYR(monthlyAmount(s), s.currency), 0),
   );
 
-  const card = (
-    <div className="glass card-elevated rounded-2xl border border-border/60 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Overview by category
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {active.length} active · {formatCompactCurrency(totalMonthly, HOME_CURRENCY)}/mo
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {rows.length === 0 ? (
-          <span className="text-xs text-muted-foreground">No active subscriptions yet.</span>
-        ) : (
-          rows.map((r) => (
-            <span
-              key={r.category}
-              className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface/60 px-3 py-1.5 text-xs"
-            >
-              <span className="size-2 rounded-full" style={{ background: r.colorVar }} />
-              {r.label}
-              <span className="text-muted-foreground">{r.count}</span>
-              <span className="text-muted-foreground/70">
-                · {formatCompactCurrency(r.monthly, HOME_CURRENCY)}
-              </span>
-            </span>
-          ))
-        )}
-      </div>
-    </div>
+  // This month (actual): distinct active subs charging in the current calendar
+  // month, and the real MYR total of those charges (a sub can charge >1×).
+  const [year, month] = todayISO.split("-").map(Number);
+  const { startISO, endISO } = monthBounds(year, month - 1);
+  const monthItems = subscriptionsChargingInRange(subscriptions, startISO, endISO);
+  const monthSubCount = monthItems.length;
+  const monthTotalMYR = roundMoney(
+    monthItems.reduce(
+      (sum, it) => sum + toMYR(it.sub.amount, it.sub.currency) * it.dates.length,
+      0,
+    ),
   );
 
   return (
     <div
       className={cn(
-        // Fixed (Statistics) pins to the viewport bottom and clears the sidebar;
-        // sticky (Calendar/All) flows at the end of the content as before.
-        pinned ? "fixed left-0 right-0 lg:left-62" : "sticky",
-        "z-30 transition-[bottom] duration-300",
+        "sticky z-30 transition-[bottom] duration-300",
         // Lift above the floating music bar when it's showing so they stack.
         musicActive ? "bottom-36 lg:bottom-24" : "bottom-20 lg:bottom-6",
       )}
     >
-      {pinned ? (
-        // Re-constrain to the content column (fixed is viewport-relative).
-        <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">{card}</div>
-      ) : (
-        card
-      )}
+      <div className="glass card-elevated rounded-2xl border border-border/60 p-4">
+        {/* Two differentiated cost figures */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <Stat label="This month" hint="actual charges">
+            <div className="text-sm font-semibold tabular-nums">
+              {monthSubCount} {monthSubCount === 1 ? "subscription" : "subscriptions"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {formatCurrency(monthTotalMYR, HOME_CURRENCY)}
+            </div>
+          </Stat>
+          <Stat label="Recurring" hint="normalized / mo">
+            <div className="text-sm font-semibold tabular-nums">
+              {active.length} active
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {formatCompactCurrency(totalMonthly, HOME_CURRENCY)}/mo
+            </div>
+          </Stat>
+        </div>
+
+        {/* Per-category breakdown */}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {rows.length === 0 ? (
+            <span className="text-xs text-muted-foreground">No active subscriptions yet.</span>
+          ) : (
+            rows.map((r) => (
+              <span
+                key={r.category}
+                className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface/60 px-3 py-1.5 text-xs"
+              >
+                <span className="size-2 rounded-full" style={{ background: r.colorVar }} />
+                {r.label}
+                <span className="text-muted-foreground">{r.count}</span>
+                <span className="text-muted-foreground/70">
+                  · {formatCompactCurrency(r.monthly, HOME_CURRENCY)}
+                </span>
+              </span>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border/50 bg-surface/40 px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-[9px] text-muted-foreground/60">{hint}</span>
+      </div>
+      <div className="mt-1">{children}</div>
     </div>
   );
 }

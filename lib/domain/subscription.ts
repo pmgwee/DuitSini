@@ -69,6 +69,33 @@ export function chargeDatesInRange(
   );
 }
 
+/** A subscription paired with the charge dates it has within a civil range. */
+export interface RangeChargeItem {
+  sub: Subscription;
+  dates: string[];
+}
+
+/**
+ * Active subscriptions that charge at least once within [startISO, endISO],
+ * each paired with its charge dates in that range (a sub can charge more than
+ * once — e.g. weekly). Powers "this month's charges" (count + actual total)
+ * without each call site re-walking the renewal engine. Paused/cancelled subs
+ * are excluded. Unsorted — callers sort as needed.
+ */
+export function subscriptionsChargingInRange(
+  subs: Subscription[],
+  startISO: string,
+  endISO: string,
+): RangeChargeItem[] {
+  const out: RangeChargeItem[] = [];
+  for (const sub of subs) {
+    if (!isActive(sub)) continue;
+    const dates = chargeDatesInRange(sub, startISO, endISO);
+    if (dates.length > 0) out.push({ sub, dates });
+  }
+  return out;
+}
+
 export function isTrialConvertingWithin(sub: Subscription, days: number): boolean {
   if (!sub.isTrial || !sub.freeTrialEndAt || !isActive(sub)) return false;
   const d = daysUntil(sub.freeTrialEndAt);
