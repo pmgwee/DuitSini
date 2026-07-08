@@ -1,11 +1,22 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Json } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** A snapshot older than this is treated as "bridge offline" → manual fallback. */
 const FRESH_MS = 3 * 60 * 1000;
+
+/** One usage stream as stored in streams_json (validated loosely at read). */
+type StreamRow = {
+  source: string;
+  label: string;
+  five_hour?: { utilization: number | null; resets_at: string | null } | null;
+  seven_day?: { utilization: number | null; resets_at: string | null } | null;
+  limits?: Json | null;
+  provider?: Json | null;
+};
 
 /**
  * Same-origin read of the signed-in user's live Claude usage snapshot (pushed
@@ -40,11 +51,34 @@ export async function GET() {
   const ageMs = Date.now() - new Date(data.updated_at).getTime();
   const fresh = ageMs < FRESH_MS;
 
+  // Normalize to a streams array. Newer rows carry streams_json (one or more
+  // sources, e.g. Claude Pro + GLM); older rows synthesize a single stream
+  // from the legacy scalar columns so the multi-stream UI still has data.
+  const streams = Array.isArray(data.streams_json)
+    ? (data.streams_json as StreamRow[])
+    : [
+        {
+          source: "claude",
+          label: "Claude",
+          five_hour: { utilization: data.five_hour_utilization, resets_at: data.five_hour_resets_at },
+          seven_day: { utilization: data.seven_day_utilization, resets_at: data.seven_day_resets_at },
+          limits: data.limits_json ?? null,
+          provider: data.provider_json ?? null,
+        },
+      ];
+
+  // Legacy single-source fields still mirror the primary stream for any older
+  // reader. Prefer a Claude-subscription source so it reflects real account
+  // usage rather than a gateway.
+  const primary =
+    streams.find((s) => s.source === "claude_pro" || s.source === "claude") ?? streams[0];
+
   const payload = {
-    five_hour: { utilization: data.five_hour_utilization, resets_at: data.five_hour_resets_at },
-    seven_day: { utilization: data.seven_day_utilization, resets_at: data.seven_day_resets_at },
-    limits: data.limits_json ?? null,
-    provider: data.provider_json ?? null,
+    five_hour: primary?.five_hour ?? null,
+    seven_day: primary?.seven_day ?? null,
+    limits: primary?.limits ?? null,
+    provider: primary?.provider ?? null,
+    streams,
     refreshed_at: data.updated_at,
     cached: !fresh,
   };

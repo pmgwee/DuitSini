@@ -1,8 +1,21 @@
 /**
  * Builds the personalized `claude-usage-sharer.mjs` a group member downloads.
- * The script is self-contained (Node 20+ only), reads the member's own Claude
- * Code token from ~/.claude/.credentials.json, self-refreshes it, and pushes
- * usage % to the app authenticated by their per-user bridge token.
+ * The script is self-contained (Node 20+ only), reads usage from THIS computer
+ * and pushes the percentages to the dashboard authenticated by the member's
+ * per-user bridge token.
+ *
+ * It can broadcast MORE THAN ONE usage stream at once:
+ *   - Claude Pro/Max — from a Claude Code subscription login. Because Claude's
+ *     5-hour/weekly limits are account-level and shared across Claude Code,
+ *     Claude.ai, and Claude Desktop, any valid subscription OAuth token for the
+ *     account returns the same usage. The token is read from the first
+ *     candidate config dir that holds a subscription login (a dedicated dir
+ *     like ~/.claude-pro keeps it stable even when cc-switch re-routes the
+ *     main ~/.claude CLI).
+ *   - GLM Coding — from a cc-switch-routed Claude Code CLI pointed at a
+ *     z.ai/bigmodel gateway, using that provider's own key.
+ * Whichever sources exist are fetched each cycle and pushed together in one
+ * call. A source that fails is skipped (warned), not fatal.
  *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
@@ -12,7 +25,7 @@
 const SOURCE = `#!/usr/bin/env node
 /*
  * Claude Usage Sharer (personal, for the class dashboard).
- * Reads YOUR Claude Code usage from THIS computer and sends only the
+ * Reads YOUR Claude usage from THIS computer and sends only the
  * percentages to the dashboard. Your login/password is never sent.
  * Close this window anytime to stop.
  */
@@ -27,7 +40,6 @@ const BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const TOKEN_ENDPOINTS = ["https://platform.claude.com/v1/oauth/token", "https://console.anthropic.com/v1/oauth/token"];
 const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const CREDS = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), ".credentials.json");
 const CC_SWITCH_DB = join(homedir(), ".cc-switch", "cc-switch.db");
 const UA = "claude-code/2.1.0";
 const PUSH_MS = 30000, COMMAND_MS = 4000, MIN_GAP_MS = 9000, EXPIRY_BUFFER_MS = 300000, REFRESH_MIN_MS = 45000;
@@ -36,13 +48,42 @@ let lastFetchAt = 0, lastPullSeen = 0, lastRefreshAt = 0, lastWarn = "", backoff
 const stamp = () => new Date().toLocaleTimeString();
 function warnOnce(m) { if (m === lastWarn) return; lastWarn = m; console.warn("  " + stamp() + "  " + m); }
 
-async function writeCreds(creds) {
-  const tmp = CREDS + ".sharer.tmp";
-  await writeFile(tmp, JSON.stringify(creds, null, 2), "utf8");
-  await rename(tmp, CREDS);
+// Candidate paths for a Claude Code SUBSCRIPTION login, most-specific first.
+// The dedicated dirs (CLAUDE_SUB_CONFIG_DIR, ~/.claude-pro, ~/.claude-sub) keep
+// a stable Pro/Max token even when cc-switch re-routes the main ~/.claude CLI
+// to a gateway. The general CLAUDE_CONFIG_DIR / ~/.claude are a fallback so a
+// member who only ever logged in normally still works.
+function proCredsCandidates() {
+  const home = homedir();
+  const out = [];
+  if (process.env.CLAUDE_SUB_CONFIG_DIR) out.push(join(process.env.CLAUDE_SUB_CONFIG_DIR, ".credentials.json"));
+  out.push(join(home, ".claude-pro", ".credentials.json"));
+  out.push(join(home, ".claude-sub", ".credentials.json"));
+  if (process.env.CLAUDE_CONFIG_DIR) out.push(join(process.env.CLAUDE_CONFIG_DIR, ".credentials.json"));
+  out.push(join(home, ".claude", ".credentials.json"));
+  return out;
 }
 
-async function refresh(creds) {
+// First candidate creds file that holds a usable Claude subscription OAuth
+// token. Returns { path, creds } or null.
+async function findProCreds() {
+  for (const p of proCredsCandidates()) {
+    let creds;
+    try { creds = JSON.parse(await readFile(p, "utf8")); }
+    catch (e) { continue; }
+    const o = creds.claudeAiOauth;
+    if (o && o.accessToken && o.refreshToken) return { path: p, creds: creds };
+  }
+  return null;
+}
+
+async function writeCreds(path, creds) {
+  const tmp = path + ".sharer.tmp";
+  await writeFile(tmp, JSON.stringify(creds, null, 2), "utf8");
+  await rename(tmp, path);
+}
+
+async function refresh(creds, path) {
   const rt = creds.claudeAiOauth && creds.claudeAiOauth.refreshToken;
   if (!rt) throw new Error("Please open Claude Code and sign in first.");
   let lastErr;
@@ -58,24 +99,21 @@ async function refresh(creds) {
     creds.claudeAiOauth.accessToken = j.access_token;
     if (j.refresh_token) creds.claudeAiOauth.refreshToken = j.refresh_token;
     creds.claudeAiOauth.expiresAt = Date.now() + (j.expires_in || 3600) * 1000;
-    await writeCreds(creds);
+    await writeCreds(path, creds);
     console.log("  " + stamp() + "  refreshed your Claude sign-in");
     return creds.claudeAiOauth.accessToken;
   }
   throw lastErr || new Error("Refresh failed.");
 }
 
-async function getToken() {
-  let creds;
-  try { creds = JSON.parse(await readFile(CREDS, "utf8")); }
-  catch { throw new Error("Could not find your Claude Code sign-in. Open Claude Code, sign in, then run this again."); }
+async function getToken(creds, path) {
   const o = creds.claudeAiOauth;
-  if (!o || !o.accessToken || !o.refreshToken) throw new Error("Please sign in to Claude Code with your Claude account first.");
+  if (!o || !o.accessToken || !o.refreshToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
   const now = Date.now(), exp = typeof o.expiresAt === "number" ? o.expiresAt : 0;
   if (now < exp - EXPIRY_BUFFER_MS) return o.accessToken;
   if (now - lastRefreshAt >= REFRESH_MIN_MS) {
     lastRefreshAt = now;
-    try { return await refresh(creds); }
+    try { return await refresh(creds, path); }
     catch (e) { if (now < exp) { warnOnce("couldn't refresh yet (" + e.message + "); using current sign-in"); return o.accessToken; } throw e; }
   }
   if (now < exp) return o.accessToken;
@@ -131,10 +169,11 @@ async function detectProvider() {
 // Public subset of a provider that is safe to send to the dashboard (no token).
 function safeProvider(p) { return p ? { name: p.name, gateway_host: p.gateway_host, official: p.official } : null; }
 
-// Does the local creds file hold a usable Claude subscription login?
-async function hasSubscription() {
-  try { const creds = JSON.parse(await readFile(CREDS, "utf8")); const o = creds.claudeAiOauth; return !!(o && o.accessToken && o.refreshToken); }
-  catch { return false; }
+async function fetchAnthropicSnapshot(creds, path) {
+  let token = await getToken(creds, path), usage;
+  try { usage = await fetchUsage(token); }
+  catch (e) { if (e.code === 401 && Date.now() - lastRefreshAt >= REFRESH_MIN_MS) { lastRefreshAt = Date.now(); token = await refresh(creds, path); usage = await fetchUsage(token); } else throw e; }
+  return { five_hour: pickWindow(usage.five_hour), seven_day: pickWindow(usage.seven_day), limits: normLimits(usage) };
 }
 
 // Fetch GLM Coding Plan usage from a z.ai/bigmodel gateway using the provider's
@@ -162,8 +201,15 @@ async function fetchGlmUsage(provider) {
   return { five_hour: five, seven_day: week, limits: limits.length ? limits : null };
 }
 
-async function push(snapshot, provider) {
-  const body = { five_hour: snapshot.five_hour, seven_day: snapshot.seven_day, limits: snapshot.limits, provider: safeProvider(provider) };
+// Push every gathered stream in ONE call. The legacy top-level fields mirror
+// the primary stream (prefer a Claude-subscription source) so older servers
+// that predate the streams array still record a snapshot.
+async function pushStreams(streams) {
+  const primary = streams.find(function (s) { return s.source === "claude_pro" || s.source === "claude"; }) || streams[0];
+  const body = {
+    five_hour: primary.five_hour, seven_day: primary.seven_day, limits: primary.limits, provider: primary.provider,
+    streams: streams,
+  };
   const r = await fetch(INGEST_URL, { method: "POST", headers: { Authorization: "Bearer " + BRIDGE_TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) { const t = await r.text().catch(function () { return ""; }); throw new Error("Sending to dashboard failed (" + r.status + ")" + (t ? ": " + t.slice(0, 120) : "")); }
 }
@@ -173,27 +219,33 @@ async function checkPull() {
   catch { return 0; }
 }
 
-async function fetchAnthropicSnapshot() {
-  let token = await getToken(), usage;
-  try { usage = await fetchUsage(token); }
-  catch (e) { if (e.code === 401 && Date.now() - lastRefreshAt >= REFRESH_MIN_MS) { lastRefreshAt = Date.now(); const creds = JSON.parse(await readFile(CREDS, "utf8")); token = await refresh(creds); usage = await fetchUsage(token); } else throw e; }
-  return { five_hour: pickWindow(usage.five_hour), seven_day: pickWindow(usage.seven_day), limits: normLimits(usage) };
-}
-
 async function fetchAndPush(reason) {
+  const proCreds = await findProCreds();
   const provider = await detectProvider();
-  const subscribed = await hasSubscription();
-  let snapshot, label;
-  if (provider && provider.source === "zai" && provider.authToken && !subscribed) {
-    snapshot = await fetchGlmUsage(provider); label = "GLM";
+  const streams = [];
+  const notes = [];
+  if (proCreds) {
+    try {
+      const snap = await fetchAnthropicSnapshot(proCreds.creds, proCreds.path);
+      streams.push({ source: "claude_pro", label: "Claude Pro", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: null });
+    } catch (e) { if (e.code === 429) throw e; notes.push("Claude Pro: " + e.message); }
   } else {
-    snapshot = await fetchAnthropicSnapshot(); label = "Claude";
+    notes.push("No Claude Pro sign-in found");
   }
-  await push(snapshot, provider);
+  if (provider && provider.source === "zai" && provider.authToken) {
+    try {
+      const snap = await fetchGlmUsage(provider);
+      streams.push({ source: "glm", label: "GLM Coding", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: safeProvider(provider) });
+    } catch (e) { if (e.code === 429) throw e; notes.push("GLM: " + e.message); }
+  }
+  if (streams.length === 0) throw new Error("No usage sent. " + notes.join(" / "));
+  await pushStreams(streams);
   lastFetchAt = Date.now(); lastWarn = "";
-  const f = snapshot.five_hour && snapshot.five_hour.utilization;
-  const via = provider ? "  via " + provider.name + (provider.official ? "" : " (" + provider.gateway_host + ")") : "";
-  console.log("  " + stamp() + "  [" + label + "] usage sent to dashboard  (5-hour: " + (f == null ? "-" : f + "%") + ")" + (reason ? "  [" + reason + "]" : "") + via);
+  for (const s of streams) {
+    const f = s.five_hour && s.five_hour.utilization;
+    console.log("  " + stamp() + "  [" + s.label + "] usage sent to dashboard  (5-hour: " + (f == null ? "-" : f + "%") + ")");
+  }
+  if (reason) console.log("  " + stamp() + "  [" + reason + "]");
 }
 
 async function loop() {

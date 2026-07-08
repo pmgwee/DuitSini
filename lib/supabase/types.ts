@@ -20,18 +20,21 @@ export type Database = {
     Tables: {
       bridge_tokens: {
         Row: {
+          id: string
           created_at: string
           last_used_at: string | null
           token_hash: string
           user_id: string
         }
         Insert: {
+          id?: string
           created_at?: string
           last_used_at?: string | null
           token_hash: string
           user_id: string
         }
         Update: {
+          id?: string
           created_at?: string
           last_used_at?: string | null
           token_hash?: string
@@ -45,6 +48,7 @@ export type Database = {
           five_hour_utilization: number | null
           limits_json: Json | null
           provider_json: Json | null
+          streams_json: Json | null
           pull_requested_at: string | null
           seven_day_resets_at: string | null
           seven_day_utilization: number | null
@@ -56,6 +60,7 @@ export type Database = {
           five_hour_utilization?: number | null
           limits_json?: Json | null
           provider_json?: Json | null
+          streams_json?: Json | null
           pull_requested_at?: string | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
@@ -67,6 +72,7 @@ export type Database = {
           five_hour_utilization?: number | null
           limits_json?: Json | null
           provider_json?: Json | null
+          streams_json?: Json | null
           pull_requested_at?: string | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null

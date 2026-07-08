@@ -9,6 +9,7 @@ import {
   type LiveUsageWindow,
   type UsageLimit,
   type UsageProvider,
+  type UsageStream,
 } from "./use-claude-usage-live";
 import { useNow } from "./use-now";
 import { Button } from "@/components/ui/button";
@@ -46,13 +47,14 @@ export function ClaudeUsageTracker() {
     );
   }
 
+  const streams = live.data ? normalizeStreams(live.data) : [];
   const liveReady =
     mode === "live" &&
     live.status === "live" &&
     live.data &&
-    (hasWindow(live.data.five_hour) ||
-      hasWindow(live.data.seven_day) ||
-      (Array.isArray(live.data.limits) && live.data.limits.length > 0));
+    streams.some(
+      (s) => hasWindow(s.five_hour) || hasWindow(s.seven_day) || (Array.isArray(s.limits) && s.limits.length > 0),
+    );
 
   return (
     <WidgetShell>
@@ -64,7 +66,6 @@ export function ClaudeUsageTracker() {
               Live
             </span>
           ) : null}
-          {liveReady ? <ProviderBadge provider={live.data?.provider} /> : null}
         </div>
         <div className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-surface/40 p-0.5 text-xs">
           <ModeTab active={mode === "live"} onClick={() => setMode("live")}>
@@ -77,12 +78,31 @@ export function ClaudeUsageTracker() {
       </header>
 
       {liveReady && live.data ? (
-        <LiveView data={live.data} now={now} onPull={live.pull} pulling={live.pulling} />
+        <LiveView streams={streams} refreshedAt={live.data.refreshed_at} now={now} onPull={live.pull} pulling={live.pulling} />
       ) : (
         <ManualView now={now} liveStatus={live.status} liveError={live.error} />
       )}
     </WidgetShell>
   );
+}
+
+/**
+ * Normalize a snapshot into a streams array. The live route always returns
+ * `streams`, but this also tolerates an older single-source payload by wrapping
+ * its top-level fields into one synthetic stream.
+ */
+function normalizeStreams(data: LiveUsage): UsageStream[] {
+  if (Array.isArray(data.streams) && data.streams.length > 0) return data.streams;
+  return [
+    {
+      source: "claude",
+      label: "Claude",
+      five_hour: data.five_hour ?? null,
+      seven_day: data.seven_day ?? null,
+      limits: data.limits ?? null,
+      provider: data.provider ?? null,
+    },
+  ];
 }
 
 function hasWindow(w?: LiveUsageWindow | null): boolean {
@@ -115,47 +135,29 @@ function formatUntil(iso: string | null | undefined, now: number): string {
 /* ------------------------------------------------------------------ */
 
 function LiveView({
-  data,
+  streams,
+  refreshedAt,
   now,
   onPull,
   pulling,
 }: {
-  data: LiveUsage;
+  streams: UsageStream[];
+  refreshedAt?: string;
   now: number;
   onPull: () => void;
   pulling: boolean;
 }) {
-  const limits = Array.isArray(data.limits) ? data.limits : [];
-
-  // Prefer the structured `limits` array; fall back to the raw windows so the
-  // widget still works before the bridge/migration carry the richer data.
-  const session: UsageLimit | null =
-    limits.find((l) => l.group === "session") ??
-    (data.five_hour
-      ? windowToLimit("session", "Current session", "session", data.five_hour)
-      : null);
-
-  const weeklyFromLimits = limits.filter((l) => l.group === "weekly");
-  const weekly: UsageLimit[] =
-    weeklyFromLimits.length > 0
-      ? weeklyFromLimits
-      : data.seven_day
-        ? [windowToLimit("weekly_all", "All models", "weekly", data.seven_day)]
-        : [];
-
-  const gauges = [session, ...weekly].filter((l): l is UsageLimit => l !== null);
-
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-3 gap-2">
-        {gauges.map((l) => (
-          <UsageGauge key={l.key} limit={l} now={now} />
+      <div className={cn("flex flex-col", streams.length > 1 ? "gap-5" : "gap-0")}>
+        {streams.map((s) => (
+          <StreamSection key={s.source} stream={s} now={now} divided={streams.length > 1} />
         ))}
       </div>
 
       <div className="flex items-center justify-between border-t border-border/50 pt-3">
         <span className="text-[11px] text-muted-foreground/80">
-          Last updated: {formatAgo(data.refreshed_at, now)}
+          Last updated: {formatAgo(refreshedAt, now)}
         </span>
         <button
           type="button"
@@ -173,6 +175,49 @@ function LiveView({
       </p>
     </div>
   );
+}
+
+/** One usage stream rendered as a labeled group of ring gauges. */
+function StreamSection({ stream, now, divided }: { stream: UsageStream; now: number; divided: boolean }) {
+  const gauges = streamGauges(stream);
+  return (
+    <div className={cn(divided && "border-t border-border/40 pt-4 first:border-t-0 first:pt-0")}>
+      <div className="mb-2.5 flex items-center gap-1.5">
+        <span className="text-xs font-medium text-foreground">{stream.label}</span>
+        <ProviderBadge provider={stream.provider} />
+      </div>
+      {gauges.length === 0 ? (
+        <p className="py-2 text-[11px] text-muted-foreground/70">No usage limits reported for this source.</p>
+      ) : (
+        <div className="grid grid-cols-3 gap-2">
+          {gauges.map((l) => (
+            <UsageGauge key={l.key} limit={l} now={now} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Turn a stream's windows/limits into the gauge rows (session + weekly). */
+function streamGauges(stream: UsageStream): UsageLimit[] {
+  const limits = Array.isArray(stream.limits) ? stream.limits : [];
+
+  // Prefer the structured `limits` array; fall back to the raw windows so the
+  // widget still works before the bridge/migration carry the richer data.
+  const session: UsageLimit | null =
+    limits.find((l) => l.group === "session") ??
+    (stream.five_hour ? windowToLimit("session", "Current session", "session", stream.five_hour) : null);
+
+  const weeklyFromLimits = limits.filter((l) => l.group === "weekly");
+  const weekly: UsageLimit[] =
+    weeklyFromLimits.length > 0
+      ? weeklyFromLimits
+      : stream.seven_day
+        ? [windowToLimit("weekly_all", "All models", "weekly", stream.seven_day)]
+        : [];
+
+  return [session, ...weekly].filter((l): l is UsageLimit => l !== null);
 }
 
 /** Adapt a raw usage window into a UsageLimit row for the fallback path. */

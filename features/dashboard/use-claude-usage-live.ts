@@ -26,11 +26,26 @@ export interface UsageProvider {
   official: boolean;
 }
 
+/**
+ * One usage stream — e.g. Claude Pro (from a subscription login) or GLM Coding
+ * (from a cc-switch-routed CLI). A snapshot can carry several so the dashboard
+ * shows more than one account/plan live at once.
+ */
+export interface UsageStream {
+  source: string;
+  label: string;
+  five_hour?: LiveUsageWindow | null;
+  seven_day?: LiveUsageWindow | null;
+  limits?: UsageLimit[] | null;
+  provider?: UsageProvider | null;
+}
+
 export interface LiveUsage {
   five_hour?: LiveUsageWindow | null;
   seven_day?: LiveUsageWindow | null;
   limits?: UsageLimit[] | null;
   provider?: UsageProvider | null;
+  streams?: UsageStream[] | null;
   error?: string;
   message?: string;
   cached?: boolean;

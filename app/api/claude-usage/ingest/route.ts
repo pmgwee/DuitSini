@@ -31,6 +31,18 @@ const providerSchema = z
   })
   .nullable();
 
+// One usage stream (e.g. Claude Pro from a dedicated subscription login, or
+// GLM from a cc-switch-routed Claude Code CLI). A bridge can push several at
+// once so the dashboard shows more than one account/plan live at the same time.
+const streamSchema = z.object({
+  source: z.string().min(1).max(32),
+  label: z.string().min(1).max(80),
+  five_hour: windowSchema.optional(),
+  seven_day: windowSchema.optional(),
+  limits: z.array(limitSchema).max(40).nullable().optional(),
+  provider: providerSchema.optional(),
+});
+
 const bodySchema = z.object({
   user_id: z.string().uuid().optional(),
   five_hour: windowSchema.optional(),
@@ -40,7 +52,23 @@ const bodySchema = z.object({
   // snapshot was taken — purely informational (see bridge-auth.ts / bridge
   // README). Absent for older bridge scripts that predate this field.
   provider: providerSchema.optional(),
+  // Multi-source push: every available usage stream this cycle. Newer bridges
+  // send this; the legacy top-level fields above stay populated (mirroring the
+  // primary stream) so older servers/readers keep working.
+  streams: z.array(streamSchema).max(6).optional(),
 });
+
+/**
+ * Shallow-copy an object minus the named keys (for graceful column fallback).
+ * `keys` are optional JSON columns, so the result still satisfies the Insert
+ * type — hence the preserved `T` shape (a runtime lie about the dropped keys,
+ * but they're all optional in the schema).
+ */
+function without<T extends Record<string, unknown>>(obj: T, keys: readonly string[]): T {
+  const out = { ...obj };
+  for (const k of keys) delete out[k as keyof T];
+  return out;
+}
 
 /**
  * Ingest endpoint for the local Claude Usage Bridge. Authenticated by a shared
@@ -65,31 +93,63 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "bad body" }, { status: 400 });
   }
 
-  const { five_hour, seven_day, limits, provider } = parsed.data;
+  const { five_hour, seven_day, limits, provider, streams } = parsed.data;
+
+  // Normalize to a streams array — the UI reads from streams_json. Newer
+  // bridges send `streams`; a legacy single-source push is wrapped so the row
+  // still carries the new shape.
+  const normalized =
+    streams && streams.length > 0
+      ? streams
+      : [
+          {
+            source: "claude",
+            label: "Claude",
+            five_hour,
+            seven_day,
+            limits: limits ?? null,
+            provider: provider ?? null,
+          },
+        ];
+
+  // The "primary" stream mirrors into the legacy scalar columns so older
+  // servers/readers keep working. Prefer a Claude-subscription source so the
+  // legacy single-gauge widget shows real account usage rather than a gateway.
+  const primary =
+    normalized.find((s) => s.source === "claude_pro" || s.source === "claude") ??
+    normalized[0];
+
   const admin = createSupabaseAdminClient();
-  const base = {
+
+  // Try the full row; if a JSON column's migration isn't applied yet, retry
+  // progressively without the offending column(s) so the widget keeps working.
+  // (The live DB has all columns; this only matters for self-hosted copies
+  // that haven't run the later migrations.)
+  const full = {
     user_id: targetUser,
-    five_hour_utilization: five_hour?.utilization ?? null,
-    five_hour_resets_at: five_hour?.resets_at ?? null,
-    seven_day_utilization: seven_day?.utilization ?? null,
-    seven_day_resets_at: seven_day?.resets_at ?? null,
+    five_hour_utilization: primary.five_hour?.utilization ?? null,
+    five_hour_resets_at: primary.five_hour?.resets_at ?? null,
+    seven_day_utilization: primary.seven_day?.utilization ?? null,
+    seven_day_resets_at: primary.seven_day?.resets_at ?? null,
     updated_at: new Date().toISOString(),
+    streams_json: normalized as unknown as Json,
+    limits_json: (primary.limits ?? null) as Json,
+    provider_json: (primary.provider ?? null) as Json,
   };
 
-  let { error } = await admin.from("claude_usage_live").upsert({
-    ...base,
-    limits_json: (limits ?? null) as Json,
-    provider_json: (provider ?? null) as Json,
-  });
-  // Degrade gracefully if either JSON column's migration isn't applied yet:
-  // still store the session/weekly totals so the widget keeps working.
+  let { error } = await admin.from("claude_usage_live").upsert(full);
+  if (error && /streams_json/i.test(error.message)) {
+    ({ error } = await admin.from("claude_usage_live").upsert(without(full, ["streams_json"])));
+  }
   if (error && /provider_json/i.test(error.message)) {
     ({ error } = await admin
       .from("claude_usage_live")
-      .upsert({ ...base, limits_json: (limits ?? null) as Json }));
+      .upsert(without(full, ["streams_json", "provider_json"])));
   }
   if (error && /limits_json/i.test(error.message)) {
-    ({ error } = await admin.from("claude_usage_live").upsert(base));
+    ({ error } = await admin
+      .from("claude_usage_live")
+      .upsert(without(full, ["streams_json", "provider_json", "limits_json"])));
   }
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
