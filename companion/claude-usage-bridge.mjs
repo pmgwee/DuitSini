@@ -38,9 +38,17 @@ const cfg = {
   ingestUrl: process.env.INGEST_URL, // e.g. https://your-app.vercel.app/api/claude-usage/ingest
   secret: process.env.BRIDGE_SECRET, // must equal CLAUDE_BRIDGE_SECRET on the server
   userId: process.env.CLAUDE_USER_ID ?? "", // optional if server sets CLAUDE_BRIDGE_USER_ID
-  // How often to fetch+push on the regular cadence. Clamped ≥15s to respect
-  // Anthropic's per-token rate limit (backs off further on 429).
-  pushMs: Math.max(15_000, Number(process.env.POLL_MS) || 30_000),
+  // How often to fetch+push on the regular cadence. Default 60s (was 30s): the
+  // unofficial /api/oauth/usage endpoint is aggressively rate-limited and 30s
+  // pollers reliably trip a session-long 429 (anthropics/claude-code #31637).
+  // Clamped ≥30s so an env override can't push us back into the danger zone.
+  pushMs: Math.max(30_000, Number(process.env.POLL_MS) || 60_000),
+  // +/- jitter on the cadence so multiple instances/members don't sync into a
+  // lockstep burst on the shared usage endpoint.
+  pushJitterMs: 8_000,
+  // Never retry a 429 faster than this, even if the server sends retry-after: 0
+  // (a documented footgun on this endpoint) — a "0" would spin us back in.
+  min429BackoffMs: 60_000,
   // How often to check the cheap "pull requested?" signal (no Anthropic call),
   // so the site's "Pull latest" button feels near-instant.
   commandMs: Math.max(2_000, Number(process.env.COMMAND_MS) || 4_000),
@@ -75,7 +83,11 @@ let lastRefreshAttemptAt = 0;
 
 /** Atomically write the credentials file (temp + rename) to avoid corruption. */
 async function writeCredentialsAtomic(creds) {
-  const tmp = `${cfg.credentialsPath}.bridge.tmp`;
+  // Unique temp name per process+call: a SHARED temp path would let two
+  // simultaneous writers truncate/rename over each other and corrupt the creds
+  // file (bricking both → re-login). pid+random keeps each write isolated;
+  // rename is atomic so readers always see a whole file, never a torn one.
+  const tmp = `${cfg.credentialsPath}.${process.pid}.${Math.floor(Math.random() * 1e9)}.bridge.tmp`;
   await writeFile(tmp, JSON.stringify(creds, null, 2), "utf8");
   await rename(tmp, cfg.credentialsPath);
 }
@@ -111,9 +123,14 @@ async function refreshCredentials(creds) {
     }
     if (resp.status === 429) {
       const ra = resp.headers.get("retry-after");
+      const reset = resp.headers.get("anthropic-ratelimit-unified-reset");
       throw Object.assign(
-        new Error(`Token refresh rate limited (429) at ${url}${ra ? ` retry-after=${ra}s` : ""}.`),
-        { code: 429, source: "refresh" },
+        new Error(
+          `Token refresh rate limited (429) at ${url}${ra ? ` retry-after=${ra}s` : ""}${
+            reset ? ` reset=${reset}` : ""
+          }.`,
+        ),
+        { code: 429, source: "refresh", retryMs: retryMsFrom(ra, reset) },
       );
     }
     if (!resp.ok) {
@@ -130,6 +147,41 @@ async function refreshCredentials(creds) {
     return creds.claudeAiOauth.accessToken;
   }
   throw lastErr ?? new Error("Token refresh failed on all endpoints.");
+}
+
+/**
+ * Refresh de-duplication across restarts AND multiple processes sharing one
+ * credentials file. The refresh endpoint ROTATES the refresh token on success,
+ * so two refreshers at once invalidate each other and stampede into a 429 (the
+ * thing that bricks the login). Before a network refresh we: (1) wait a short
+ * random jitter so simultaneous starters desync; (2) re-read the file — if a
+ * sibling already refreshed it (a newer, still-valid expiresAt than the token
+ * we came in with), ADOPT that token and skip the network entirely; else
+ * refresh using the newest refresh token on disk (never a stale rotated one).
+ *
+ * @param staleExp the expiresAt we decided to refresh against — adopt only a
+ *   strictly-newer disk token, so we don't loop on our own just-written value.
+ */
+async function refreshOrAdoptFromDisk(creds, staleExp) {
+  await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 800)));
+  try {
+    const fresh = JSON.parse(await readFile(cfg.credentialsPath, "utf8"));
+    const fo = fresh.claudeAiOauth;
+    if (
+      fo?.accessToken &&
+      typeof fo.expiresAt === "number" &&
+      fo.expiresAt > staleExp &&
+      Date.now() < fo.expiresAt - EXPIRY_BUFFER_MS
+    ) {
+      creds.claudeAiOauth = fo;
+      console.log(`${stamp()}  adopted a fresher token from disk (another process refreshed it)`);
+      return fo.accessToken;
+    }
+    if (fo?.refreshToken) creds.claudeAiOauth = fo; // refresh with newest on-disk token
+  } catch {
+    /* unreadable / torn write — fall through and refresh what we have */
+  }
+  return await refreshCredentials(creds);
 }
 
 async function resolveToken() {
@@ -162,7 +214,7 @@ async function resolveToken() {
   if (now - lastRefreshAttemptAt >= REFRESH_MIN_INTERVAL_MS) {
     lastRefreshAttemptAt = now;
     try {
-      return await refreshCredentials(creds);
+      return await refreshOrAdoptFromDisk(creds, exp);
     } catch (e) {
       // Still within the pre-expiry buffer → keep using the valid token, retry later.
       if (now < exp) {
@@ -205,7 +257,7 @@ async function fetchUsage(token) {
           reset ? ` reset=${reset}` : ""
         }${detail ? ` body=${detail}` : ""}`,
       ),
-      { code: 429, source: "usage" },
+      { code: 429, source: "usage", retryMs: retryMsFrom(ra, reset) },
     );
   }
   if (!resp.ok) throw new Error(`Usage endpoint returned ${resp.status}.`);
@@ -340,7 +392,7 @@ async function fetchGlmUsage(provider) {
     const ra = r.headers.get("retry-after");
     throw Object.assign(
       new Error(`GLM provider rate limited (429)${ra ? ` retry-after=${ra}s` : ""}.`),
-      { code: 429, source: "GLM" },
+      { code: 429, source: "GLM", retryMs: retryMsFrom(ra, null) },
     );
   }
   if (!r.ok) throw new Error(`GLM usage endpoint returned ${r.status}.`);
@@ -386,12 +438,35 @@ let backoff = 0;
 let lastFetchAt = 0;
 let lastPullSeen = 0;
 let lastWarn = "";
+let rateLimitStreak = 0; // consecutive 429s — drives the "stop restarting" alarm
+let pushJitter = 0; // re-rolled per push so cadence never lands on a fixed tick
 
 /** Warn, but suppress consecutive duplicates so an outage doesn't spam the log. */
 function warnOnce(msg) {
   if (msg === lastWarn) return;
   lastWarn = msg;
   console.warn(`${stamp()}  ${msg}`);
+}
+
+/**
+ * Turn a 429's rate-limit headers into a wait in ms. `retry-after` is seconds;
+ * the reset header is an absolute unix time (seconds). Honoring this is what
+ * stops a burst of refreshes from hammering the endpoint (the thing that bricks
+ * the login for hours). Returns 0 if neither header is usable.
+ */
+function retryMsFrom(retryAfter, reset) {
+  if (retryAfter) {
+    const s = parseInt(retryAfter, 10);
+    if (Number.isFinite(s) && s >= 0) return s * 1000;
+  }
+  if (reset) {
+    const t = parseInt(reset, 10);
+    if (Number.isFinite(t)) {
+      const ms = t * 1000 - Date.now();
+      if (ms > 0) return ms;
+    }
+  }
+  return 0;
 }
 
 /** Cheap check (no Anthropic call): has the site requested a fresh pull? */
@@ -432,7 +507,8 @@ async function fetchAnthropicSnapshot() {
     if (e.code === 401 && !cfg.accessToken && Date.now() - lastRefreshAttemptAt >= REFRESH_MIN_INTERVAL_MS) {
       lastRefreshAttemptAt = Date.now();
       const creds = JSON.parse(await readFile(cfg.credentialsPath, "utf8"));
-      token = await refreshCredentials(creds);
+      const exp0 = typeof creds.claudeAiOauth?.expiresAt === "number" ? creds.claudeAiOauth.expiresAt : 0;
+      token = await refreshOrAdoptFromDisk(creds, exp0);
       usage = await fetchUsage(token);
     } else {
       throw e;
@@ -471,6 +547,7 @@ async function fetchAndPush(reason) {
   await push(snapshot, provider);
   lastFetchAt = Date.now();
   backoff = 0;
+  rateLimitStreak = 0; // a good push clears the 429 streak → alarm re-arms fresh
   lastWarn = "";
   const f = snapshot.five_hour?.utilization;
   const s = snapshot.seven_day?.utilization;
@@ -487,20 +564,48 @@ async function loop() {
     if (pullRequested) lastPullSeen = pullTs;
 
     const sinceFetch = Date.now() - lastFetchAt;
-    const due = sinceFetch >= cfg.pushMs;
+    // Steady-state jitter: a scheduled push waits pushMs + a small random slice
+    // so multiple instances/members don't line up on the shared usage endpoint.
+    // A user-initiated pull bypasses it (still bounded by minFetchGapMs).
+    const due = sinceFetch >= cfg.pushMs + pushJitter;
     const gapOk = sinceFetch >= cfg.minFetchGapMs;
 
     if ((pullRequested || due) && gapOk) {
       await fetchAndPush(pullRequested ? "pull" : "");
+      pushJitter = Math.floor(Math.random() * cfg.pushJitterMs);
     }
   } catch (e) {
     if (e.code === 429) {
-      backoff = Math.min(MAX_BACKOFF_MS, Math.max(45_000, (backoff || cfg.pushMs) * 2));
+      rateLimitStreak++;
+      // Prefer the server's own retry window (retry-after / reset header) over a
+      // blind doubling ladder: waiting exactly as long as the server asked (plus
+      // a small cushion) means the NEXT attempt succeeds instead of re-tripping
+      // the 429 and dragging the lockout out for hours. Fall back to the ladder
+      // only when no header was sent.
+      if (e.retryMs && e.retryMs > 0) {
+        // Honor the header, but never below the floor: this endpoint is known to
+        // return 429 with retry-after: 0, which would retry instantly and re-trip.
+        backoff = Math.min(MAX_BACKOFF_MS, Math.max(cfg.min429BackoffMs, e.retryMs + 3000 + Math.floor(Math.random() * 4000)));
+      } else {
+        backoff = Math.min(MAX_BACKOFF_MS, Math.max(cfg.min429BackoffMs, (backoff || cfg.pushMs) * 2));
+      }
       // Name the throttled endpoint (refresh / usage / GLM) + its detail so the
       // log pinpoints WHAT is rate-limiting instead of an opaque "rate limited".
       warnOnce(
         `rate limited [${e.source || "?"}] — backing off ${Math.round(backoff / 1000)}s  (${e.message || "429"})`,
       );
+      // After a few 429s in a row, shout the human fix: DON'T restart. Restarting
+      // resets the timer and fires another immediate request, which is exactly
+      // what keeps the endpoint locked (and can let the token expire → needs a
+      // fresh login). Reprinted every 3rd hit so it can't scroll away unseen.
+      if (rateLimitStreak === 3 || (rateLimitStreak > 3 && rateLimitStreak % 3 === 0)) {
+        console.warn(
+          `\n  ⚠  Rate-limited ${rateLimitStreak}× in a row on [${e.source || "?"}].\n` +
+            `     DO NOT close/restart this window — that makes it worse and can\n` +
+            `     lock your sign-in until it expires. Just LEAVE IT OPEN; it waits\n` +
+            `     out the server's cooldown and recovers on its own.\n`,
+        );
+      }
     } else {
       warnOnce(e.message);
     }
