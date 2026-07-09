@@ -48,6 +48,16 @@ let lastFetchAt = 0, lastPullSeen = 0, lastRefreshAt = 0, lastWarn = "", backoff
 const stamp = () => new Date().toLocaleTimeString();
 function warnOnce(m) { if (m === lastWarn) return; lastWarn = m; console.warn("  " + stamp() + "  " + m); }
 
+// How long the server told us to wait, from its rate-limit headers. retry-after
+// is seconds; the reset header is an absolute unix time (seconds). Returns ms,
+// or 0 if neither is usable. Honoring this is what stops a burst of refreshes
+// from hammering the endpoint (which is what bricked the login for hours).
+function retryMsFrom(ra, reset) {
+  if (ra) { const s = parseInt(ra, 10); if (Number.isFinite(s) && s >= 0) return s * 1000; }
+  if (reset) { const t = parseInt(reset, 10); if (Number.isFinite(t)) { const ms = t * 1000 - Date.now(); if (ms > 0) return ms; } }
+  return 0;
+}
+
 // fetch() wrapper that fixes the recurring "fetch failed" after sleep/wake or a
 // network change:
 //   (a) sends "connection: close" so undici NEVER reuses a pooled socket. Node
@@ -124,7 +134,17 @@ async function refresh(creds, path) {
     try { resp = await safeFetch(url, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rt, client_id: OAUTH_CLIENT_ID }) }); }
     catch (e) { lastErr = e; continue; }
     if (resp.status === 404) { lastErr = new Error("token endpoint 404"); continue; }
-    if (resp.status === 429) { throw Object.assign(new Error("Anthropic token-refresh rate-limited (429) at " + url), { code: 429 }); }
+    if (resp.status === 429) {
+      // Surface how long the endpoint wants us to wait, which creds file is
+      // stuck, and how stale its token is (tokenAge > 0 => already expired) -
+      // this is what tells us whether it's one file being hammered vs. a
+      // genuinely long server-side limit.
+      const ra = resp.headers.get("retry-after");
+      const reset = resp.headers.get("anthropic-ratelimit-unified-reset");
+      const exp2 = creds.claudeAiOauth && creds.claudeAiOauth.expiresAt;
+      const ageMin = typeof exp2 === "number" ? Math.round((Date.now() - exp2) / 60000) : null;
+      throw Object.assign(new Error("Anthropic token-refresh rate-limited (429) at " + url + (ra ? " retry-after=" + ra + "s" : "") + (reset ? " reset=" + reset : "") + " creds=" + path + (ageMin == null ? "" : " tokenAge=" + ageMin + "m")), { code: 429, retryMs: retryMsFrom(ra, reset) });
+    }
     if (!resp.ok) { throw new Error("Could not refresh your sign-in (" + resp.status + ")."); }
     const j = await resp.json();
     if (!j.access_token) throw new Error("Refresh returned no token.");
@@ -161,7 +181,7 @@ async function fetchUsage(token) {
     const ra = r.headers.get("retry-after");
     const reset = r.headers.get("anthropic-ratelimit-unified-reset") || r.headers.get("x-ratelimit-reset");
     let detail = ""; try { detail = (await r.text()).slice(0, 160); } catch (e) { /* body may be empty */ }
-    throw Object.assign(new Error("Anthropic usage rate-limited (429)" + (ra ? " retry-after=" + ra + "s" : "") + (reset ? " reset=" + reset : "") + (detail ? " body=" + detail : "")), { code: 429 });
+    throw Object.assign(new Error("Anthropic usage rate-limited (429)" + (ra ? " retry-after=" + ra + "s" : "") + (reset ? " reset=" + reset : "") + (detail ? " body=" + detail : "")), { code: 429, retryMs: retryMsFrom(ra, reset) });
   }
   if (r.status === 403) throw new Error("Usage is only available on a Claude Pro or Max plan (not a free plan or a different provider).");
   if (!r.ok) throw new Error("Usage check failed (" + r.status + ").");
@@ -222,7 +242,7 @@ async function fetchAnthropicSnapshot(creds, path) {
 async function fetchGlmUsage(provider) {
   const r = await safeFetch(provider.monitorUrl, { headers: { Authorization: provider.authToken, "Accept-Language": "en-US,en", "Content-Type": "application/json" } });
   if (r.status === 401 || r.status === 403) throw new Error("Your GLM plan key was rejected (" + r.status + ").");
-  if (r.status === 429) { const ra = r.headers.get("retry-after"); throw Object.assign(new Error("GLM provider rate-limited (429)" + (ra ? " retry-after=" + ra + "s" : "")), { code: 429 }); }
+  if (r.status === 429) { const ra = r.headers.get("retry-after"); throw Object.assign(new Error("GLM provider rate-limited (429)" + (ra ? " retry-after=" + ra + "s" : "")), { code: 429, retryMs: retryMsFrom(ra, null) }); }
   if (!r.ok) throw new Error("GLM usage check failed (" + r.status + ").");
   const j = await r.json();
   const list = j && j.data && Array.isArray(j.data.limits) ? j.data.limits : [];
@@ -295,7 +315,17 @@ async function loop() {
     if ((pull || since >= PUSH_MS) && since >= MIN_GAP_MS) { await fetchAndPush(pull ? "refresh requested" : ""); backoff = 0; }
   } catch (e) {
     if (e && e.code === 429) {
-      backoff = Math.min(300000, Math.max(45000, (backoff || PUSH_MS) * 2));
+      // Prefer the server's own retry window (retry-after / reset header) - THIS
+      // is the fix for the endpoint bricking itself: instead of guessing with a
+      // doubling ladder that keeps poking before the limit clears, we wait
+      // exactly as long as the server asked (plus a few seconds of cushion), so
+      // the very next attempt succeeds instead of re-tripping the 429. If no
+      // header was sent, fall back to the exponential ladder as before.
+      if (e.retryMs && e.retryMs > 0) {
+        backoff = Math.min(600000, e.retryMs + 3000 + Math.floor(Math.random() * 4000));
+      } else {
+        backoff = Math.min(300000, Math.max(45000, (backoff || PUSH_MS) * 2));
+      }
       // Name the throttled source + its detail so the log says WHICH endpoint is
       // rate-limiting (Claude Pro token-refresh vs. usage vs. GLM) and why,
       // instead of an opaque "busy".
