@@ -124,7 +124,7 @@ async function refresh(creds, path) {
     try { resp = await safeFetch(url, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rt, client_id: OAUTH_CLIENT_ID }) }); }
     catch (e) { lastErr = e; continue; }
     if (resp.status === 404) { lastErr = new Error("token endpoint 404"); continue; }
-    if (resp.status === 429) { throw Object.assign(new Error("Anthropic busy; will retry."), { code: 429 }); }
+    if (resp.status === 429) { throw Object.assign(new Error("Anthropic token-refresh rate-limited (429) at " + url), { code: 429 }); }
     if (!resp.ok) { throw new Error("Could not refresh your sign-in (" + resp.status + ")."); }
     const j = await resp.json();
     if (!j.access_token) throw new Error("Refresh returned no token.");
@@ -155,7 +155,14 @@ async function getToken(creds, path) {
 async function fetchUsage(token) {
   const r = await safeFetch(USAGE_ENDPOINT, { headers: { Authorization: "Bearer " + token, "anthropic-beta": "oauth-2025-04-20", "User-Agent": UA, "Content-Type": "application/json" } });
   if (r.status === 401) throw Object.assign(new Error("Sign-in rejected; will refresh."), { code: 401 });
-  if (r.status === 429) throw Object.assign(new Error("Anthropic busy; will retry."), { code: 429 });
+  if (r.status === 429) {
+    // Surface the retry-after / rate-limit headers Anthropic sends, so the log
+    // shows WHY (and for how long) this endpoint is throttling us.
+    const ra = r.headers.get("retry-after");
+    const reset = r.headers.get("anthropic-ratelimit-unified-reset") || r.headers.get("x-ratelimit-reset");
+    let detail = ""; try { detail = (await r.text()).slice(0, 160); } catch (e) { /* body may be empty */ }
+    throw Object.assign(new Error("Anthropic usage rate-limited (429)" + (ra ? " retry-after=" + ra + "s" : "") + (reset ? " reset=" + reset : "") + (detail ? " body=" + detail : "")), { code: 429 });
+  }
   if (r.status === 403) throw new Error("Usage is only available on a Claude Pro or Max plan (not a free plan or a different provider).");
   if (!r.ok) throw new Error("Usage check failed (" + r.status + ").");
   return r.json();
@@ -215,7 +222,7 @@ async function fetchAnthropicSnapshot(creds, path) {
 async function fetchGlmUsage(provider) {
   const r = await safeFetch(provider.monitorUrl, { headers: { Authorization: provider.authToken, "Accept-Language": "en-US,en", "Content-Type": "application/json" } });
   if (r.status === 401 || r.status === 403) throw new Error("Your GLM plan key was rejected (" + r.status + ").");
-  if (r.status === 429) throw Object.assign(new Error("GLM provider busy; will retry."), { code: 429 });
+  if (r.status === 429) { const ra = r.headers.get("retry-after"); throw Object.assign(new Error("GLM provider rate-limited (429)" + (ra ? " retry-after=" + ra + "s" : "")), { code: 429 }); }
   if (!r.ok) throw new Error("GLM usage check failed (" + r.status + ").");
   const j = await r.json();
   const list = j && j.data && Array.isArray(j.data.limits) ? j.data.limits : [];
@@ -260,7 +267,7 @@ async function fetchAndPush(reason) {
     try {
       const snap = await fetchAnthropicSnapshot(proCreds.creds, proCreds.path);
       streams.push({ source: "claude_pro", label: "Claude Pro", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: null });
-    } catch (e) { if (e.code === 429) throw e; notes.push("Claude Pro: " + e.message); }
+    } catch (e) { if (e.code === 429) { e.source = "Claude Pro"; throw e; } notes.push("Claude Pro: " + e.message); }
   } else {
     notes.push("No Claude Pro sign-in found");
   }
@@ -268,7 +275,7 @@ async function fetchAndPush(reason) {
     try {
       const snap = await fetchGlmUsage(provider);
       streams.push({ source: "glm", label: "GLM Coding", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: safeProvider(provider) });
-    } catch (e) { if (e.code === 429) throw e; notes.push("GLM: " + e.message); }
+    } catch (e) { if (e.code === 429) { e.source = "GLM"; throw e; } notes.push("GLM: " + e.message); }
   }
   if (streams.length === 0) throw new Error("No usage sent. " + notes.join(" / "));
   await pushStreams(streams);
@@ -289,7 +296,10 @@ async function loop() {
   } catch (e) {
     if (e && e.code === 429) {
       backoff = Math.min(300000, Math.max(45000, (backoff || PUSH_MS) * 2));
-      warnOnce("busy - waiting " + Math.round(backoff / 1000) + "s");
+      // Name the throttled source + its detail so the log says WHICH endpoint is
+      // rate-limiting (Claude Pro token-refresh vs. usage vs. GLM) and why,
+      // instead of an opaque "busy".
+      warnOnce("busy [" + (e.source || "?") + "] - waiting " + Math.round(backoff / 1000) + "s  (" + (e.message || "429") + ")");
     } else {
       // Network/server error (typical after sleep/wake or a transient blip).
       // Retry SOON rather than climbing the 429 ladder - we can't be "busy" if

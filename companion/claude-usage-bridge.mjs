@@ -110,7 +110,11 @@ async function refreshCredentials(creds) {
       continue;
     }
     if (resp.status === 429) {
-      throw Object.assign(new Error("Token refresh rate limited (429)."), { code: 429 });
+      const ra = resp.headers.get("retry-after");
+      throw Object.assign(
+        new Error(`Token refresh rate limited (429) at ${url}${ra ? ` retry-after=${ra}s` : ""}.`),
+        { code: 429, source: "refresh" },
+      );
     }
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
@@ -185,7 +189,25 @@ async function fetchUsage(token) {
   });
   if (resp.status === 401)
     throw Object.assign(new Error("Access token rejected (401) — will refresh."), { code: 401 });
-  if (resp.status === 429) throw Object.assign(new Error("Rate limited by Anthropic."), { code: 429 });
+  if (resp.status === 429) {
+    const ra = resp.headers.get("retry-after");
+    const reset =
+      resp.headers.get("anthropic-ratelimit-unified-reset") || resp.headers.get("x-ratelimit-reset");
+    let detail = "";
+    try {
+      detail = (await resp.text()).slice(0, 160);
+    } catch {
+      /* body may be empty */
+    }
+    throw Object.assign(
+      new Error(
+        `Anthropic usage rate-limited (429)${ra ? ` retry-after=${ra}s` : ""}${
+          reset ? ` reset=${reset}` : ""
+        }${detail ? ` body=${detail}` : ""}`,
+      ),
+      { code: 429, source: "usage" },
+    );
+  }
   if (!resp.ok) throw new Error(`Usage endpoint returned ${resp.status}.`);
   return resp.json();
 }
@@ -314,7 +336,13 @@ async function fetchGlmUsage(provider) {
   });
   if (r.status === 401 || r.status === 403)
     throw new Error(`GLM provider rejected the key (${r.status}).`);
-  if (r.status === 429) throw Object.assign(new Error("GLM provider rate limited."), { code: 429 });
+  if (r.status === 429) {
+    const ra = r.headers.get("retry-after");
+    throw Object.assign(
+      new Error(`GLM provider rate limited (429)${ra ? ` retry-after=${ra}s` : ""}.`),
+      { code: 429, source: "GLM" },
+    );
+  }
   if (!r.ok) throw new Error(`GLM usage endpoint returned ${r.status}.`);
   const j = await r.json();
   const rows = j?.data?.limits;
@@ -468,7 +496,11 @@ async function loop() {
   } catch (e) {
     if (e.code === 429) {
       backoff = Math.min(MAX_BACKOFF_MS, Math.max(45_000, (backoff || cfg.pushMs) * 2));
-      warnOnce(`rate limited — backing off ${Math.round(backoff / 1000)}s`);
+      // Name the throttled endpoint (refresh / usage / GLM) + its detail so the
+      // log pinpoints WHAT is rate-limiting instead of an opaque "rate limited".
+      warnOnce(
+        `rate limited [${e.source || "?"}] — backing off ${Math.round(backoff / 1000)}s  (${e.message || "429"})`,
+      );
     } else {
       warnOnce(e.message);
     }
