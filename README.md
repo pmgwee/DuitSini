@@ -37,6 +37,7 @@ Share your real Claude plan usage to the dashboard — no API key wrangling:
 | UI | React 19, Tailwind CSS v4, custom design system, Recharts |
 | State | TanStack Query (server), Zustand (UI), `next-themes` (theme) |
 | Backend | Supabase (Postgres, Auth, Row-Level Security, Realtime) |
+| Cloud / APIs | Google Cloud — YouTube Data API v3 (music search), Google OAuth 2.0 (Google sign-in identity) |
 | Forms / validation | React Hook Form + Zod |
 | Language | TypeScript (strict) |
 | Package manager | pnpm |
