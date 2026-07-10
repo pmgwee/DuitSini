@@ -13,7 +13,13 @@ type Row = Database["public"]["Tables"]["subscriptions"]["Row"];
 type Insert = Database["public"]["Tables"]["subscriptions"]["Insert"];
 type UpdateRow = Database["public"]["Tables"]["subscriptions"]["Update"];
 
-function rowToSubscription(row: Row): Subscription {
+/**
+ * Map a raw subscriptions row (snake_case) to the domain `Subscription`
+ * (camelCase). Exported so the cron sweep — which reads rows with the
+ * service-role client across all users (the cookie-bound repo can't) — reuses
+ * the SAME mapping the repo uses, instead of duplicating it.
+ */
+export function rowToSubscription(row: Row): Subscription {
   return {
     id: row.id,
     userId: row.user_id,
@@ -36,7 +42,7 @@ function rowToSubscription(row: Row): Subscription {
     iconUrl: row.icon_url,
     color: row.color,
     notes: row.notes,
-    reminderOffsetsDays: row.reminder_offsets_days ?? [],
+    reminderOffsetsDays: row.reminder_offsets_days,
     reminderTimeLocal: row.reminder_time_local,
     notificationChannels: (row.notification_channels ?? []) as NotificationChannel[],
     createdAt: row.created_at,
@@ -130,7 +136,7 @@ export function createSupabaseSubscriptionRepository(
         icon_type: "monogram",
         color: input.color ?? null,
         notes: input.notes ?? null,
-        reminder_offsets_days: input.reminderOffsetsDays,
+        reminder_offsets_days: input.reminderOffsetsDays ?? null,
         reminder_time_local: input.reminderTimeLocal,
         notification_channels: input.notificationChannels,
       };

@@ -34,7 +34,7 @@ export interface Subscription {
   iconUrl: string | null;
   color: string | null;
   notes: string | null;
-  reminderOffsetsDays: number[];
+  reminderOffsetsDays: number[] | null;
   reminderTimeLocal: string; // HH:mm
   notificationChannels: NotificationChannel[];
   createdAt: string;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,13 @@ const FOCUSABLE =
  * and removes it on close/unmount.
  */
 const openStack: Array<{ onClose: () => void }> = [];
+
+/**
+ * The <body> inline overflow captured BEFORE the first dialog opened, restored
+ * when the last one closes. Global (stack-counted) rather than per-dialog on
+ * purpose: see the lock logic in the effect.
+ */
+let savedBodyOverflow = "";
 
 /**
  * Lightweight accessible modal: portal to body, click-backdrop / Esc to close,
@@ -42,11 +50,31 @@ export function Dialog({
   const previouslyFocused = useRef<HTMLElement | null>(null);
   const titleId = useId();
 
+  // Keep the latest `onClose` in a ref. Callers pass an inline
+  // `() => setOpen(false)` whose identity changes every render; if `onClose`
+  // were in the effect deps below, the open effect would tear down + re-run on
+  // every parent render, churning the body scroll-lock snapshot/restore. That
+  // churn — combined with nested dialogs — could leave <body> stuck on
+  // overflow:hidden after the dialog closed (e.g. clicking the "default
+  // schedule" link inside the form navigated away but the destination page
+  // stayed frozen until a hard refresh). Reading via the ref avoids the churn.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
-    const entry = { onClose };
-    openStack.push(entry);
+    const entry = { onClose: () => onCloseRef.current() };
     previouslyFocused.current = document.activeElement as HTMLElement | null;
+    // Ref-counted scroll lock: capture the body's original overflow only when
+    // the FIRST dialog opens, and restore it only when the LAST one closes. A
+    // per-dialog snapshot (the old approach) is unsafe under nesting + arbitrary
+    // cleanup order — the inner dialog snapshotted the "hidden" the outer dialog
+    // set, and if it cleaned up last it wrote "hidden" back, locking the page.
+    if (openStack.length === 0) savedBodyOverflow = document.body.style.overflow;
+    openStack.push(entry);
+    document.body.style.overflow = "hidden";
     // Move focus into the panel on open.
     panelRef.current?.focus();
 
@@ -54,7 +82,7 @@ export function Dialog({
       if (e.key === "Escape") {
         // Only the topmost open dialog dismisses on Esc (supports nesting).
         if (openStack[openStack.length - 1] === entry) {
-          onClose();
+          onCloseRef.current();
         }
         return;
       }
@@ -78,17 +106,34 @@ export function Dialog({
     };
 
     document.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
       const idx = openStack.indexOf(entry);
       if (idx >= 0) openStack.splice(idx, 1);
-      // Restore focus to whatever opened the dialog.
-      previouslyFocused.current?.focus();
+      // Only the dialog that empties the stack restores the body — order no
+      // longer matters, and the restored value is always the true original.
+      if (openStack.length === 0) {
+        document.body.style.overflow = savedBodyOverflow;
+      }
+      // Restore focus to whatever opened the dialog (only if it's still in the
+      // document — after a route change the trigger may be gone).
+      const trigger = previouslyFocused.current;
+      if (trigger && document.contains(trigger)) trigger.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
+
+  // Close on any client-side route change. The Add/Edit dialogs live in the
+  // persistent app shell, so a <Link> or sidebar nav away from the page does NOT
+  // unmount them — without this, the open dialog keeps <body> scroll-locked and
+  // the destination page is frozen until a hard refresh. Closing runs the normal
+  // cleanup above (restores overflow + focus).
+  const pathname = usePathname();
+  const prevPathname = useRef(pathname);
+  useEffect(() => {
+    if (prevPathname.current === pathname) return;
+    prevPathname.current = pathname;
+    onCloseRef.current();
+  }, [pathname]);
 
   if (!open || typeof document === "undefined") return null;
 

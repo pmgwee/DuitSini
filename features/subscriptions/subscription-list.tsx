@@ -140,6 +140,11 @@ export function SubscriptionRow({ sub }: { sub: Subscription }) {
           >
             {meta.label}
           </span>
+          {sub.reminderOffsetsDays != null ? (
+            <span className="shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              Custom schedule
+            </span>
+          ) : null}
         </div>
         <div className="truncate text-xs text-muted-foreground">
           {sub.provider && sub.provider !== sub.name ? `${sub.provider} · ` : ""}

@@ -1,6 +1,7 @@
 "use client";
 
-import { Children, cloneElement, useId, useState, type ReactElement } from "react";
+import { Children, cloneElement, useEffect, useId, useState, type ReactElement } from "react";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Ban, Loader2, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
@@ -10,6 +11,7 @@ import {
   CATEGORIES,
   CATEGORY_META,
   CURRENCIES,
+  DEFAULT_REMINDER_OFFSETS,
 } from "@/lib/constants";
 import {
   subscriptionInputSchema,
@@ -31,6 +33,10 @@ import { toISODate } from "@/lib/domain/dates";
 import { cn } from "@/lib/utils";
 import { ProviderCombobox } from "./provider-combobox";
 import type { ProviderPreset } from "@/lib/providers";
+import {
+  getGlobalReminderDefaults,
+  readGlobalReminderDefaults,
+} from "@/lib/reminders/global-default";
 
 const CATEGORY_OPTIONS = CATEGORIES.map((c) => ({
   value: c,
@@ -55,6 +61,7 @@ interface FieldValues {
   startDate: string;
   isTrial: boolean;
   freeTrialEndAt: string;
+  reminderOffsetsDays: number[] | null;
   notes: string;
   color: string;
 }
@@ -78,6 +85,30 @@ export function SubscriptionForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The user's GLOBAL default schedule, shown when this subscription is set to
+  // "follow my default". Read from the session cache in lib/reminders/global-
+  // default so the chips don't flash from the [7,3,1] fallback to the real
+  // schedule on every open: the first open loads it once (showing a neutral
+  // placeholder until it arrives); later opens read the cached value
+  // synchronously and paint the real schedule immediately.
+  const [defaultOffsets, setDefaultOffsets] = useState<number[]>(
+    () => readGlobalReminderDefaults() ?? [...DEFAULT_REMINDER_OFFSETS],
+  );
+  const [defaultsLoaded, setDefaultsLoaded] = useState<boolean>(
+    () => readGlobalReminderDefaults() != null,
+  );
+  useEffect(() => {
+    let active = true;
+    getGlobalReminderDefaults().then((offsets) => {
+      if (!active || !offsets) return;
+      setDefaultOffsets(offsets);
+      setDefaultsLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const {
     register,
     handleSubmit,
@@ -98,6 +129,9 @@ export function SubscriptionForm({
       startDate: subscription?.startDate ?? defaultStartDate ?? toISODate(new Date()),
       isTrial: subscription?.isTrial ?? false,
       freeTrialEndAt: subscription?.freeTrialEndAt ?? "",
+      // NULL = "use my default schedule" (inherit the global). New renewals start
+      // NULL; a new trial is flipped to [3,1,0] by the trial-toggle effect below.
+      reminderOffsetsDays: subscription != null ? subscription.reminderOffsetsDays ?? null : null,
       notes: subscription?.notes ?? "",
       color: subscription?.color ?? "",
     },
@@ -110,6 +144,30 @@ export function SubscriptionForm({
   const category = watch("category");
   const currency = watch("currency");
   const showInterval = billingCycle === "custom_days" || billingCycle === "custom_months";
+  const reminderOffsetsDays = watch("reminderOffsetsDays");
+
+  // Smart default ladder: a trial converting is the highest-stakes event (an
+  // unwanted NEW charge), so when Free Trial is toggled on we suggest a tighter
+  // 3/1/0 ladder — including a same-day "converts today" ping — instead of the
+  // 7/3/1 renewal ladder. We only swap when the current offsets still match the
+  // OTHER preset, so a member's custom offsets are never clobbered. This is a
+  // form default only; the engine treats all offsets identically.
+  // Every subscription (renewal OR trial) defaults to NULL = "follow the global
+  // default schedule". Chips are read-only while following the default;
+  // "Customize" isolates this subscription onto its own schedule (it stops
+  // following the global), and "Follow my default" returns it. Unticking the
+  // last chip falls back to following the default.
+  const usingDefault = reminderOffsetsDays == null;
+  const customize = () => setValue("reminderOffsetsDays", [...defaultOffsets], { shouldDirty: true });
+  const useDefault = () => setValue("reminderOffsetsDays", null, { shouldDirty: true });
+  const toggleOffset = (day: number) => {
+    const cur = reminderOffsetsDays;
+    if (cur == null) return;
+    const next = cur.includes(day)
+      ? cur.filter((d) => d !== day)
+      : [...cur, day].sort((a, b) => b - a);
+    setValue("reminderOffsetsDays", next.length > 0 ? next : null, { shouldDirty: true });
+  };
 
   // Choosing a known service from the Provider picker fills its brand color and
   // (in create mode, if still untouched) its category — both stay editable. If
@@ -243,6 +301,113 @@ export function SubscriptionForm({
           />
         </Field>
       )}
+
+      <div className="flex flex-col gap-1.5">
+        <span className="flex items-center gap-2 text-sm font-medium">
+          Remind me
+          <span className="text-xs font-normal text-muted-foreground">
+            {isTrial ? "before the trial converts" : "before it renews"}
+          </span>
+          {!usingDefault ? (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              Custom schedule
+            </span>
+          ) : null}
+        </span>
+
+        {usingDefault ? (
+          defaultsLoaded ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {Array.from(new Set([7, 3, 1, 0, ...defaultOffsets]))
+                  .sort((a, b) => b - a)
+                  .map((d) => {
+                    const active = defaultOffsets.includes(d);
+                    return (
+                      <span
+                        key={d}
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-xs",
+                          active
+                            ? "border-primary/40 bg-primary/5 text-muted-foreground"
+                            : "border-border/40 text-muted-foreground/50",
+                        )}
+                      >
+                        {d === 0 ? "Same day" : `${d} day${d === 1 ? "" : "s"}`}
+                      </span>
+                    );
+                  })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Following your{" "}
+                <Link href="/settings" className="font-medium text-primary hover:underline">
+                  default schedule
+                </Link>{" "}
+                (
+                {defaultOffsets
+                  .slice()
+                  .sort((a, b) => b - a)
+                  .map((d) => (d === 0 ? "same day" : `${d} day${d === 1 ? "" : "s"}`))
+                  .join(", ")}
+                ).
+              </p>
+              <button
+                type="button"
+                onClick={customize}
+                className="self-start text-[11px] font-medium text-primary hover:underline"
+              >
+                Customize this subscription instead
+              </button>
+              <p className="text-[11px] text-muted-foreground/70">
+                Customizing sets a schedule just for this subscription — it stops following your
+                default.
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground/80">Loading your default schedule…</p>
+          )
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {Array.from(new Set([7, 3, 1, 0, ...(reminderOffsetsDays ?? [])]))
+                .sort((a, b) => b - a)
+                .map((d) => {
+                  const active = (reminderOffsetsDays ?? []).includes(d);
+                  return (
+                    <button
+                      type="button"
+                      key={d}
+                      onClick={() => toggleOffset(d)}
+                      aria-pressed={active}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-xs transition-colors",
+                        active
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/60 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {d === 0 ? "Same day" : `${d} day${d === 1 ? "" : "s"}`}
+                    </button>
+                  );
+                })}
+            </div>
+            <p className="text-[11px] text-muted-foreground/70">
+              This subscription uses its own schedule, separate from your{" "}
+              <Link href="/settings" className="font-medium text-primary hover:underline">
+                default
+              </Link>
+              .
+            </p>
+            <button
+              type="button"
+              onClick={useDefault}
+              className="self-start text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+            >
+              Follow my default schedule instead
+            </button>
+          </>
+        )}
+      </div>
 
       <Field label="Notes" hint="optional">
         <textarea

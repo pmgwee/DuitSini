@@ -8,6 +8,7 @@ import {
   FileText,
   LayoutDashboard,
   Loader2,
+  Settings,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -25,6 +26,7 @@ const NAV: NavItem[] = [
   { href: "/subscriptions", label: "Subscriptions", icon: CalendarDays },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/reports", label: "Reports", icon: FileText },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell({ children, user }: { children: ReactNode; user?: AuthUser }) {

@@ -53,6 +53,28 @@ export const CATEGORY_COLOR: Record<Category, string> = {
   other: "oklch(0.72 0.02 265)",
 };
 
+/**
+ * Emoji marker for each category — used as the group header icon in Telegram
+ * reminder digests. Telegram text messages can't render the brand-logo images
+ * the web UI uses (Simple Icons glyph / favicon), so a category emoji is the
+ * inline visual marker instead.
+ */
+export const CATEGORY_EMOJI: Record<Category, string> = {
+  streaming: "🎬",
+  utilities: "🛠️",
+  saas: "💼",
+  ai: "🤖",
+  music: "🎵",
+  gaming: "🎮",
+  productivity: "🗂️",
+  finance: "💰",
+  education: "📚",
+  cloud: "☁️",
+  news: "📰",
+  health: "💪",
+  other: "📦",
+};
+
 export const BILLING_CYCLES = [
   "weekly",
   "monthly",

@@ -53,9 +53,12 @@ export const subscriptionFieldsSchema = z.object({
   unsubscribeUrl: optionalText(300),
   color: optionalText(32),
   notes: optionalText(500),
-  reminderOffsetsDays: z.array(z.number().int().min(0).max(60)).max(6).default([7, 3, 1]),
+  reminderOffsetsDays: z.array(z.number().int().min(0).max(60)).max(6).nullish(),
   reminderTimeLocal: z.string().regex(HH_MM, "Use HH:mm").default("09:00"),
-  notificationChannels: z.array(notificationChannelSchema).default(["in_app"]),
+  // telegram is included by default so reminders "just work" once a member
+  // connects Telegram — delivery is still gated per-user by telegram_enabled +
+  // a linked chat_id, so this can never message anyone who hasn't opted in.
+  notificationChannels: z.array(notificationChannelSchema).default(["telegram", "in_app"]),
 });
 
 /** Create: full object with trial cross-field checks. */

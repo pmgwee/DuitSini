@@ -386,7 +386,7 @@ export type Database = {
           notification_channels: Database["public"]["Enums"]["notification_channel"][]
           plan_type: string | null
           provider: string | null
-          reminder_offsets_days: number[]
+          reminder_offsets_days: number[] | null
           reminder_time_local: string
           start_date: string
           unsubscribe_url: string | null
@@ -414,7 +414,7 @@ export type Database = {
           notification_channels?: Database["public"]["Enums"]["notification_channel"][]
           plan_type?: string | null
           provider?: string | null
-          reminder_offsets_days?: number[]
+          reminder_offsets_days?: number[] | null
           reminder_time_local?: string
           start_date: string
           unsubscribe_url?: string | null
@@ -442,7 +442,7 @@ export type Database = {
           notification_channels?: Database["public"]["Enums"]["notification_channel"][]
           plan_type?: string | null
           provider?: string | null
-          reminder_offsets_days?: number[]
+          reminder_offsets_days?: number[] | null
           reminder_time_local?: string
           start_date?: string
           unsubscribe_url?: string | null
@@ -457,6 +457,7 @@ export type Database = {
           full_name: string | null
           monthly_report_enabled: boolean
           preferred_currency: string
+          reminder_offsets_days: number[]
           telegram_chat_id: string | null
           telegram_enabled: boolean
           theme: string
@@ -472,6 +473,7 @@ export type Database = {
           full_name?: string | null
           monthly_report_enabled?: boolean
           preferred_currency?: string
+          reminder_offsets_days?: number[]
           telegram_chat_id?: string | null
           telegram_enabled?: boolean
           theme?: string
@@ -487,6 +489,7 @@ export type Database = {
           full_name?: string | null
           monthly_report_enabled?: boolean
           preferred_currency?: string
+          reminder_offsets_days?: number[]
           telegram_chat_id?: string | null
           telegram_enabled?: boolean
           theme?: string

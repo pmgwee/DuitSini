@@ -34,7 +34,7 @@ interface SeedSpec {
   unsubscribeUrl?: string;
   color?: string;
   notes?: string;
-  reminderOffsetsDays?: number[];
+  reminderOffsetsDays?: number[] | null;
   notificationChannels?: NotificationChannel[];
 }
 
@@ -72,7 +72,7 @@ function make(spec: SeedSpec): Subscription {
     iconUrl: null,
     color: spec.color ?? null,
     notes: spec.notes ?? null,
-    reminderOffsetsDays: spec.reminderOffsetsDays ?? [7, 3, 1],
+    reminderOffsetsDays: spec.reminderOffsetsDays ?? null,
     reminderTimeLocal: "09:00",
     notificationChannels: spec.notificationChannels ?? ["in_app"],
     createdAt: timestamp,

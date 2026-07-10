@@ -56,7 +56,7 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
       iconUrl: null,
       color: input.color ?? null,
       notes: input.notes ?? null,
-      reminderOffsetsDays: input.reminderOffsetsDays,
+      reminderOffsetsDays: input.reminderOffsetsDays ?? null,
       reminderTimeLocal: input.reminderTimeLocal,
       notificationChannels: input.notificationChannels,
       createdAt: timestamp,
