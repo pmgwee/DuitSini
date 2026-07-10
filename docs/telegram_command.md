@@ -35,3 +35,7 @@ curl.exe -i http://localhost:3000/api/cron/reminders
 curl.exe -H "Authorization: Bearer cb77880f8205e19f33252dcbe10a70e61276aaca12e29d86" "http://localhost:3000/api/cron/reminders?dry=1"
 
 curl.exe -H "Authorization: Bearer cb77880f8205e19f33252dcbe10a70e61276aaca12e29d86" "http://localhost:3000/api/cron/reminders"
+
+## Deployment
+
+curl.exe "https://api.telegram.org/bot8769581004:AAF05TV3NmzsgBYCqMRUkWSWG44AmP-HAeo/setWebhook?url=https://subscription-agent-five.vercel.app/api/integrations/telegram/webhook&secret_token=cd5a085034d45e7813b9932b358d7918fdf3daf6c19c31e1"

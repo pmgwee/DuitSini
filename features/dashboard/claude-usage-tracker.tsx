@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Play, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { Play, RefreshCw, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { useClaudeUsage, type UsageState } from "@/lib/stores/claude-usage";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   useClaudeUsageLive,
   type LiveUsage,
@@ -37,16 +38,6 @@ export function ClaudeUsageTracker() {
   useEffect(() => setMounted(true), []);
   const live = useClaudeUsageLive();
 
-  if (!mounted || now === null) {
-    return (
-      <WidgetShell>
-        <div className="grid h-44 place-items-center text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-        </div>
-      </WidgetShell>
-    );
-  }
-
   const streams = live.data ? normalizeStreams(live.data) : [];
   const liveReady =
     mode === "live" &&
@@ -56,33 +47,79 @@ export function ClaudeUsageTracker() {
       (s) => hasWindow(s.five_hour) || hasWindow(s.seven_day) || (Array.isArray(s.limits) && s.limits.length > 0),
     );
 
+  const header = (
+    <header className="mb-4 flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Sparkles className="size-4 text-primary" /> Agent Usage
+        {liveReady ? (
+          <span className="rounded-full bg-success/15 px-1.5 py-0.5 text-[10px] font-medium text-success">
+            Live
+          </span>
+        ) : null}
+      </div>
+      <div className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-surface/40 p-0.5 text-xs">
+        <ModeTab active={mode === "live"} onClick={() => setMode("live")}>
+          Live
+        </ModeTab>
+        <ModeTab active={mode === "manual"} onClick={() => setMode("manual")}>
+          Manual
+        </ModeTab>
+      </div>
+    </header>
+  );
+
+  // Loading gate: still hydrating/mounting, or (in live mode) the first usage
+  // snapshot hasn't resolved yet. Show a skeleton body so the widget never
+  // flashes the manual fallback while real live data is on its way — that flash
+  // was the per-navigation flicker. (In manual mode there's nothing to wait for,
+  // so the manual view renders immediately.)
+  if (!mounted || now === null || (mode === "live" && live.status === "connecting")) {
+    return (
+      <WidgetShell>
+        {header}
+        <LiveViewSkeleton />
+      </WidgetShell>
+    );
+  }
+
   return (
     <WidgetShell>
-      <header className="mb-4 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <Sparkles className="size-4 text-primary" /> Claude usage
-          {liveReady ? (
-            <span className="rounded-full bg-success/15 px-1.5 py-0.5 text-[10px] font-medium text-success">
-              Live
-            </span>
-          ) : null}
-        </div>
-        <div className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-surface/40 p-0.5 text-xs">
-          <ModeTab active={mode === "live"} onClick={() => setMode("live")}>
-            Live
-          </ModeTab>
-          <ModeTab active={mode === "manual"} onClick={() => setMode("manual")}>
-            Manual
-          </ModeTab>
-        </div>
-      </header>
-
+      {header}
       {liveReady && live.data ? (
         <LiveView streams={streams} refreshedAt={live.data.refreshed_at} now={now} onPull={live.pull} pulling={live.pulling} />
       ) : (
         <ManualView now={now} liveStatus={live.status} liveError={live.error} />
       )}
     </WidgetShell>
+  );
+}
+
+/**
+ * Placeholder mirroring the LiveView layout (stream label + three ring gauges +
+ * footer) so the loading → live handoff doesn't shift the widget. Shown only
+ * during the first snapshot fetch, while `live.status` is still "connecting".
+ */
+function LiveViewSkeleton() {
+  return (
+    <div className="flex flex-col gap-5" role="status" aria-live="polite" aria-label="Loading live usage">
+      <div className="flex items-center gap-1.5">
+        <Skeleton className="h-3.5 w-20" />
+        <Skeleton className="h-3.5 w-12 rounded-full" />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex flex-col items-center gap-1.5">
+            <Skeleton className="size-23 rounded-full" />
+            <Skeleton className="h-2.5 w-14" />
+            <Skeleton className="h-2 w-10" />
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between border-t border-border/50 pt-3">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-6 w-24 rounded-md" />
+      </div>
+    </div>
   );
 }
 

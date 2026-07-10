@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Apple, Check, CheckCircle2, Copy, Download, Share2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 type OS = "windows" | "mac";
@@ -84,7 +85,9 @@ export function ConnectClaudeCard() {
         ) : null}
       </div>
 
-      {connected ? (
+      {connected === null ? (
+        <ConnectCardSkeleton />
+      ) : connected ? (
         <ConnectedView sources={sources} />
       ) : (
         <>
@@ -141,6 +144,31 @@ export function ConnectClaudeCard() {
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Loading skeleton — shown while the first live-status fetch resolves */
+/* (mirrors the ClaudeUsageTracker's skeleton so both cards surface    */
+/* their content at the same moment).                                  */
+/* ------------------------------------------------------------------ */
+
+function ConnectCardSkeleton() {
+  return (
+    <div
+      className="flex flex-col gap-3"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading usage source status"
+    >
+      <Skeleton className="h-4 w-72 max-w-full" />
+      <Skeleton className="h-4 w-60 max-w-full" />
+      <div className="mt-1 flex flex-wrap gap-2">
+        <Skeleton className="h-14 w-44 rounded-xl" />
+        <Skeleton className="h-14 w-44 rounded-xl" />
+      </div>
+      <Skeleton className="mt-1 h-9 w-44 rounded-xl" />
     </div>
   );
 }
