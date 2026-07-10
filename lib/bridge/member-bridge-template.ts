@@ -28,18 +28,6 @@
  * placed in `setup-token.txt` or CLAUDE_SHARER_TOKEN) skips the refresh
  * endpoint entirely; absent it, the normal sign-in flow needs no extra setup.
  *
- * v4 — AUTO-REFRESH DISABLED (root-cause fix): even the v3 discipline still
- * tripped refresh-429s on dedicated login dirs (nothing else refreshes them,
- * and the endpoint rate-limits by login, not by politeness). v4 flips
- * REFRESH_ENABLED to false: the sharer NEVER calls the token endpoint. The
- * long-lived setup token is now the intended steady-state auth (one-time
- * `claude setup-token` → `setup-token.txt`); a plain sign-in still works while
- * its on-disk access token is valid (the Claude CLI rotates it during normal
- * use), and an expired one pauses the stream with a one-step fix message,
- * resuming automatically when a setup token or fresh login appears on disk.
- * ALL v3 refresh machinery is kept intact below — re-enable by setting
- * REFRESH_ENABLED = true.
- *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
  * injected via the __PLACEHOLDER__ tokens.
@@ -56,7 +44,7 @@ import { readFile, writeFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
-const SHARER_VERSION = "4";
+const SHARER_VERSION = "3";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
 const BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
@@ -91,13 +79,6 @@ const PUSH_MS = 60000, PUSH_JITTER_MS = 8000, COMMAND_MS = 4000, MIN_GAP_MS = 90
 // EXPIRY_BUFFER_MS is only the "stop using this token" cutoff, no longer the
 // refresh trigger. REFRESH_MIN_OK_GAP_MS stops a hot loop if token lifetimes
 // ever shrink below the lead time.
-// v4 KILL-SWITCH: auto-refresh against the token endpoint is DISABLED. Three
-// hardening rounds (early+jittered, cooldown ladder, persisted state) still
-// ended in refresh-429 lockouts on dedicated login dirs, so the sharer no
-// longer calls the token endpoint at all. The long-lived setup token
-// (claude setup-token -> setup-token.txt) is the intended auth now. Every
-// refresh function below is kept intact - set this to true to restore v3.
-const REFRESH_ENABLED = false;
 const EXPIRY_BUFFER_MS = 300000, REFRESH_MIN_MS = 45000;
 const REFRESH_LEAD_MS = 10800000, REFRESH_LEAD_JITTER_MS = 900000, REFRESH_MIN_OK_GAP_MS = 900000;
 const REFRESH_COOLDOWNS_MS = [900000, 1800000, 3600000, 7200000];
@@ -357,17 +338,6 @@ async function getToken(creds, path) {
   if (!o || !o.accessToken || !o.refreshToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
   const now = Date.now(), exp = typeof o.expiresAt === "number" ? o.expiresAt : 0;
   const usable = now < exp - EXPIRY_BUFFER_MS;
-  // v4: with auto-refresh off, a valid on-disk token is used as-is and an
-  // expired one pauses this source with the one-step fix. The pause is short
-  // (60s) and costs only local disk reads per retry, so a setup-token.txt
-  // drop-in or a re-login is picked up within about a minute - no restart.
-  // The message is static (no clock) so warnOnce prints it exactly once.
-  if (!REFRESH_ENABLED) {
-    if (usable) return o.accessToken;
-    throw Object.assign(new Error(
-      "Claude sign-in expired (auto-refresh is off in v4). One-step fix: run  claude setup-token  and save the token into setup-token.txt next to .credentials.json - picked up automatically. A fresh sign-in works too."
-    ), { code: "cooldown", until: now + 60000 });
-  }
   const st = await readState(path);
   let lead = (st.jitterForExp === exp && typeof st.jitterMs === "number") ? st.jitterMs : -1;
   if (lead < 0) { lead = Math.floor(Math.random() * REFRESH_LEAD_JITTER_MS); await writeState(path, { jitterForExp: exp, jitterMs: lead }); }
@@ -665,17 +635,6 @@ console.log("   Your usage now shows on the class dashboard, live.");
 console.log("   Keep this window open. Close it anytime to stop.");
 console.log("  ============================================");
 console.log("");
-// v4 startup hint: say up front which auth mode this run is in, so a member
-// can fix a missing setup token BEFORE the sign-in expires mid-day.
-findSetupToken().then(function (t) {
-  if (t) { console.log("  " + stamp() + "  long-lived sharer token found - refresh-free mode (recommended)"); }
-  else {
-    console.log("  " + stamp() + "  no setup token found - using your current sign-in as-is.");
-    console.log("  Tip: run  claude setup-token  once and save the token into setup-token.txt");
-    console.log("  next to your .credentials.json. v4 never auto-refreshes sign-ins, so the");
-    console.log("  setup token is what keeps sharing alive around the clock.");
-  }
-});
 loop();
 `;
 

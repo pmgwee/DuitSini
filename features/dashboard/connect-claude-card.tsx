@@ -88,11 +88,11 @@ export function ConnectClaudeCard() {
       {connected === null ? (
         <ConnectCardSkeleton />
       ) : connected ? (
-        <ConnectedView sources={sources} os={os} />
+        <ConnectedView sources={sources} />
       ) : (
         <>
           <p className="mb-4 text-sm text-muted-foreground">
-            See your own Claude usage here, live — no coding needed. Pick your computer, follow the
+            See your own Claude usage here, live — no coding needed. Pick your computer, follow two
             short steps, and keep the window open. You need Claude Code signed in with your own Claude
             Pro/Max account.
           </p>
@@ -137,28 +137,6 @@ export function ConnectClaudeCard() {
               <code className="font-mono text-[10px]">~/.claude</code>). GLM is read from your cc-switch setup,
               untouched. Both then show live side by side.
             </p>
-            <p className="mt-1.5">
-              Sharing key for a dedicated folder — mint it <b className="text-foreground">from that folder</b>{" "}
-              and save it there too:
-            </p>
-            <ul className="mt-1.5 list-disc space-y-0.5 pl-4">
-              <li>
-                Windows:{" "}
-                <code className="font-mono text-[10px]">
-                  $env:CLAUDE_CONFIG_DIR=&quot;$env:USERPROFILE\.claude-pro&quot;; claude setup-token
-                </code>{" "}
-                → copy the code →{" "}
-                <code className="font-mono text-[10px]">
-                  Get-Clipboard | Set-Content &quot;$env:USERPROFILE\.claude-pro\setup-token.txt&quot;
-                </code>
-              </li>
-              <li>
-                Mac:{" "}
-                <code className="font-mono text-[10px]">CLAUDE_CONFIG_DIR=~/.claude-pro claude setup-token</code>{" "}
-                → copy the code →{" "}
-                <code className="font-mono text-[10px]">pbpaste &gt; ~/.claude-pro/setup-token.txt</code>
-              </li>
-            </ul>
           </details>
 
           <p className="mt-3 text-[11px] text-muted-foreground/70">
@@ -199,7 +177,7 @@ function ConnectCardSkeleton() {
 /* Connected view — showcase the sources the bridge is broadcasting    */
 /* ------------------------------------------------------------------ */
 
-function ConnectedView({ sources, os }: { sources: ConnectedSource[]; os: OS }) {
+function ConnectedView({ sources }: { sources: ConnectedSource[] }) {
   return (
     <div>
       {sources.length > 0 ? (
@@ -227,41 +205,6 @@ function ConnectedView({ sources, os }: { sources: ConnectedSource[]; os: OS }) 
         </a>{" "}
         · to stop, close the window.
       </p>
-
-      {/* v4 upgrade path: members on an old sharer (or without a sharing key)
-          stop updating a few hours after their sign-in expires. This is the
-          self-serve fix, shown without nagging the healthy ones. */}
-      <details className="mt-3 rounded-lg border border-border/40 bg-surface/30 px-3 py-2 text-[11px] text-muted-foreground/80">
-        <summary className="cursor-pointer select-none font-medium text-muted-foreground">
-          Sharing stops after a few hours? Add your sharing key
-        </summary>
-        <div className="mt-1.5 space-y-1 text-xs">
-          <p>
-            Newer sharers no longer auto-renew your Claude sign-in (renewing in a loop got accounts
-            rate-limited). A one-time <b className="text-foreground">sharing key</b> fixes it for
-            good:
-          </p>
-          <ol className="list-decimal space-y-1 pl-4">
-            <li>
-              <a
-                href="/api/bridge/download"
-                className="font-medium text-primary underline-offset-2 hover:underline"
-              >
-                Re-download the sharer
-              </a>{" "}
-              and replace your old one.
-            </li>
-            <li>
-              Open {os === "windows" ? "PowerShell" : "Terminal"}, then:
-              <SharingKeySteps os={os} />
-            </li>
-            <li>
-              Start the new sharer — it should say{" "}
-              <b className="text-foreground">“long-lived sharer token found”</b>.
-            </li>
-          </ol>
-        </div>
-      </details>
     </div>
   );
 }
@@ -325,19 +268,13 @@ function WindowsPanel() {
       </Button>
 
       <ol className="mt-4 space-y-2.5 text-sm text-muted-foreground">
-        <Step n={1}>
-          Click the button above, save the ZIP, then unzip it (right-click →{" "}
-          <b className="text-foreground">Extract All</b>).
-        </Step>
+        <Step n={1}>Click the button above and save the ZIP file.</Step>
         <Step n={2}>
-          <b className="text-foreground">Create your sharing key</b> (one time — this keeps tracking
-          alive around the clock). Open <b className="text-foreground">PowerShell</b> (press the
-          Windows key, type “powershell”, Enter).
-          <SharingKeySteps os="windows" />
+          Open it and unzip (right-click → <b className="text-foreground">Extract All</b>).
         </Step>
         <Step n={3}>
-          Double-click <b className="text-foreground">START-HERE (Windows)</b>. The window should say{" "}
-          <b className="text-foreground">“long-lived sharer token found”</b> — keep it open.
+          Double-click <b className="text-foreground">START-HERE (Windows)</b>. Keep the window that
+          opens open.
         </Step>
         <Step n={4}>Done! Your usage appears above, live. Close the window anytime to stop.</Step>
       </ol>
@@ -407,19 +344,13 @@ function MacPanel() {
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
 
       <ol className="mt-4 space-y-2.5 text-sm text-muted-foreground">
-        <Step n={1}>
+        <Step n={1}>Click the button above to reveal your one-line command, then copy it.</Step>
+        <Step n={2}>
           Open <b className="text-foreground">Terminal</b> (press <b className="text-foreground">Cmd
           + Space</b>, type “Terminal”, press Enter).
         </Step>
-        <Step n={2}>
-          <b className="text-foreground">Create your sharing key</b> (one time — this keeps tracking
-          alive around the clock).
-          <SharingKeySteps os="mac" />
-        </Step>
         <Step n={3}>
-          Click the button above to reveal your one-line command, copy it, paste it into Terminal,
-          press <b className="text-foreground">Enter</b>. It should say{" "}
-          <b className="text-foreground">“long-lived sharer token found”</b> — keep that window open.
+          Paste the command, press <b className="text-foreground">Enter</b>. Keep that window open.
         </Step>
         <Step n={4}>Done! Your usage appears above, live. Close the window anytime to stop.</Step>
       </ol>
@@ -473,67 +404,7 @@ function Step({ n, children }: { n: number; children: React.ReactNode }) {
       <span className="grid size-5 shrink-0 place-items-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
         {n}
       </span>
-      {/* div (not span): steps may contain block-level command lines */}
-      <div className="min-w-0 grow pt-0.5">{children}</div>
+      <span className="pt-0.5">{children}</span>
     </li>
-  );
-}
-
-/**
- * One copyable command line for non-technical members: the command in a code
- * box plus a one-tap copy button, so nobody has to select terminal text.
- */
-function CmdLine({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* clipboard blocked — text stays selectable */
-    }
-  };
-  return (
-    <span className="mt-1.5 mb-1 flex items-center gap-1.5">
-      <code className="block min-w-0 grow select-all overflow-x-auto whitespace-pre rounded-lg bg-background/70 px-2.5 py-1.5 font-mono text-[11px] text-foreground">
-        {text}
-      </code>
-      <button
-        type="button"
-        onClick={copy}
-        aria-label="Copy command"
-        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-surface/60 px-2 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent/60"
-      >
-        {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
-      </button>
-    </span>
-  );
-}
-
-/**
- * The one-time "sharing key" steps (v4: the sharer never auto-refreshes
- * sign-ins, so this key is what keeps tracking alive around the clock).
- * Rendered inside the setup flows and the connected-view troubleshooter.
- */
-function SharingKeySteps({ os }: { os: OS }) {
-  return (
-    <>
-      <span className="block">
-        Run this, approve in the browser that opens, then <b className="text-foreground">copy</b> the
-        long code starting with <code className="font-mono text-[11px]">sk-ant-</code>:
-      </span>
-      <CmdLine text="claude setup-token" />
-      <span className="block">
-        Then run this — it saves the code you just copied to the right place:
-      </span>
-      <CmdLine
-        text={
-          os === "windows"
-            ? 'Get-Clipboard | Set-Content "$env:USERPROFILE\\.claude\\setup-token.txt"'
-            : "pbpaste > ~/.claude/setup-token.txt"
-        }
-      />
-    </>
   );
 }
