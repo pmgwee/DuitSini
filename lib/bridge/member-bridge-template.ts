@@ -28,6 +28,29 @@
  * placed in `setup-token.txt` or CLAUDE_SHARER_TOKEN) skips the refresh
  * endpoint entirely; absent it, the normal sign-in flow needs no extra setup.
  *
+ * v5 — cc-switch parity (current behavior; verified against
+ * farion1231/cc-switch's subscription service, which reads creds and never
+ * refreshes). `REFRESH_ENABLED = false` disables ALL v3 refresh machinery
+ * (kept intact below for a future re-enable — the token endpoint is never
+ * called; even v3's discipline still hit refresh-429 lockouts on dedicated
+ * login dirs):
+ *   (1) SERVER-AUTHORITATIVE tokens: an on-disk access token is used AS-IS
+ *       even past its recorded expiresAt — only a real 401/403 from the usage
+ *       endpoint retires it (tokens often outlive the recorded expiry;
+ *       cc-switch ships the same bet).
+ *   (2) CANDIDATE FAILOVER: on 401/403 the sharer walks the next credential
+ *       source (dedicated dirs → macOS Keychain → general dirs), logging the
+ *       active source whenever it changes. A 429 pauses the stream
+ *       immediately — never multiplied across candidates. All-rejected → a
+ *       short pause with the one-step `claude setup-token` fix; a fingerprint
+ *       of on-disk auth material gates early resume (a rejected token that
+ *       merely LOOKS unexpired cannot insta-resume into the same 401).
+ *   (3) macOS KEYCHAIN source: the "Claude Code-credentials" item, read like
+ *       cc-switch does (newer CLIs on mac store creds only there).
+ *   (4) CONFIGURABLE CADENCE: pushSeconds from a sharer-config.json beside
+ *       the script (env CLAUDE_SHARER_PUSH_SECONDS wins), clamped 60–3600s;
+ *       the 60s default equals cc-switch's own minimum auto-query interval.
+ *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
  * injected via the __PLACEHOLDER__ tokens.
@@ -43,8 +66,10 @@ const SOURCE = `#!/usr/bin/env node
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
 
-const SHARER_VERSION = "3";
+const SHARER_VERSION = "5";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
 const BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
@@ -63,7 +88,10 @@ const UA = "claude-code/2.1.9";
 // MIN_429_BACKOFF_MS is a floor: some 429s come back with retry-after: 0 (a
 // documented footgun on this endpoint) - never retry faster than this, or a
 // "0" would spin us straight back into the limit.
-const PUSH_MS = 60000, PUSH_JITTER_MS = 8000, COMMAND_MS = 4000, MIN_GAP_MS = 9000, MIN_429_BACKOFF_MS = 60000;
+// v5: PUSH_MS is configurable per member (cc-switch-style; see loadPushMs).
+// The 60s default equals cc-switch's own minimum auto-query interval.
+let PUSH_MS = 60000;
+const PUSH_JITTER_MS = 8000, COMMAND_MS = 4000, MIN_GAP_MS = 9000, MIN_429_BACKOFF_MS = 60000;
 // Token-refresh discipline. Subscription access tokens live about 8 hours,
 // and the refresh endpoint flags a login that gets retried in a loop (that
 // flag is what bricked the sign-in for a whole night). So refreshes are:
@@ -79,6 +107,13 @@ const PUSH_MS = 60000, PUSH_JITTER_MS = 8000, COMMAND_MS = 4000, MIN_GAP_MS = 90
 // EXPIRY_BUFFER_MS is only the "stop using this token" cutoff, no longer the
 // refresh trigger. REFRESH_MIN_OK_GAP_MS stops a hot loop if token lifetimes
 // ever shrink below the lead time.
+// v5 KILL-SWITCH: auto-refresh against the token endpoint is DISABLED. Three
+// hardening rounds (early+jittered, cooldown ladder, persisted state) still
+// ended in refresh-429 lockouts on dedicated login dirs, so the sharer no
+// longer calls the token endpoint at all - tokens are used as-is and the
+// usage endpoint's own 401/403 is the only authority (cc-switch parity).
+// Every refresh function below is kept intact - set true to restore v3.
+const REFRESH_ENABLED = false;
 const EXPIRY_BUFFER_MS = 300000, REFRESH_MIN_MS = 45000;
 const REFRESH_LEAD_MS = 10800000, REFRESH_LEAD_JITTER_MS = 900000, REFRESH_MIN_OK_GAP_MS = 900000;
 const REFRESH_COOLDOWNS_MS = [900000, 1800000, 3600000, 7200000];
@@ -101,7 +136,7 @@ let lastTickAt = Date.now(), scheduledGap = 4000;
 // Per-source scheduling: a rate-limited source pauses ITSELF (nextAt in the
 // future) while every other source keeps flowing - one busy endpoint must
 // never blank the whole dashboard again.
-const sources = { pro: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false }, glm: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false } };
+const sources = { pro: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, activeLabel: "", lastRejects: "", pausedFp: "" }, glm: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false } };
 
 const stamp = () => new Date().toLocaleTimeString();
 function fmtClock(t) { return new Date(t).toLocaleTimeString(); }
@@ -166,19 +201,68 @@ function proCredsCandidates() {
   return out;
 }
 
-// First candidate creds file that holds a usable Claude subscription OAuth
-// token. Returns { path, creds } or null. Re-read from disk every cycle, so a
-// member who re-logs-in after an expiry is picked up automatically within a
-// cycle - no restart needed.
-async function findProCreds() {
+// The OAuth blob inside a credentials JSON. Both key spellings occur in the
+// wild (cc-switch parses both too).
+function oauthEntryOf(creds) {
+  if (!creds || typeof creds !== "object") return null;
+  return creds.claudeAiOauth || creds["claude.ai_oauth"] || null;
+}
+
+// macOS Keychain source (darwin only): the same "Claude Code-credentials"
+// item cc-switch reads - newer CLIs on mac store creds ONLY there. Missing
+// entry / non-mac / any error resolves null (silent skip).
+function readKeychainCreds() {
+  if (process.platform !== "darwin") return Promise.resolve(null);
+  return new Promise(function (resolve) {
+    execFile("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], { timeout: 4000 }, function (err, stdout) {
+      if (err) return resolve(null);
+      try { resolve(JSON.parse(String(stdout || "").trim())); } catch (e) { resolve(null); }
+    });
+  });
+}
+
+// v5 walk order: dedicated dirs first (a deliberate member choice), then the
+// macOS Keychain, then the general fallbacks. Each source: { label, path,
+// read() -> creds JSON or null }. Labels surface in logs so the member always
+// knows WHICH login is feeding the dashboard.
+function proCredSources() {
+  const paths = proCredsCandidates();
+  const fileSource = function (p) {
+    return {
+      label: p, path: p,
+      read: async function () { try { return JSON.parse(await readFile(p, "utf8")); } catch (e) { return null; } },
+    };
+  };
+  const out = [];
+  // The general tail = CLAUDE_CONFIG_DIR (if set) + the plain ~/.claude;
+  // everything before it is a dedicated dir. The keychain slots between.
+  const tailStart = paths.length - (process.env.CLAUDE_CONFIG_DIR ? 2 : 1);
+  for (let i = 0; i < tailStart; i++) out.push(fileSource(paths[i]));
+  out.push({ label: "macOS Keychain", path: null, read: readKeychainCreds });
+  for (let i = tailStart; i < paths.length; i++) out.push(fileSource(paths[i]));
+  return out;
+}
+
+// Cheap identity of the auth material on disk (token tails only, never full
+// secrets). Captured when the pro stream pauses on all-rejected; the stream
+// resumes EARLY only when this CHANGES (a re-login or a new setup token) -
+// never because a rejected token merely looks unexpired, which would resume
+// straight back into the same 401 every few seconds. The keychain is
+// deliberately excluded (spawning the security tool every tick is heavy); a
+// keychain re-login is still picked up by the normal pause expiry (~60s).
+async function credsFingerprint() {
+  const parts = [];
+  const fromEnv = (process.env.CLAUDE_SHARER_TOKEN || "").trim();
+  parts.push(fromEnv ? fromEnv.slice(-12) : "-");
   for (const p of proCredsCandidates()) {
-    let creds;
-    try { creds = JSON.parse(await readFile(p, "utf8")); }
-    catch (e) { continue; }
-    const o = creds.claudeAiOauth;
-    if (o && o.accessToken && o.refreshToken) return { path: p, creds: creds };
+    try {
+      const o = oauthEntryOf(JSON.parse(await readFile(p, "utf8")));
+      parts.push(o && o.accessToken ? String(o.accessToken).slice(-12) : "-");
+    } catch (e) { parts.push("-"); }
+    try { parts.push((await readFile(join(dirname(p), "setup-token.txt"), "utf8")).trim().slice(-12)); }
+    catch (e) { parts.push("-"); }
   }
-  return null;
+  return parts.join("|");
 }
 
 // Optional long-lived token path (power users / troubleshooting): a token from
@@ -196,6 +280,27 @@ async function findSetupToken() {
     } catch (e) { /* not there - normal */ }
   }
   return null;
+}
+
+// v5: the script's own directory - sharer-config.json lives beside the script.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+
+// Effective push cadence: env CLAUDE_SHARER_PUSH_SECONDS wins, else
+// {"pushSeconds": N} from a sharer-config.json beside this script, else 60s.
+// Clamped to [60, 3600] - 60s equals cc-switch's own minimum auto-query
+// interval, so even the fastest setting stays inside a proven-safe envelope.
+async function loadPushMs() {
+  let secs = null;
+  const raw = (process.env.CLAUDE_SHARER_PUSH_SECONDS || "").trim();
+  if (raw) { const n = parseInt(raw, 10); if (Number.isFinite(n)) secs = n; }
+  if (secs == null) {
+    try {
+      const j = JSON.parse(await readFile(join(SCRIPT_DIR, "sharer-config.json"), "utf8"));
+      if (j && typeof j.pushSeconds === "number" && Number.isFinite(j.pushSeconds)) secs = j.pushSeconds;
+    } catch (e) { /* absent or corrupt config - keep the default silently */ }
+  }
+  if (secs == null) return 60000;
+  return Math.min(3600, Math.max(60, Math.floor(secs))) * 1000;
 }
 
 async function writeCreds(path, creds) {
@@ -335,7 +440,14 @@ async function attemptRefresh(creds, path, staleExp) {
 // pauses this source quietly instead of climbing any backoff ladder.
 async function getToken(creds, path) {
   const o = creds.claudeAiOauth;
-  if (!o || !o.accessToken || !o.refreshToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
+  if (!o || !o.accessToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
+  // v5 (cc-switch parity): with auto-refresh off, the on-disk token is used
+  // AS-IS even past its recorded expiresAt - the server is the authority, and
+  // a real 401/403 is handled by the candidate walk in fetchProSnapshot.
+  // (Normally unreachable while REFRESH_ENABLED is false - the walk bypasses
+  // getToken - kept as a guard so nothing can reach the refresh code below.)
+  if (!REFRESH_ENABLED) return o.accessToken;
+  if (!o.refreshToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
   const now = Date.now(), exp = typeof o.expiresAt === "number" ? o.expiresAt : 0;
   const usable = now < exp - EXPIRY_BUFFER_MS;
   const st = await readState(path);
@@ -379,7 +491,9 @@ async function fetchUsage(token) {
     let detail = ""; try { detail = (await r.text()).slice(0, 160); } catch (e) { /* body may be empty */ }
     throw Object.assign(new Error("Anthropic usage rate-limited (429)" + (ra ? " retry-after=" + ra + "s" : "") + (reset ? " reset=" + reset : "") + (detail ? " body=" + detail : "")), { code: 429, retryMs: retryMsFrom(ra, reset) });
   }
-  if (r.status === 403) throw new Error("Usage is only available on a Claude Pro or Max plan (not a free plan or a different provider).");
+  // 403 is coded like 401: for the v5 candidate walk both mean "this login
+  // cannot serve usage" (revoked vs not-a-Pro-plan) - try the next source.
+  if (r.status === 403) throw Object.assign(new Error("Usage is only available on a Claude Pro or Max plan (not a free plan or a different provider)."), { code: 403 });
   if (!r.ok) throw new Error("Usage check failed (" + r.status + ").");
   return r.json();
 }
@@ -428,37 +542,74 @@ function snapFromUsage(usage) {
   return { five_hour: pickWindow(usage.five_hour), seven_day: pickWindow(usage.seven_day), limits: normLimits(usage) };
 }
 
-async function fetchAnthropicSnapshot(creds, path) {
-  let token = await getToken(creds, path), usage;
-  try { usage = await fetchUsage(token); }
-  catch (e) {
-    if (e.code === 401) {
-      // The server rejected a token we thought was valid - treat it as expired
-      // and go back through the same cooldown-aware gate as everything else,
-      // so a bad token can never turn into a refresh retry loop.
-      if (creds.claudeAiOauth) creds.claudeAiOauth.expiresAt = Date.now() - 1;
-      token = await getToken(creds, path);
-      usage = await fetchUsage(token);
-    } else throw e;
-  }
-  return snapFromUsage(usage);
+// Remember which login currently feeds the dashboard and announce changes -
+// with failover across several logins the member must always be able to see
+// WHICH account's numbers they are looking at.
+function noteActiveSource(label) {
+  if (sources.pro.activeLabel === label) return;
+  sources.pro.activeLabel = label;
+  sources.pro.lastRejects = "";
+  console.log("  " + stamp() + "  [Claude Pro] now using: " + label);
 }
 
-// Claude Pro snapshot: prefer the optional long-lived setup token (zero calls
-// to the refresh endpoint, ever); otherwise the normal sign-in with the
-// scheduled refresh above. A rejected setup token falls back to the sign-in
-// with a single warning instead of failing the stream.
-async function fetchProSnapshot(proCreds) {
+/**
+ * Claude Pro snapshot - the v5 walk (cc-switch parity). Order: the long-lived
+ * setup token first (never talks to any token endpoint), then each credential
+ * source (dedicated dirs -> macOS Keychain -> general dirs). Every token is
+ * tried AS-IS with no expiry gating - the server is the authority:
+ *   - 401/403  -> this login can't serve usage; advance to the next source.
+ *   - 429      -> STOP the walk (throttling is endpoint-level; trying more
+ *                 candidates would multiply pressure) - pauseSource backs off.
+ *   - network  -> STOP (safeFetch already retried; says nothing about tokens).
+ *   - all-rejected -> short pause with the one-step fix; re-walked ~1/min and
+ *                 resumed early only when the on-disk auth material CHANGES.
+ */
+async function fetchProSnapshot() {
   const setupTok = await findSetupToken();
   if (setupTok) {
-    try { return snapFromUsage(await fetchUsage(setupTok)); }
-    catch (e) {
+    try {
+      const snap = snapFromUsage(await fetchUsage(setupTok));
+      noteActiveSource("setup token");
+      return snap;
+    } catch (e) {
       if (e && e.code === 429) throw e;
       warnOnce("long-lived sharer token not accepted (" + ((e && e.message) || "error") + "); using the normal sign-in");
     }
   }
-  if (!proCreds) throw new Error("No Claude Pro sign-in found");
-  return fetchAnthropicSnapshot(proCreds.creds, proCreds.path);
+  let sawCreds = false;
+  const rejects = [];
+  for (const src of proCredSources()) {
+    const oauth = oauthEntryOf(await src.read());
+    if (!oauth || !oauth.accessToken) continue;
+    sawCreds = true;
+    // REFRESH_ENABLED is the dormant v3 path: file sources would go through
+    // getToken's scheduled refresh. With refresh off (v5) the token is used
+    // as-is; the keychain source is always as-is (nothing can write it back).
+    const token = (src.path && REFRESH_ENABLED)
+      ? await getToken({ claudeAiOauth: oauth }, src.path)
+      : oauth.accessToken;
+    try {
+      const snap = snapFromUsage(await fetchUsage(token));
+      noteActiveSource(src.label);
+      return snap;
+    } catch (e) {
+      if (e && (e.code === 401 || e.code === 403)) {
+        rejects.push(src.label + " (" + e.code + ")");
+        continue;
+      }
+      throw e;
+    }
+  }
+  if (!sawCreds) throw new Error("No Claude Pro sign-in found");
+  // One line when the rejection set CHANGES - not one per cycle.
+  const summary = rejects.join(", ");
+  if (summary && summary !== sources.pro.lastRejects) {
+    sources.pro.lastRejects = summary;
+    console.warn("  " + stamp() + "  [Claude Pro] sign-in rejected on: " + summary);
+  }
+  throw Object.assign(new Error(
+    "All found Claude sign-ins were rejected by the server. One-step fix: run  claude setup-token  and save the token into setup-token.txt next to .credentials.json - picked up automatically. A fresh sign-in works too."
+  ), { code: "cooldown", until: Date.now() + 60000 });
 }
 
 // Fetch GLM Coding Plan usage from a z.ai/bigmodel gateway using the provider's
@@ -550,27 +701,30 @@ function pauseSource(key, label, e) {
 
 async function fetchAndPush(reason) {
   const now = Date.now();
-  const proCreds = await findProCreds();
   const provider = await detectProvider();
   const streams = [];
   const notes = [];
-  // A pause caused by an expired/rate-limited sign-in ends the moment a fresh
-  // login lands on disk (the member re-logged-in, or a sibling refreshed) -
-  // this local file check costs nothing and makes recovery instant, keeping
-  // the "a re-login is picked up automatically" promise in the pause message.
-  if (now < sources.pro.nextAt && sources.pro.resumeOnFreshCreds && proCreds) {
-    const fo = proCreds.creds.claudeAiOauth;
-    if (fo && fo.accessToken && typeof fo.expiresAt === "number" && now < fo.expiresAt - EXPIRY_BUFFER_MS) {
+  // v5: a sign-in-caused pause ends early only when something auth-ish on
+  // disk actually CHANGED (a re-login or a new setup token). Fingerprints,
+  // not expiry timestamps - a server-rejected token can look unexpired, and a
+  // timestamp-based resume would walk straight back into the same 401 every
+  // few seconds.
+  if (now < sources.pro.nextAt && sources.pro.resumeOnFreshCreds) {
+    const fp = await credsFingerprint();
+    if (fp !== sources.pro.pausedFp) {
       sources.pro.nextAt = 0; sources.pro.resumeOnFreshCreds = false;
-      console.log("  " + stamp() + "  found a fresh Claude sign-in on disk - resuming now");
+      console.log("  " + stamp() + "  found a changed Claude sign-in on disk - resuming now");
     }
   }
   if (now >= sources.pro.nextAt) {
     try {
-      const snap = await fetchProSnapshot(proCreds);
+      const snap = await fetchProSnapshot();
       streams.push({ source: "claude_pro", label: "Claude Pro", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: null });
       sources.pro.backoff = 0; sources.pro.streak = 0; sources.pro.nextAt = 0; sources.pro.resumeOnFreshCreds = false;
-    } catch (e) { if (!pauseSource("pro", "Claude Pro", e)) notes.push("Claude Pro: " + ((e && e.message) || "error")); }
+    } catch (e) {
+      if (pauseSource("pro", "Claude Pro", e)) sources.pro.pausedFp = await credsFingerprint();
+      else notes.push("Claude Pro: " + ((e && e.message) || "error"));
+    }
   }
   if (provider && provider.source === "zai" && provider.authToken && now >= sources.glm.nextAt) {
     try {
@@ -628,14 +782,29 @@ async function loop() {
   } finally { scheduledGap = backoff || COMMAND_MS; setTimeout(loop, scheduledGap); }
 }
 
-console.log("");
-console.log("  ============================================");
-console.log("   Claude Usage Sharer v" + SHARER_VERSION + " is running.");
-console.log("   Your usage now shows on the class dashboard, live.");
-console.log("   Keep this window open. Close it anytime to stop.");
-console.log("  ============================================");
-console.log("");
-loop();
+(async function start() {
+  PUSH_MS = await loadPushMs();
+  console.log("");
+  console.log("  ============================================");
+  console.log("   Claude Usage Sharer v" + SHARER_VERSION + " is running.");
+  console.log("   Your usage now shows on the class dashboard, live.");
+  console.log("   Keep this window open. Close it anytime to stop.");
+  console.log("  ============================================");
+  console.log("");
+  console.log("  " + stamp() + "  update cadence: every " + Math.round(PUSH_MS / 1000) + "s  (change via sharer-config.json pushSeconds or CLAUDE_SHARER_PUSH_SECONDS, 60-3600)");
+  // Say up front which auth mode this run is in, so a member can add the
+  // setup token BEFORE a sign-in expires mid-day.
+  const t = await findSetupToken();
+  if (t) {
+    console.log("  " + stamp() + "  long-lived sharer token found - refresh-free mode (recommended)");
+  } else {
+    console.log("  " + stamp() + "  no setup token found - your sign-ins are used as-is until the server rejects them.");
+    console.log("  Tip: run  claude setup-token  once and save the token into setup-token.txt");
+    console.log("  next to your .credentials.json - the sharer never auto-refreshes sign-ins,");
+    console.log("  so the setup token is what keeps sharing alive around the clock.");
+  }
+  loop();
+})();
 `;
 
 export function buildMemberBridge(cfg: {
