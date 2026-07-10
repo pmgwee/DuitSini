@@ -24,9 +24,10 @@
  * The sharer now refreshes EARLY (3h before expiry, jittered), at most once
  * per escalating cooldown window (15m→30m→60m→120m), and persists the cooldown
  * in a `.sharer-state.json` next to the credentials so restarts can never fire
- * an extra attempt. An optional long-lived token (from `claude setup-token`,
- * placed in `setup-token.txt` or CLAUDE_SHARER_TOKEN) skips the refresh
- * endpoint entirely; absent it, the normal sign-in flow needs no extra setup.
+ * an extra attempt. (v3 also honored an optional long-lived token from
+ * "claude setup-token" as a refresh-free usage bearer — later DISPROVEN and
+ * removed in v5: such tokens lack the user:profile scope the usage endpoint
+ * requires, so they 403 on every plan; only browser-login OAuth tokens work.)
  *
  * v5 — cc-switch parity (current behavior; verified against
  * farion1231/cc-switch's subscription service, which reads creds and never
@@ -42,14 +43,19 @@
  *       source (dedicated dirs → macOS Keychain → general dirs), logging the
  *       active source whenever it changes. A 429 pauses the stream
  *       immediately — never multiplied across candidates. All-rejected → a
- *       short pause with the one-step `claude setup-token` fix; a fingerprint
- *       of on-disk auth material gates early resume (a rejected token that
- *       merely LOOKS unexpired cannot insta-resume into the same 401).
+ *       short pause with a "sign in again" message; a fingerprint of on-disk
+ *       auth material gates early resume (a rejected token that merely LOOKS
+ *       unexpired cannot insta-resume into the same 401).
  *   (3) macOS KEYCHAIN source: the "Claude Code-credentials" item, read like
  *       cc-switch does (newer CLIs on mac store creds only there).
  *   (4) CONFIGURABLE CADENCE: pushSeconds from a sharer-config.json beside
  *       the script (env CLAUDE_SHARER_PUSH_SECONDS wins), clamped 60–3600s;
  *       the 60s default equals cc-switch's own minimum auto-query interval.
+ *   (5) NO SETUP-TOKEN PATH: "claude setup-token" bearers lack the
+ *       user:profile scope this endpoint requires and 403 on every plan
+ *       (openclaw #4614) — only browser-login credentials can serve usage,
+ *       so v5 removed the v3/v4 setup-token layer entirely (cc-switch has no
+ *       such path either).
  *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
@@ -245,41 +251,21 @@ function proCredSources() {
 
 // Cheap identity of the auth material on disk (token tails only, never full
 // secrets). Captured when the pro stream pauses on all-rejected; the stream
-// resumes EARLY only when this CHANGES (a re-login or a new setup token) -
-// never because a rejected token merely looks unexpired, which would resume
-// straight back into the same 401 every few seconds. The keychain is
-// deliberately excluded (spawning the security tool every tick is heavy); a
-// keychain re-login is still picked up by the normal pause expiry (~60s).
+// resumes EARLY only when this CHANGES (a re-login, or a login moved into a
+// new candidate dir) - never because a rejected token merely looks
+// unexpired, which would resume straight back into the same 401 every few
+// seconds. The keychain is deliberately excluded (spawning the security tool
+// every tick is heavy); a keychain re-login is still picked up by the normal
+// pause expiry (~60s).
 async function credsFingerprint() {
   const parts = [];
-  const fromEnv = (process.env.CLAUDE_SHARER_TOKEN || "").trim();
-  parts.push(fromEnv ? fromEnv.slice(-12) : "-");
   for (const p of proCredsCandidates()) {
     try {
       const o = oauthEntryOf(JSON.parse(await readFile(p, "utf8")));
       parts.push(o && o.accessToken ? String(o.accessToken).slice(-12) : "-");
     } catch (e) { parts.push("-"); }
-    try { parts.push((await readFile(join(dirname(p), "setup-token.txt"), "utf8")).trim().slice(-12)); }
-    catch (e) { parts.push("-"); }
   }
   return parts.join("|");
-}
-
-// Optional long-lived token path (power users / troubleshooting): a token from
-// "claude setup-token" placed in setup-token.txt next to any candidate creds
-// file, or in CLAUDE_SHARER_TOKEN. When present, usage is fetched with it
-// directly and the refresh endpoint is NEVER called. Absent for most members -
-// the normal sign-in flow needs no extra setup.
-async function findSetupToken() {
-  const fromEnv = (process.env.CLAUDE_SHARER_TOKEN || "").trim();
-  if (fromEnv.indexOf("sk-ant-") === 0) return fromEnv;
-  for (const credsPath of proCredsCandidates()) {
-    try {
-      const t = (await readFile(join(dirname(credsPath), "setup-token.txt"), "utf8")).trim();
-      if (t.indexOf("sk-ant-") === 0) return t;
-    } catch (e) { /* not there - normal */ }
-  }
-  return null;
 }
 
 // v5: the script's own directory - sharer-config.json lives beside the script.
@@ -553,29 +539,23 @@ function noteActiveSource(label) {
 }
 
 /**
- * Claude Pro snapshot - the v5 walk (cc-switch parity). Order: the long-lived
- * setup token first (never talks to any token endpoint), then each credential
- * source (dedicated dirs -> macOS Keychain -> general dirs). Every token is
- * tried AS-IS with no expiry gating - the server is the authority:
+ * Claude Pro snapshot - the v5 walk (cc-switch parity). Each credential source
+ * (dedicated dirs -> macOS Keychain -> general dirs) is tried in order. Every
+ * token is used AS-IS with no expiry gating - the server is the authority:
  *   - 401/403  -> this login can't serve usage; advance to the next source.
  *   - 429      -> STOP the walk (throttling is endpoint-level; trying more
  *                 candidates would multiply pressure) - pauseSource backs off.
  *   - network  -> STOP (safeFetch already retried; says nothing about tokens).
- *   - all-rejected -> short pause with the one-step fix; re-walked ~1/min and
- *                 resumed early only when the on-disk auth material CHANGES.
+ *   - all-rejected -> short pause with a "sign in again" message; re-walked
+ *                 ~1/min and resumed early only when the on-disk auth material
+ *                 CHANGES.
+ *
+ * Note on setup-token (deliberately NOT used): a bearer from "claude
+ * setup-token" lacks the user:profile scope this endpoint requires and 403s on
+ * every plan (openclaw #4614) - only browser-login credentials can serve usage,
+ * so there is no setup-token path here. cc-switch has none either.
  */
 async function fetchProSnapshot() {
-  const setupTok = await findSetupToken();
-  if (setupTok) {
-    try {
-      const snap = snapFromUsage(await fetchUsage(setupTok));
-      noteActiveSource("setup token");
-      return snap;
-    } catch (e) {
-      if (e && e.code === 429) throw e;
-      warnOnce("long-lived sharer token not accepted (" + ((e && e.message) || "error") + "); using the normal sign-in");
-    }
-  }
   let sawCreds = false;
   const rejects = [];
   for (const src of proCredSources()) {
@@ -608,7 +588,7 @@ async function fetchProSnapshot() {
     console.warn("  " + stamp() + "  [Claude Pro] sign-in rejected on: " + summary);
   }
   throw Object.assign(new Error(
-    "All found Claude sign-ins were rejected by the server. One-step fix: run  claude setup-token  and save the token into setup-token.txt next to .credentials.json - picked up automatically. A fresh sign-in works too."
+    "All found Claude sign-ins were rejected by the server. Please sign in to Claude Code with your Claude Pro/Max account again (or in a dedicated folder like ~/.claude-pro). A fresh login on this computer is picked up automatically."
   ), { code: "cooldown", until: Date.now() + 60000 });
 }
 
@@ -705,10 +685,10 @@ async function fetchAndPush(reason) {
   const streams = [];
   const notes = [];
   // v5: a sign-in-caused pause ends early only when something auth-ish on
-  // disk actually CHANGED (a re-login or a new setup token). Fingerprints,
-  // not expiry timestamps - a server-rejected token can look unexpired, and a
-  // timestamp-based resume would walk straight back into the same 401 every
-  // few seconds.
+  // disk actually CHANGED (a re-login, or a login moved into a new folder).
+  // Fingerprints, not expiry timestamps - a server-rejected token can look
+  // unexpired, and a timestamp-based resume would walk straight back into the
+  // same 401 every few seconds.
   if (now < sources.pro.nextAt && sources.pro.resumeOnFreshCreds) {
     const fp = await credsFingerprint();
     if (fp !== sources.pro.pausedFp) {
@@ -792,17 +772,8 @@ async function loop() {
   console.log("  ============================================");
   console.log("");
   console.log("  " + stamp() + "  update cadence: every " + Math.round(PUSH_MS / 1000) + "s  (change via sharer-config.json pushSeconds or CLAUDE_SHARER_PUSH_SECONDS, 60-3600)");
-  // Say up front which auth mode this run is in, so a member can add the
-  // setup token BEFORE a sign-in expires mid-day.
-  const t = await findSetupToken();
-  if (t) {
-    console.log("  " + stamp() + "  long-lived sharer token found - refresh-free mode (recommended)");
-  } else {
-    console.log("  " + stamp() + "  no setup token found - your sign-ins are used as-is until the server rejects them.");
-    console.log("  Tip: run  claude setup-token  once and save the token into setup-token.txt");
-    console.log("  next to your .credentials.json - the sharer never auto-refreshes sign-ins,");
-    console.log("  so the setup token is what keeps sharing alive around the clock.");
-  }
+  console.log("  " + stamp() + "  reading your Claude Code sign-in(s) from disk (dedicated folders -> macOS Keychain -> ~/.claude).");
+  console.log("  If sharing stops later, just sign in to Claude Code again - it is picked up automatically.");
   loop();
 })();
 `;
