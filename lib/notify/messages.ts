@@ -5,6 +5,7 @@ import { formatMYR, toMYR } from "@/lib/domain/fx";
 import { daysUntil, formatLongDate, parseISODate } from "@/lib/domain/dates";
 import { CATEGORY_EMOJI, CATEGORY_META, type Category } from "@/lib/constants";
 import type { DueReminder } from "@/lib/reminders/engine";
+import type { MonthlyReportTotalsV1, YearlyReportTotalsV1 } from "@/lib/reports/types";
 
 /** "today" / "tomorrow" / "in N days" / past phrasing for the days-until count. */
 function whenPhrase(days: number): string {
@@ -121,5 +122,112 @@ export function buildDigestMessage(
     sections.push(lines.join("\n"));
   }
   const html = sections.join("\n\n");
+  return { text: html.replace(/<[^>]+>/g, ""), html };
+}
+
+/* ============================================================
+   Report highlight messages (Phase 4)
+   Compact Telegram highlights + a deep link to the full in-app
+   statement. The page carries the detail; this is the teaser.
+   ============================================================ */
+
+/** "▲ 5.2% vs May" / "▼ 3% vs 2024" / "new" (null delta). */
+function deltaPhrase(deltaPct: number | null, vsLabel: string): string {
+  if (deltaPct == null) return "new";
+  const arrow = deltaPct > 0 ? "▲" : deltaPct < 0 ? "▼" : "→";
+  return `${arrow} ${Math.abs(deltaPct).toFixed(deltaPct % 1 === 0 ? 0 : 1)}% vs ${vsLabel}`;
+}
+
+/** Long month name from a month_key, e.g. "2026-06" → "June". */
+function monthName(monthKey: string): string {
+  const [, mm] = monthKey.split("-");
+  return parseISODate(`${monthKey}-01`).toLocaleDateString("en-GB", { month: "long" });
+}
+
+/** Previous-period label for the delta phrase: "May" (monthly) / "2024" (yearly). */
+function prevMonthName(monthKey: string): string {
+  const [yyyy, mm] = monthKey.split("-").map(Number);
+  const d = new Date(yyyy, mm - 1, 1);
+  d.setMonth(d.getMonth() - 1);
+  return d.toLocaleDateString("en-GB", { month: "long" });
+}
+
+/** "Streaming RM 120 · SaaS RM 96 · Music RM 45" — top N categories. */
+function topCategoriesLine(
+  categories: { category: string; label: string; totalMYR: number }[],
+  n = 3,
+): string {
+  return categories
+    .slice(0, n)
+    .map((c) => `${escapeTelegramHTML(c.label)} ${escapeTelegramHTML(formatMYR(c.totalMYR))}`)
+    .join(" · ");
+}
+
+/**
+ * Build the Telegram highlights message for a monthly statement. `appUrl` is the
+ * public site root (NEXT_PUBLIC_APP_URL); the deep link opens the full report.
+ */
+export function buildMonthlyReportMessage(
+  totals: MonthlyReportTotalsV1,
+  appUrl: string,
+): NotifyPayload {
+  const link = `${appUrl.replace(/\/+$/, "")}/reports/${totals.monthKey}`;
+  const lines: string[] = [
+    `📊 <b>Your ${escapeTelegramHTML(monthName(totals.monthKey))} report</b>`,
+    `Spent: ${escapeTelegramHTML(formatMYR(totals.totalMYR))} (${escapeTelegramHTML(
+      deltaPhrase(totals.deltaPct, prevMonthName(totals.monthKey)),
+    )}) · ${totals.activeCount} active`,
+  ];
+  if (totals.categories.length > 0) {
+    lines.push(`Top: ${topCategoriesLine(totals.categories)}`);
+  }
+  const trialNote =
+    totals.trialsConverting.length > 0
+      ? ` · ${totals.trialsConverting.length} trial${totals.trialsConverting.length === 1 ? "" : "s"} converting`
+      : "";
+  lines.push(`Next month: ~${escapeTelegramHTML(formatMYR(totals.upcomingTotalMYR))} expected${trialNote}`);
+  if (totals.cancellationSavingsMYR > 0) {
+    lines.push(`💰 Saving ${escapeTelegramHTML(formatMYR(totals.cancellationSavingsMYR))}/mo from cancelled subs`);
+  }
+  lines.push("");
+  lines.push(`<a href="${escapeTelegramHTML(link)}">Open the full report</a>`);
+  const html = lines.join("\n");
+  return { text: html.replace(/<[^>]+>/g, ""), html };
+}
+
+/**
+ * Build the Telegram highlights message for a yearly statement.
+ */
+export function buildYearlyReportMessage(
+  totals: YearlyReportTotalsV1,
+  appUrl: string,
+): NotifyPayload {
+  const link = `${appUrl.replace(/\/+$/, "")}/reports/${totals.yearKey}`;
+  const prevYear = String(Number(totals.yearKey) - 1);
+  const lines: string[] = [
+    `📊 <b>Your ${escapeTelegramHTML(totals.yearKey)} report</b>`,
+    `Spent: ${escapeTelegramHTML(formatMYR(totals.totalMYR))} (${escapeTelegramHTML(
+      deltaPhrase(totals.deltaPct, prevYear),
+    )})`,
+  ];
+  if (totals.categories.length > 0) {
+    lines.push(`Top: ${topCategoriesLine(totals.categories)}`);
+  }
+  lines.push(`Avg/month: ${escapeTelegramHTML(formatMYR(roundMoney(totals.totalMYR / 12)))}`);
+  if (totals.topSubscriptions.length > 0) {
+    const top = totals.topSubscriptions
+      .slice(0, 3)
+      .map(
+        (t) => `${escapeTelegramHTML(t.name)} ${escapeTelegramHTML(formatMYR(t.totalMYR))}`,
+      )
+      .join(" · ");
+    lines.push(`Biggest: ${top}`);
+  }
+  if (totals.cancellationSavingsMYR > 0) {
+    lines.push(`💰 Saved ${escapeTelegramHTML(formatMYR(totals.cancellationSavingsMYR))} from cancelled subs`);
+  }
+  lines.push("");
+  lines.push(`<a href="${escapeTelegramHTML(link)}">Open the full report</a>`);
+  const html = lines.join("\n");
   return { text: html.replace(/<[^>]+>/g, ""), html };
 }

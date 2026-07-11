@@ -16,21 +16,26 @@ export const HOME_CURRENCY = "MYR";
  * approximate ("≈"). Swapping in a live FX feed later only means replacing this
  * table; every consumer calls `toMYR` and needs no other change.
  *
- * The convention is pinned deliberately: storing MYR-per-1-unit (JPY: 0.028,
- * NOT ~36) keeps `toMYR` a plain multiplication and avoids the classic 30×
- * inversion that would silently make a ¥1,500 charge read as RM 54,000.
+ * The convention is pinned deliberately: storing MYR-per-1-unit (JPY: 0.0252,
+ * NOT ~40) keeps `toMYR` a plain multiplication and avoids the classic 30×
+ * inversion that would silently make a ¥1,500 charge read as RM 60,000.
  */
-export const RATE_AS_OF = "2026-07-01";
+export const RATE_AS_OF = "2026-07-11";
 
+// Mid-market rates (MYR per 1 unit) sourced from exchangerate-api's free feed
+// (open.er-api.com/v6/latest/USD) — the same mid-market reference Wise uses, so
+// a USD charge converts to within ~0.1% of what a Wise card actually bills.
+// Manually refreshable: re-fetch that URL, derive each entry as
+// `USD->MYR / USD-><code>`, and bump RATE_AS_OF.
 const RATES_MYR_PER_UNIT: Record<string, number> = {
   MYR: 1,
-  USD: 4.45,
-  EUR: 4.8,
-  GBP: 5.7,
-  SGD: 3.3,
-  AUD: 2.95,
-  JPY: 0.028,
-  INR: 0.052,
+  USD: 4.0707,
+  EUR: 4.6492,
+  GBP: 5.4571,
+  SGD: 3.1521,
+  AUD: 2.8294,
+  JPY: 0.0252,
+  INR: 0.0427,
 };
 
 // Defensive guard: a typo here (e.g. storing the inverse JPY rate ~36) would

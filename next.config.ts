@@ -25,6 +25,13 @@ const nextConfig: NextConfig = {
   // A stray package-lock.json in the user's home directory makes Next infer the
   // wrong workspace root. Pin file tracing to this project's directory.
   outputFileTracingRoot: process.cwd(),
+  // @sparticuz/chromium-min resolves its binary by relative path at runtime —
+  // if Next bundles it, that resolution breaks ("The input directory
+  // /var/task/bin does not exist"). Load-bearing for the SERVERLESS branch of
+  // lib/reports/pdf.ts (production/Vercel). The local-browser auto-detect
+  // branch doesn't touch this package, but do NOT remove this entry or Vercel
+  // prod breaks.
+  serverExternalPackages: ["@sparticuz/chromium-min"],
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

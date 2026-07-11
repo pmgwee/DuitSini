@@ -354,7 +354,7 @@ function MacPanel() {
         </Button>
       )}
 
-      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
 
       <ol className="mt-4 space-y-2.5 text-sm text-muted-foreground">
         <Step n={1}>Click the button above to reveal your one-line command, then copy it.</Step>

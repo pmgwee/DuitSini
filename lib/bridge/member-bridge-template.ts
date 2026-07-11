@@ -49,13 +49,32 @@
  *   (3) macOS KEYCHAIN source: the "Claude Code-credentials" item, read like
  *       cc-switch does (newer CLIs on mac store creds only there).
  *   (4) CONFIGURABLE CADENCE: pushSeconds from a sharer-config.json beside
- *       the script (env CLAUDE_SHARER_PUSH_SECONDS wins), clamped 60–3600s;
- *       the 60s default equals cc-switch's own minimum auto-query interval.
+ *       the script (env CLAUDE_SHARER_PUSH_SECONDS wins), clamped 120–3600s.
  *   (5) NO SETUP-TOKEN PATH: "claude setup-token" bearers lack the
  *       user:profile scope this endpoint requires and 403 on every plan
  *       (openclaw #4614) — only browser-login credentials can serve usage,
  *       so v5 removed the v3/v4 setup-token layer entirely (cc-switch has no
  *       such path either).
+ *
+ * v6 — usage-429 budget hardening (2026-07-11). Three days of field data
+ * (v3/v4/v5 all started ~1:30pm, all died ~7–8pm at 60s cadence — with AND
+ * without refresh calls) showed the binding limit is a server-side rolling
+ * volume/abuse window on the usage endpoint keyed to the ACCOUNT: ~330–390
+ * calls/day tripped it, recovery came only after many hours of total silence
+ * (overnight), and same-day retries at the old 300s-cap ladder kept the flag
+ * warm. So v6:
+ *   (1) DEFAULT CADENCE 300s (cc-switch's own default; 12 calls/h ≈ 192 calls
+ *       over a 16h day — roughly half the observed trip band), floor 120s.
+ *   (2) QUIET PERIODS, not fast retries, on a usage 429: 15m → 30m → 60m
+ *       (retry-after wins if longer), and a changed on-disk login ends the
+ *       pause early (so a deliberate /logout + fresh browser re-login can be
+ *       tested as a recovery the moment it lands on disk).
+ *   (3) MEASUREMENT: every network call to the usage endpoint is counted in a
+ *       .sharer-usage-count.json beside the script (persists across restarts,
+ *       resets at local midnight) and the count is printed on every push and
+ *       on every 429 — so the next failure tells us whether the limit is
+ *       count-based (dies near the same N) or time-based (dies near the same
+ *       clock hours).
  *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
@@ -75,7 +94,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 
-const SHARER_VERSION = "5";
+const SHARER_VERSION = "6";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
 const BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
@@ -85,18 +104,22 @@ const TOKEN_ENDPOINTS = ["https://platform.claude.com/v1/oauth/token", "https://
 const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CC_SWITCH_DB = join(homedir(), ".cc-switch", "cc-switch.db");
 const UA = "claude-code/2.1.9";
-// PUSH_MS is 60s (was 30s): the unofficial /api/oauth/usage endpoint is
-// aggressively rate-limited and third-party pollers at 30s reliably trip a
-// session-long 429 (anthropics/claude-code issues #31637/#30930/#31021). 60s
-// keeps us comfortably under that trigger while the dashboard still feels live.
+// PUSH_MS default is 300s (v6; was 60s in v5, 30s originally): the unofficial
+// /api/oauth/usage endpoint is aggressively rate-limited (anthropics/
+// claude-code issues #31637/#30930/#31021), and three days of field data
+// showed a rolling per-ACCOUNT volume limit on top: polling at 60s died after
+// ~330-390 calls (~6h), no matter whether tokens were refreshed or not, and
+// recovered only after many hours of silence. 300s equals cc-switch's own
+// DEFAULT auto-query interval - about 12 calls/h, roughly half the observed
+// daily trip band even across a 16h day. The dashboard shows "last updated Xm
+// ago", so a 5-minute gauge stays honest without looking offline.
 // PUSH_JITTER_MS spreads the fixed cadence by +/- a few seconds so multiple
 // instances (or several members) don't line up and hit the endpoint in lockstep.
 // MIN_429_BACKOFF_MS is a floor: some 429s come back with retry-after: 0 (a
 // documented footgun on this endpoint) - never retry faster than this, or a
 // "0" would spin us straight back into the limit.
-// v5: PUSH_MS is configurable per member (cc-switch-style; see loadPushMs).
-// The 60s default equals cc-switch's own minimum auto-query interval.
-let PUSH_MS = 60000;
+// PUSH_MS is configurable per member (cc-switch-style; see loadPushMs).
+let PUSH_MS = 300000;
 const PUSH_JITTER_MS = 8000, COMMAND_MS = 4000, MIN_GAP_MS = 9000, MIN_429_BACKOFF_MS = 60000;
 // Token-refresh discipline. Subscription access tokens live about 8 hours,
 // and the refresh endpoint flags a login that gets retried in a loop (that
@@ -272,9 +295,12 @@ async function credsFingerprint() {
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 // Effective push cadence: env CLAUDE_SHARER_PUSH_SECONDS wins, else
-// {"pushSeconds": N} from a sharer-config.json beside this script, else 60s.
-// Clamped to [60, 3600] - 60s equals cc-switch's own minimum auto-query
-// interval, so even the fastest setting stays inside a proven-safe envelope.
+// {"pushSeconds": N} from a sharer-config.json beside this script, else 300s.
+// Clamped to [120, 3600] (v6): the 3-day field data showed continuous 60s
+// polling trips the account's rolling usage-endpoint limit after ~6h, so the
+// fastest allowed setting is 120s - and the 300s default is the setting that
+// clears a full 16h day with margin. Members who want a snappier gauge can
+// set 120-180s, accepting they may hit the daily window on very long days.
 async function loadPushMs() {
   let secs = null;
   const raw = (process.env.CLAUDE_SHARER_PUSH_SECONDS || "").trim();
@@ -285,8 +311,45 @@ async function loadPushMs() {
       if (j && typeof j.pushSeconds === "number" && Number.isFinite(j.pushSeconds)) secs = j.pushSeconds;
     } catch (e) { /* absent or corrupt config - keep the default silently */ }
   }
-  if (secs == null) return 60000;
-  return Math.min(3600, Math.max(60, Math.floor(secs))) * 1000;
+  if (secs == null) return 300000;
+  return Math.min(3600, Math.max(120, Math.floor(secs))) * 1000;
+}
+
+// v6 MEASUREMENT LAYER: count every network call made to the Anthropic usage
+// endpoint, persisted beside the script so restarts keep counting. This is
+// what turns the NEXT rate-limit into a datapoint instead of a mystery:
+//   - dies near the same CALL COUNT on different cadences -> count-based
+//     budget (slow the cadence further);
+//   - dies near the same CLOCK HOURS regardless of count -> time/session-
+//     based (cadence won't fix it; the re-login experiment matters more).
+// Resets at local midnight; survives restarts (a same-day restart must not
+// hide calls already spent from the day's budget).
+const USAGE_COUNT_FILE = join(SCRIPT_DIR, ".sharer-usage-count.json");
+let usageCount = { day: "", count: 0, firstAt: 0 };
+let usageCountLoaded = false;
+async function loadUsageCount() {
+  if (usageCountLoaded) return;
+  usageCountLoaded = true;
+  try {
+    const j = JSON.parse(await readFile(USAGE_COUNT_FILE, "utf8"));
+    if (j && j.day === new Date().toDateString() && typeof j.count === "number") {
+      usageCount = { day: j.day, count: j.count, firstAt: typeof j.firstAt === "number" ? j.firstAt : 0 };
+    }
+  } catch (e) { /* first run or unreadable - start fresh */ }
+}
+async function noteUsageCall() {
+  await loadUsageCount();
+  const day = new Date().toDateString();
+  if (usageCount.day !== day) usageCount = { day: day, count: 0, firstAt: 0 };
+  usageCount.count++;
+  if (!usageCount.firstAt) usageCount.firstAt = Date.now();
+  const tmp = USAGE_COUNT_FILE + "." + process.pid + "." + Math.floor(Math.random() * 1e9) + ".tmp";
+  try { await writeFile(tmp, JSON.stringify(Object.assign({}, usageCount, { lastAt: Date.now() }), null, 2), "utf8"); await rename(tmp, USAGE_COUNT_FILE); }
+  catch (e) { /* counting is best-effort; never block a push */ }
+}
+function usageCallSummary() {
+  if (!usageCount.count) return "no usage calls yet today";
+  return usageCount.count + " usage calls today (since " + fmtClock(usageCount.firstAt) + ")";
 }
 
 async function writeCreds(path, creds) {
@@ -467,6 +530,9 @@ async function getToken(creds, path) {
 }
 
 async function fetchUsage(token) {
+  // Count the ATTEMPT (before knowing the outcome): the server's rolling
+  // window sees every request, including ones that come back 401/403/429.
+  await noteUsageCall();
   const r = await safeFetch(USAGE_ENDPOINT, { headers: { Authorization: "Bearer " + token, "anthropic-beta": "oauth-2025-04-20", "User-Agent": UA, "Content-Type": "application/json" } });
   if (r.status === 401) throw Object.assign(new Error("Sign-in rejected; will refresh."), { code: 401 });
   if (r.status === 429) {
@@ -653,6 +719,23 @@ function pauseSource(key, label, e) {
   if (e && e.code === 429) {
     s.streak++;
     if (e.blockedUntil) { s.nextAt = e.blockedUntil + 2000; }
+    else if (key === "pro") {
+      // v6: an Anthropic usage 429 is a rolling volume/abuse window on the
+      // ACCOUNT (field data: ~330-390 calls tripped it, recovery needed hours
+      // of silence, and the old 300s-cap ladder only kept the flag warm all
+      // evening). So the answer is a real QUIET period - 15m, then 30m, then
+      // 60m - with the server's retry-after winning when it asks for more.
+      const quiet = [900000, 1800000, 3600000];
+      const hold = Math.max(e.retryMs || 0, quiet[Math.min(s.streak, quiet.length) - 1]);
+      s.nextAt = now + hold + Math.floor(Math.random() * 30000);
+      // Log the day's call count AT the trip - the one number that tells us
+      // whether the limit is count-based or time-based (see the counter note).
+      console.warn("  " + stamp() + "  !!  [" + label + "] rate-limited after " + usageCallSummary() + " at " + Math.round(PUSH_MS / 1000) + "s cadence - write this down.");
+      // A deliberate fresh re-login (/logout, then a full browser sign-in) is
+      // the standing experiment for whether a new OAuth session clears the
+      // flag - so let changed on-disk credentials end this pause early.
+      s.resumeOnFreshCreds = true;
+    }
     else if (e.retryMs && e.retryMs > 0) {
       // Honor the header, but never dip below the floor: this endpoint is
       // known to answer 429 with retry-after: 0, which would otherwise retry
@@ -662,7 +745,7 @@ function pauseSource(key, label, e) {
       s.backoff = Math.min(300000, Math.max(MIN_429_BACKOFF_MS, (s.backoff || PUSH_MS) * 2));
       s.nextAt = now + s.backoff;
     }
-    warnOnce("busy [" + label + "] - next try " + fmtClock(s.nextAt) + "  (" + (e.message || "429") + ")");
+    warnOnce("busy [" + label + "] - " + (key === "pro" ? "quiet" : "next try") + " until " + fmtClock(s.nextAt) + "  (" + (e.message || "429") + ")");
     // After a few 429s in a row, reassure the human: the wait is persisted, so
     // neither leaving it open nor restarting can make it worse - it recovers
     // on its own. Reprinted every 3rd hit so it cannot scroll away unseen.
@@ -725,7 +808,8 @@ async function fetchAndPush(reason) {
   lastFetchAt = Date.now(); lastWarn = "";
   for (const s of streams) {
     const f = s.five_hour && s.five_hour.utilization;
-    console.log("  " + stamp() + "  [" + s.label + "] usage sent to dashboard  (5-hour: " + (f == null ? "-" : f + "%") + ")");
+    const meter = s.source === "claude_pro" ? ", query " + usageCount.count + " today" : "";
+    console.log("  " + stamp() + "  [" + s.label + "] usage sent to dashboard  (5-hour: " + (f == null ? "-" : f + "%") + meter + ")");
   }
   if (reason) console.log("  " + stamp() + "  [" + reason + "]");
 }
@@ -764,6 +848,7 @@ async function loop() {
 
 (async function start() {
   PUSH_MS = await loadPushMs();
+  await loadUsageCount();
   console.log("");
   console.log("  ============================================");
   console.log("   Claude Usage Sharer v" + SHARER_VERSION + " is running.");
@@ -771,7 +856,8 @@ async function loop() {
   console.log("   Keep this window open. Close it anytime to stop.");
   console.log("  ============================================");
   console.log("");
-  console.log("  " + stamp() + "  update cadence: every " + Math.round(PUSH_MS / 1000) + "s  (change via sharer-config.json pushSeconds or CLAUDE_SHARER_PUSH_SECONDS, 60-3600)");
+  console.log("  " + stamp() + "  update cadence: every " + Math.round(PUSH_MS / 1000) + "s  (change via sharer-config.json pushSeconds or CLAUDE_SHARER_PUSH_SECONDS, 120-3600)");
+  console.log("  " + stamp() + "  usage-endpoint budget meter: " + usageCallSummary());
   console.log("  " + stamp() + "  reading your Claude Code sign-in(s) from disk (dedicated folders -> macOS Keychain -> ~/.claude).");
   console.log("  If sharing stops later, just sign in to Claude Code again - it is picked up automatically.");
   loop();

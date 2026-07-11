@@ -39,10 +39,12 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
 
   return (
     <div className="min-h-dvh">
-      <RouteProgress />
+      <div className="print:hidden">
+        <RouteProgress />
+      </div>
 
       {/* Sidebar — desktop */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-border/60 glass px-4 py-6 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[248px] flex-col border-r border-border/60 glass px-4 py-6 lg:flex print:hidden">
         <div className="flex items-center gap-2.5 px-2">
           <div className="grid size-9 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
             <Sparkles className="size-4" />
@@ -69,8 +71,8 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
       </aside>
 
       {/* Main column */}
-      <div className="lg:pl-[248px]">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border/60 glass px-4 sm:px-6">
+      <div className="lg:pl-[248px] print:pl-0">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border/60 glass px-4 sm:px-6 print:hidden">
           <span className="text-sm font-medium text-muted-foreground lg:hidden">
             Subscription Agent
           </span>
@@ -92,10 +94,12 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
       </div>
 
       {/* Persistent music bar — survives navigation between app pages */}
-      <MiniPlayer />
+      <div className="print:hidden">
+        <MiniPlayer />
+      </div>
 
       {/* Bottom nav — mobile */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border/60 glass px-2 py-2 lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border/60 glass px-2 py-2 lg:hidden print:hidden">
         {NAV.map((item) => {
           const active = pathname.startsWith(item.href);
           return <BottomNavLink key={item.href} item={item} active={active} />;

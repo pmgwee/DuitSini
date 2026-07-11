@@ -83,6 +83,10 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  /* shadcn-compatible alias: the codebase uses --danger as the red token, but
+     several components use the shadcn-standard text-destructive utility. Point
+     it at the same red so decrease/error states render colored, not unstyled. */
+  --color-destructive: var(--danger);
   --color-info: var(--info);
 
   --color-cat-streaming: var(--cat-streaming);

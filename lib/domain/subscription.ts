@@ -2,8 +2,9 @@ import type { BillingCycle } from "@/lib/constants";
 import type { Subscription, SubscriptionStatus } from "@/types/subscription";
 import type { SubscriptionPatch } from "@/lib/validation/subscription";
 import { daysUntil, toISODate } from "./dates";
-import { monthlyEquivalent, yearlyEquivalent } from "./money";
+import { monthlyEquivalent, roundMoney, yearlyEquivalent } from "./money";
 import { chargesInRange, nextChargeOnOrAfter } from "./renewal";
+import { toMYR } from "./fx";
 
 /** The date the recurring charge series is anchored to. */
 export function chargeAnchorISO(sub: Subscription): string {
@@ -94,6 +95,30 @@ export function subscriptionsChargingInRange(
     if (dates.length > 0) out.push({ sub, dates });
   }
   return out;
+}
+
+/**
+ * Total MYR value of every charge landing in [startISO, endISO] across the given
+ * subscriptions: each subscription contributes (its charge count in the window) ×
+ * (its amount in MYR), summed at full float precision and rounded ONCE. This is
+ * the "this month (actual)" figure — a weekly sub charging four times counts
+ * four times; an annual sub counts only in its renewal month. Paused/cancelled
+ * subs contribute nothing (`chargeDatesInRange` returns [] for them).
+ *
+ * Shared so the reports builder and any future "actual spend" surface use the
+ * identical math (CLAUDE.md money rule: convert per-line, sum, round once).
+ */
+export function chargesTotalMYRInRange(
+  subs: Subscription[],
+  startISO: string,
+  endISO: string,
+): number {
+  let sum = 0;
+  for (const sub of subs) {
+    const count = chargeDatesInRange(sub, startISO, endISO).length;
+    if (count > 0) sum += count * toMYR(sub.amount, sub.currency);
+  }
+  return roundMoney(sum);
 }
 
 export function isTrialConvertingWithin(sub: Subscription, days: number): boolean {

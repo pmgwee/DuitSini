@@ -1,280 +1,219 @@
-import { CalendarClock, FileText, PiggyBank, Sparkles, TrendingUp } from "lucide-react";
+import Link from "next/link";
+import { FileText, CalendarRange, TrendingUp } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { getEffectiveUserId, getSubscriptionRepository } from "@/lib/data";
-import { CATEGORIES, CATEGORY_META } from "@/lib/constants";
-import {
-  chargeDatesInRange,
-  grossMonthlyCost,
-  isActive,
-  isTrialConvertingWithin,
-  monthlyAmount,
-} from "@/lib/domain/subscription";
-import { monthBounds } from "@/lib/domain/calendar";
-import { formatCurrency, roundMoney } from "@/lib/domain/money";
-import { HOME_CURRENCY, myrEquivalentOf, toMYR } from "@/lib/domain/fx";
-import { formatLongDate, formatMonthYear, toISODate } from "@/lib/domain/dates";
-import { CATEGORY_COLOR } from "@/lib/constants";
-import { PrintButton } from "@/features/reports/print-button";
+import { isSupabaseEnabled } from "@/lib/data";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Json } from "@/lib/supabase/types";
+import { toISODate, formatLongDate } from "@/lib/domain/dates";
+import { formatCurrency } from "@/lib/domain/money";
+import { HOME_CURRENCY } from "@/lib/domain/fx";
+import { prevMonthKeyFromToday } from "@/lib/reports/period";
+import type { MonthlyReportTotalsV1, YearlyReportTotalsV1 } from "@/lib/reports/types";
+import { GenerateButton } from "@/features/reports/generate-button";
 
-interface MonthCharge {
-  id: string;
-  name: string;
-  category: keyof typeof CATEGORY_META;
-  amount: number;
-  currency: string;
-  iso: string;
-  isTrialConversion: boolean;
+export const dynamic = "force-dynamic";
+
+interface ReportListItem {
+  kind: "month" | "year";
+  key: string;
+  createdAt: string;
+  generatedOnISO: string | null;
+  totalMYR: number | null;
+  deltaPct: number | null;
 }
 
+/** Read the headline figures from a stored snapshot (v1 only). */
+function readTotals(totalsJson: Json | null): {
+  totalMYR: number | null;
+  deltaPct: number | null;
+  generatedOnISO: string | null;
+} {
+  const t = totalsJson as {
+    v?: number;
+    totalMYR?: number;
+    deltaPct?: number | null;
+    generatedOnISO?: string;
+  } | null;
+  if (!t || t.v !== 1 || typeof t.totalMYR !== "number") {
+    return { totalMYR: null, deltaPct: null, generatedOnISO: null };
+  }
+  return {
+    totalMYR: t.totalMYR,
+    deltaPct: t.deltaPct ?? null,
+    generatedOnISO: typeof t.generatedOnISO === "string" ? t.generatedOnISO : null,
+  };
+}
+
+/** "June 2026" for a month key, "2025" for a year key. */
+function periodLabel(kind: "month" | "year", key: string): string {
+  if (kind === "year") return key;
+  const [yyyy, mm] = key.split("-").map(Number);
+  return new Date(yyyy, mm - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+}
+
+function deltaText(deltaPct: number | null): string {
+  if (deltaPct == null) return "new period";
+  const arrow = deltaPct > 0 ? "▲" : deltaPct < 0 ? "▼" : "→";
+  return `${arrow} ${Math.abs(deltaPct).toFixed(deltaPct % 1 === 0 ? 0 : 1)}%`;
+}
+
+/**
+ * Reports index — the list of stored monthly & yearly statements (newest first),
+ * with a "Generate last month" button for first-timers who don't want to wait for
+ * the 1st-of-month cron. Renders the snapshot figures (never recomputes).
+ *
+ * Mock mode: there is no mock report store, so we show the empty-state note
+ * instead of a 500 (CLAUDE.md data-source rule).
+ */
 export default async function ReportsPage() {
-  const userId = await getEffectiveUserId();
-  const repo = await getSubscriptionRepository();
-  const subscriptions = await repo.list(userId);
+  const items: ReportListItem[] = [];
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const { startISO, endISO } = monthBounds(year, month);
+  if (isSupabaseEnabled()) {
+    try {
+      const supabase = await createSupabaseServerClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-  const active = subscriptions.filter(isActive);
-  const cancelled = subscriptions.filter((s) => s.isCancelled);
+      if (user) {
+        const [monthly, yearly] = await Promise.all([
+          supabase
+            .from("monthly_reports")
+            .select("month_key, created_at, totals_json")
+            .eq("user_id", user.id)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("yearly_reports")
+            .select("year_key, created_at, totals_json")
+            .eq("user_id", user.id)
+            .order("created_at", { ascending: false }),
+        ]);
 
-  // Charges landing in this month, with trial-conversion detection.
-  const charges: MonthCharge[] = [];
-  for (const sub of active) {
-    for (const iso of chargeDatesInRange(sub, startISO, endISO)) {
-      charges.push({
-        id: sub.id,
-        name: sub.name,
-        category: sub.category,
-        amount: sub.amount,
-        currency: sub.currency,
-        iso,
-        isTrialConversion: sub.isTrial && sub.freeTrialEndAt === iso,
-      });
+        for (const m of (monthly.data ?? []) as {
+          month_key: string;
+          created_at: string;
+          totals_json: Json | null;
+        }[]) {
+          const t = readTotals(m.totals_json);
+          items.push({
+            kind: "month",
+            key: m.month_key,
+            createdAt: m.created_at,
+            generatedOnISO: t.generatedOnISO,
+            totalMYR: t.totalMYR,
+            deltaPct: t.deltaPct,
+          });
+        }
+        for (const y of (yearly.data ?? []) as {
+          year_key: string;
+          created_at: string;
+          totals_json: Json | null;
+        }[]) {
+          const t = readTotals(y.totals_json);
+          items.push({
+            kind: "year",
+            key: y.year_key,
+            createdAt: y.created_at,
+            generatedOnISO: t.generatedOnISO,
+            totalMYR: t.totalMYR,
+            deltaPct: t.deltaPct,
+          });
+        }
+        items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      }
+    } catch {
+      // Stay at empty state — a transient DB hiccup degrades gracefully.
     }
   }
-  charges.sort((a, b) => a.iso.localeCompare(b.iso));
 
-  // Totals are always MYR: convert each charge to MYR, sum, round once.
-  const totalMonth = roundMoney(charges.reduce((sum, c) => sum + toMYR(c.amount, c.currency), 0));
-
-  const byCategory = CATEGORIES.map((category) => {
-    const subs = active.filter((s) => s.category === category);
-    return {
-      category,
-      ...CATEGORY_META[category],
-      count: subs.length,
-      monthly: roundMoney(subs.reduce((sum, s) => sum + toMYR(monthlyAmount(s), s.currency), 0)),
-    };
-  }).filter((r) => r.count > 0);
-
-  const trialsConverting = active
-    .filter((s) => isTrialConvertingWithin(s, 30))
-    .sort((a, b) => (a.freeTrialEndAt ?? "").localeCompare(b.freeTrialEndAt ?? ""));
-  // Rank by MYR value, not raw amount, so a ¥1,500 sub doesn't outrank a €30 one.
-  const mostExpensive = [...active]
-    .sort((a, b) => toMYR(b.amount, b.currency) - toMYR(a.amount, a.currency))
-    .slice(0, 5);
-  // grossMonthlyCost ignores the cancelled state → the would-be spend now saved.
-  const savings = roundMoney(
-    cancelled.reduce((sum, s) => sum + toMYR(grossMonthlyCost(s), s.currency), 0),
-  );
+  const lastMonthKey = prevMonthKeyFromToday(toISODate(new Date()));
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 print:max-w-none">
-      <div className="print:hidden">
-        <PageHeader
-          title="Monthly report"
-          description={`${formatMonthYear(new Date(year, month, 1))} · generated ${formatLongDate(
-            toISODate(now),
-          )}`}
-          actions={<PrintButton />}
+    <div className="mx-auto flex max-w-6xl flex-col gap-6">
+      <PageHeader
+        title="Reports"
+        description="Monthly and yearly statements, generated on the 1st and saved as snapshots."
+        actions={isSupabaseEnabled() ? <GenerateButton periodKey={lastMonthKey} /> : undefined}
+      />
+
+      {!isSupabaseEnabled() ? (
+        <EmptyState
+          icon={FileText}
+          title="Reports need the Supabase backend"
+          description="In mock mode there's no report store. Switch NEXT_PUBLIC_DATA_SOURCE to supabase to generate statements."
         />
-      </div>
-
-      {/* Print-only header */}
-      <div className="hidden print:block">
-        <h1 className="text-2xl font-semibold">Subscription Agent · Monthly Report</h1>
-        <p className="text-muted-foreground">{formatMonthYear(new Date(year, month, 1))}</p>
-      </div>
-
-      {/* Total */}
-      <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
-        <div className="flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-xl bg-primary/12 text-primary">
-            <TrendingUp className="size-5" />
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">
-              Expected spend this month (MYR)
-            </div>
-            <div className="text-3xl font-semibold tracking-tight">
-              {formatCurrency(totalMonth, HOME_CURRENCY)}
-            </div>
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Active" value={String(active.length)} />
-          <Stat label="Charges" value={String(charges.length)} />
-          <Stat label="Trials converting" value={String(trialsConverting.length)} />
-          <Stat label="Saved / mo" value={formatCurrency(savings, HOME_CURRENCY)} accent="success" />
-        </div>
-      </section>
-
-      {/* Charges by date */}
-      <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-medium">
-          <CalendarClock className="size-4 text-primary" /> Charges this month
-        </h2>
-        {charges.length === 0 ? (
-          <EmptyState icon={FileText} title="No charges this month" description="Nothing scheduled in this month yet." />
-        ) : (
-          <ul className="flex flex-col divide-y divide-border/50">
-            {charges.map((c, i) => {
-              const myr = myrEquivalentOf(c.amount, c.currency);
-              return (
-                <li key={c.id + c.iso + i} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                  <span className="size-2 shrink-0 rounded-full" style={{ background: CATEGORY_COLOR[c.category] }} />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="No reports yet"
+          description="Your first monthly statement generates on the 1st — or generate last month now to see one immediately."
+          action={<GenerateButton periodKey={lastMonthKey} />}
+        />
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {items.map((item) => {
+            const Icon = item.kind === "month" ? FileText : CalendarRange;
+            // Prefer the snapshot's civil generation date; fall back to created_at's
+            // date for rows lacking it. Avoids the UTC-instant/server-TZ off-by-one.
+            const generatedLabel = formatLongDate(
+              (item.generatedOnISO ?? item.createdAt.slice(0, 10)).slice(0, 10),
+            );
+            return (
+              <li key={`${item.kind}:${item.key}`}>
+                <Link
+                  href={`/reports/${item.key}`}
+                  className="group flex items-center gap-4 rounded-2xl border border-border/60 bg-surface/40 p-5 transition-colors hover:bg-surface/70"
+                >
+                  <div className="grid size-11 place-items-center rounded-xl bg-primary/12 text-primary">
+                    <Icon className="size-5" />
+                  </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">
-                      {c.name}
-                      {c.isTrialConversion ? (
-                        <span className="ml-2 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
-                          Trial converts
-                        </span>
-                      ) : null}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{periodLabel(item.kind, item.key)}</span>
+                      <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {item.kind === "month" ? "Monthly" : "Yearly"}
+                      </span>
                     </div>
-                    <div className="text-xs text-muted-foreground">{formatLongDate(c.iso)}</div>
+                    <div className="text-xs text-muted-foreground">Generated {generatedLabel}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-medium">{formatCurrency(c.amount, c.currency)}</div>
-                    {myr && <div className="text-[11px] text-muted-foreground">≈ {myr}</div>}
+                    {item.totalMYR == null ? (
+                      <span className="text-xs text-muted-foreground">Needs regenerating</span>
+                    ) : (
+                      <>
+                        <div className="text-sm font-semibold tabular-nums">
+                          {formatCurrency(item.totalMYR, HOME_CURRENCY)}
+                        </div>
+                        <div
+                          className={`text-[11px] ${
+                            item.deltaPct == null
+                              ? "text-muted-foreground"
+                              : item.deltaPct > 0
+                                ? "text-success"
+                                : item.deltaPct < 0
+                                  ? "text-danger"
+                                  : "text-muted-foreground"
+                          }`}
+                        >
+                          {deltaText(item.deltaPct)}
+                        </div>
+                      </>
+                    )}
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* By category */}
-        <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
-          <h2 className="mb-3 text-sm font-medium">By category (MYR / month)</h2>
-          {byCategory.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No active subscriptions.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {byCategory.map((r) => (
-                <li key={r.category} className="flex items-center gap-2 text-sm">
-                  <span className="size-2 rounded-full" style={{ background: r.colorVar }} />
-                  <span className="flex-1 text-muted-foreground">{r.label}</span>
-                  <span className="text-muted-foreground">{r.count}</span>
-                  <span className="w-24 text-right font-medium">
-                    {formatCurrency(r.monthly, HOME_CURRENCY)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Most expensive */}
-        <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
-          <h2 className="mb-3 text-sm font-medium">Most expensive (by MYR value)</h2>
-          {mostExpensive.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No active subscriptions.</p>
-          ) : (
-            <ol className="flex flex-col gap-2">
-              {mostExpensive.map((s, i) => {
-                const myr = myrEquivalentOf(s.amount, s.currency);
-                return (
-                  <li key={s.id} className="flex items-center gap-3 text-sm">
-                    <span className="grid size-6 place-items-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
-                      {i + 1}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                    <span className="text-right">
-                      <span className="font-medium">{formatCurrency(s.amount, s.currency)}</span>
-                      {myr && (
-                        <span className="block text-[11px] text-muted-foreground">≈ {myr}</span>
-                      )}
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-        </section>
-      </div>
-
-      {/* Action needed: trials converting */}
-      {trialsConverting.length > 0 ? (
-        <section className="rounded-2xl border border-warning/30 bg-warning/6 p-6">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-warning">
-            <Sparkles className="size-4" /> Action needed — trials converting within 30 days
-          </h2>
-          <ul className="flex flex-col divide-y divide-warning/15">
-            {trialsConverting.map((s) => {
-              const myr = myrEquivalentOf(s.amount, s.currency);
-              return (
-                <li key={s.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{s.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      Converts {s.freeTrialEndAt ? formatLongDate(s.freeTrialEndAt) : "soon"}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-medium">{formatCurrency(s.amount, s.currency)}</div>
-                    {myr && <div className="text-[11px] text-muted-foreground">≈ {myr}</div>}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+      {items.length > 0 ? (
+        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
+          <TrendingUp className="size-3.5" />
+          Statements are snapshots — they don&apos;t change when you edit a subscription later.
+        </p>
       ) : null}
-
-      {savings > 0 ? (
-        <section className="flex items-center gap-3 rounded-2xl border border-success/30 bg-success/6 p-6">
-          <div className="grid size-10 place-items-center rounded-xl bg-success/15 text-success">
-            <PiggyBank className="size-5" />
-          </div>
-          <div>
-            <div className="text-sm font-medium">
-              You&apos;re saving {formatCurrency(savings, HOME_CURRENCY)}/month from cancelled
-              subscriptions.
-            </div>
-            <div className="text-xs text-muted-foreground">
-              That&apos;s {formatCurrency(roundMoney(savings * 12), HOME_CURRENCY)} a year.
-            </div>
-          </div>
-        </section>
-      ) : null}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: "success";
-}) {
-  return (
-    <div className="rounded-xl border border-border/50 bg-surface/30 p-3">
-      <div
-        className={`text-lg font-semibold ${accent === "success" ? "text-success" : "text-foreground"}`}
-      >
-        {value}
-      </div>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
     </div>
   );
 }

@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { addDays } from "date-fns";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { useMemo, useState } from "react";
+import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { TrendingUp, CalendarClock, Sparkles, PiggyBank } from "lucide-react";
 import type { Subscription } from "@/types/subscription";
 import { CATEGORIES, CATEGORY_COLOR, CATEGORY_META } from "@/lib/constants";
@@ -17,12 +16,11 @@ import {
 import { monthBounds } from "@/lib/domain/calendar";
 import { formatCompactCurrency, formatCurrency, roundMoney } from "@/lib/domain/money";
 import { HOME_CURRENCY, myrEquivalentOf, toMYR } from "@/lib/domain/fx";
-import { toISODate } from "@/lib/domain/dates";
 import { SubscriptionIcon } from "./subscription-icon";
 
 /**
- * Page 1 / Tab 2: spending analytics. Monthly/yearly/average, upcoming 30-day
- * charges, a category ring, a 6-month cash-flow trend, trial conversions, and
+ * Page 1 / Tab 2: spending analytics. Monthly/yearly/average, this month's
+ * actual charges, a category ring, a 6-month cash-flow trend, trial conversions,
  * savings from cancelled subscriptions. All derived from the subscription list.
  *
  * Every AGGREGATE is reported in the home currency (MYR): each subscription's
@@ -39,15 +37,6 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
     );
     const yearly = roundMoney(
       active.reduce((sum, s) => sum + toMYR(yearlyAmount(s), s.currency), 0),
-    );
-
-    const todayISO = toISODate(new Date());
-    const horizonEnd = toISODate(addDays(new Date(), 30));
-    const upcoming = active.flatMap((sub) =>
-      chargeDatesInRange(sub, todayISO, horizonEnd).map((iso) => ({ sub, iso })),
-    );
-    const upcomingTotal = roundMoney(
-      upcoming.reduce((sum, x) => sum + toMYR(x.sub.amount, x.sub.currency), 0),
     );
 
     const trialsConverting = active.filter((s) => isTrialConvertingWithin(s, 30));
@@ -68,6 +57,17 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
     }).filter((r) => r.value > 0);
 
     const now = new Date();
+    // This month's ACTUAL charges — every charge landing in the current calendar
+    // month, summed in MYR. Distinct from the normalized "monthly equivalent"
+    // above (which smooths annual/weekly cycles to a per-month figure).
+    const thisMonthBounds = monthBounds(now.getFullYear(), now.getMonth());
+    const thisMonthCharges = active.flatMap((sub) =>
+      chargeDatesInRange(sub, thisMonthBounds.startISO, thisMonthBounds.endISO).map((iso) => ({ sub, iso })),
+    );
+    const thisMonthTotal = roundMoney(
+      thisMonthCharges.reduce((sum, x) => sum + toMYR(x.sub.amount, x.sub.currency), 0),
+    );
+    const thisMonthCount = new Set(thisMonthCharges.map((x) => x.sub.id)).size;
     const trend = Array.from({ length: 6 }, (_, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
       const { startISO, endISO } = monthBounds(d.getFullYear(), d.getMonth());
@@ -92,14 +92,20 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
       active,
       monthly,
       yearly,
-      upcomingCount: upcoming.length,
-      upcomingTotal,
+      thisMonthTotal,
+      thisMonthCount,
       trialsConverting,
       savedMonthly,
       ring,
       trend,
     };
   }, [subscriptions]);
+
+  // Donut hover — dims the non-hovered slices and surfaces a detail box beside
+  // the chart (matches the report's category chart). Legend rows stay static.
+  const [activeCategory, setActiveCategory] = useState<number | null>(null);
+  const ringTotal = stats.ring.reduce((s, r) => s + r.value, 0) || 1;
+  const activeRing = activeCategory != null ? stats.ring[activeCategory] : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -110,23 +116,23 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          icon={TrendingUp}
-          label="Monthly equivalent"
-          value={formatCurrency(stats.monthly, HOME_CURRENCY)}
-          hint="normalized across cycles"
+         <StatCard
+          icon={Sparkles}
+          label="Spent this month (MYR)"
+          value={formatCurrency(stats.thisMonthTotal, HOME_CURRENCY)}
+          hint={`${stats.thisMonthCount} ${stats.thisMonthCount === 1 ? "subscription" : "subscriptions"}`}
         />
         <StatCard
+          icon={TrendingUp}
+          label="Monthly Recurring (MYR)"
+          value={formatCurrency(stats.monthly, HOME_CURRENCY)}
+          hint={`${stats.active.length} subscriptions`}
+        />
+         <StatCard
           icon={CalendarClock}
           label="Yearly equivalent"
           value={formatCurrency(stats.yearly, HOME_CURRENCY)}
-          hint={`${stats.active.length} active`}
-        />
-        <StatCard
-          icon={Sparkles}
-          label="Next 30 days"
-          value={formatCurrency(stats.upcomingTotal, HOME_CURRENCY)}
-          hint={`${stats.upcomingCount} ${stats.upcomingCount === 1 ? "charge" : "charges"}`}
+          hint="recurring / year"
         />
         <StatCard
           icon={PiggyBank}
@@ -142,7 +148,7 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
         <div className="rounded-2xl border border-border/60 bg-surface/40 p-5">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-medium">By category</h3>
-            <span className="text-xs text-muted-foreground">monthly equivalent</span>
+            <span className="text-xs text-muted-foreground">Monthly Recurring (MYR)</span>
           </div>
           {stats.ring.length === 0 ? (
             <EmptyChart label="Add subscriptions to see the breakdown" />
@@ -159,49 +165,72 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
                       outerRadius={80}
                       paddingAngle={2}
                       stroke="none"
+                      onMouseEnter={(_, i) => setActiveCategory(i)}
+                      onMouseLeave={() => setActiveCategory(null)}
+                      isAnimationActive={false}
                     >
-                      {stats.ring.map((r) => (
-                        <Cell key={r.category} fill={r.color} />
+                      {stats.ring.map((r, i) => (
+                        <Cell
+                          key={r.category}
+                          fill={r.color}
+                          opacity={activeCategory == null || activeCategory === i ? 1 : 0.35}
+                          style={{ transition: "opacity 120ms" }}
+                        />
                       ))}
                     </Pie>
-                    <Tooltip
-                      content={({ active: a, payload }) =>
-                        a && payload && payload.length ? (
-                          <TooltipBody
-                            label={String(payload[0].name)}
-                            value={formatCurrency(Number(payload[0].value), HOME_CURRENCY)}
-                          />
-                        ) : null
-                      }
-                    />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="pointer-events-none absolute inset-0 grid place-items-center">
                   <div className="text-center">
                     <div className="text-[11px] text-muted-foreground">/ month</div>
                     <div className="text-sm font-semibold">
-                      {formatCompactCurrency(stats.monthly, HOME_CURRENCY)}
+                      {formatCurrency(stats.monthly, HOME_CURRENCY)}
                     </div>
                   </div>
                 </div>
               </div>
-              <ul className="flex flex-1 flex-col gap-1.5">
-                {stats.ring
-                  .slice()
-                  .sort((a, b) => b.value - a.value)
-                  .map((r) => (
-                    <li key={r.category} className="flex items-center gap-2 text-xs">
+
+              <div className="flex w-full flex-1 flex-col gap-2">
+                {/* Hover detail — beside the chart, not over the center label. */}
+                {activeRing ? (
+                  <div className="rounded-lg border border-border/60 bg-surface px-3 py-2 text-xs shadow-sm">
+                    <div className="flex items-center gap-2">
                       <span
                         className="size-2 rounded-full"
-                        style={{ background: r.color }}
+                        style={{ background: activeRing.color }}
                       />
-                      <span className="flex-1 text-muted-foreground">{r.label}</span>
-                      <span className="text-right font-medium tabular-nums">
-                        {formatCurrency(r.value, HOME_CURRENCY)}
-                      </span>
-                    </li>
-                  ))}
-              </ul>
+                      <span className="font-medium">{activeRing.label}</span>
+                    </div>
+                    <div className="mt-1 text-muted-foreground">
+                      {formatCurrency(activeRing.value, HOME_CURRENCY)}
+                      {" · "}
+                      {Math.round((activeRing.value / ringTotal) * 100)}%
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Static legend — no row hover (the donut drives the only hover affordance). */}
+                <ul className="flex w-full flex-1 flex-col gap-0.5">
+                  {stats.ring
+                    .slice()
+                    .sort((a, b) => b.value - a.value)
+                    .map((r) => (
+                      <li
+                        key={r.category}
+                        className="flex items-center gap-2 rounded-md px-1.5 py-1 text-xs"
+                      >
+                        <span
+                          className="size-2 shrink-0 rounded-full"
+                          style={{ background: r.color }}
+                        />
+                        <span className="flex-1 truncate text-muted-foreground">{r.label}</span>
+                        <span className="w-20 text-right font-medium tabular-nums">
+                          {formatCurrency(r.value, HOME_CURRENCY)}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </div>
             </div>
           )}
         </div>
@@ -210,7 +239,7 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
         <div className="rounded-2xl border border-border/60 bg-surface/40 p-5">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-sm font-medium">Last 6 months</h3>
-            <span className="text-xs text-muted-foreground">actual charges (MYR)</span>
+            <span className="text-xs text-muted-foreground">actual charges</span>
           </div>
           {stats.active.length === 0 ? (
             <EmptyChart label="No active subscriptions to trend" />
@@ -284,15 +313,6 @@ function StatCard({
       <div className="mt-3 text-lg font-semibold tracking-tight">{value}</div>
       <div className="text-xs font-medium text-muted-foreground">{label}</div>
       <div className="mt-0.5 text-[11px] text-muted-foreground/70">{hint}</div>
-    </div>
-  );
-}
-
-function TooltipBody({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border/60 bg-surface px-2.5 py-1.5 text-xs shadow-lg">
-      <div className="text-muted-foreground">{label}</div>
-      <div className="font-medium">{value}</div>
     </div>
   );
 }

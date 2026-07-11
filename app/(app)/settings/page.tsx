@@ -2,6 +2,7 @@ import { Bell } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { TelegramCard } from "@/features/settings/telegram-card";
 import { ReminderScheduleCard } from "@/features/settings/reminder-schedule-card";
+import { ReportsCard } from "@/features/settings/reports-card";
 import { RecentDeliveries } from "@/features/settings/deliveries-list";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { sanitizeOffsets } from "@/lib/reminders/engine";
@@ -23,6 +24,8 @@ export default async function SettingsPage() {
   let enabled = false;
   let offsets = [7, 3, 1];
   let customizedCount = 0;
+  let monthlyReport = true;
+  let yearlyReport = true;
   let deliveries: DeliveryRow[] = [];
 
   try {
@@ -33,12 +36,16 @@ export default async function SettingsPage() {
     if (user) {
       const { data: profile } = await supabase
         .from("user_profiles")
-        .select("telegram_chat_id, telegram_enabled, reminder_offsets_days")
+        .select(
+          "telegram_chat_id, telegram_enabled, reminder_offsets_days, monthly_report_enabled, yearly_report_enabled",
+        )
         .eq("user_id", user.id)
         .maybeSingle();
       connected = !!profile?.telegram_chat_id;
       enabled = !!profile?.telegram_enabled;
       offsets = sanitizeOffsets(profile?.reminder_offsets_days ?? null);
+      monthlyReport = profile?.monthly_report_enabled ?? true;
+      yearlyReport = profile?.yearly_report_enabled ?? true;
 
       // Subscriptions that override the global schedule (have their own offsets).
       const { count } = await supabase
@@ -61,15 +68,17 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+    <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
         title="Settings"
-        description="Reminders and messaging integrations for your account."
+        description="Reminders, reports, and messaging integrations for your account."
       />
 
       <TelegramCard initialConnected={connected} initialEnabled={enabled} />
 
       <ReminderScheduleCard initialOffsets={offsets} customizedCount={customizedCount} />
+
+      <ReportsCard initialMonthly={monthlyReport} initialYearly={yearlyReport} />
 
       <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
         <h2 className="mb-3 flex items-center gap-2 text-sm font-medium">

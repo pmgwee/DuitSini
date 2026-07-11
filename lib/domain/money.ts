@@ -14,6 +14,19 @@ const CURRENCY_LOCALE = "en-US";
 
 export function formatCurrency(amount: number, currency: string): string {
   const maximumFractionDigits = ZERO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
+  // Force the ringgit symbol "RM" for MYR. Intl's currency symbol for MYR is
+  // ICU-dependent: full-ICU runtimes render "RM", but small-ICU Node (and some
+  // builds) render the ISO code "MYR" — inconsistent across server/browser and
+  // the source of "MYR 88.04" showing instead of "RM 88.04". The app is
+  // MYR-home, so the symbol is pinned here for a uniform "RM 88.04". (The ISO
+  // code "MYR" stays as HOME_CURRENCY internally; titles like "Spent (MYR)"
+  // keep their literal label — only the formatted unit changes.)
+  if (currency === "MYR") {
+    return `RM ${amount.toLocaleString(CURRENCY_LOCALE, {
+      minimumFractionDigits: maximumFractionDigits,
+      maximumFractionDigits,
+    })}`;
+  }
   try {
     return new Intl.NumberFormat(CURRENCY_LOCALE, {
       style: "currency",
@@ -30,6 +43,12 @@ export function formatCurrency(amount: number, currency: string): string {
 export function formatCompactCurrency(amount: number, currency: string): string {
   if (Math.abs(amount) < 1000) return formatCurrency(amount, currency);
   try {
+    if (currency === "MYR") {
+      return `RM ${new Intl.NumberFormat(CURRENCY_LOCALE, {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(amount)}`;
+    }
     return new Intl.NumberFormat(CURRENCY_LOCALE, {
       style: "currency",
       currency,

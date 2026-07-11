@@ -80,7 +80,7 @@ export function CategoryDock({
       <div className="glass card-elevated rounded-2xl border border-border/60 p-4">
         {/* Two differentiated cost figures */}
         <div className="grid grid-cols-2 gap-2.5">
-          <Stat label="This month" hint="actual charges">
+          <Stat label="Spent this month (MYR)" hint="ACTUAL CHARGES">
             <div className="text-sm font-semibold tabular-nums">
               {monthSubCount} {monthSubCount === 1 ? "subscription" : "subscriptions"}
             </div>
@@ -88,9 +88,9 @@ export function CategoryDock({
               {formatCurrency(monthTotalMYR, HOME_CURRENCY)}
             </div>
           </Stat>
-          <Stat label="Recurring" hint="normalized / mo">
+          <Stat label="MONTHLY Recurring (MYR)" hint="ALL BILLING CYCLE">
             <div className="text-sm font-semibold tabular-nums">
-              {active.length} active
+              {active.length} subscriptions
             </div>
             <div className="text-xs text-muted-foreground">
               {formatCompactCurrency(totalMonthly, HOME_CURRENCY)}/mo

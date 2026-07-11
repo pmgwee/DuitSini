@@ -32,3 +32,6 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# autopilot (local-only plans + logs; see .claude/skills/README.md)
+/handoff/

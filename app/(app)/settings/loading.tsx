@@ -1,14 +1,15 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-/** Mirrors the settings layout: header, Telegram card, recent-reminders card. */
+/** Mirrors the settings layout: header + Telegram + reminders + reports + recent. */
 export default function SettingsLoading() {
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+    <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <div className="space-y-2">
         <Skeleton className="h-7 w-32" />
         <Skeleton className="h-4 w-72 max-w-full" />
       </div>
 
+      {/* Telegram */}
       <div className="rounded-2xl border border-border/60 bg-surface/40 p-6">
         <Skeleton className="mb-4 h-5 w-40" />
         <div className="flex items-center justify-between gap-4">
@@ -20,6 +21,7 @@ export default function SettingsLoading() {
         </div>
       </div>
 
+      {/* Reminders */}
       <div className="rounded-2xl border border-border/60 bg-surface/40 p-6">
         <Skeleton className="mb-4 h-5 w-48" />
         <Skeleton className="mb-4 h-4 w-72 max-w-full" />
@@ -31,6 +33,24 @@ export default function SettingsLoading() {
         <Skeleton className="mt-4 h-4 w-80 max-w-full" />
       </div>
 
+      {/* Reports */}
+      <div className="rounded-2xl border border-border/60 bg-surface/40 p-6">
+        <Skeleton className="mb-4 h-5 w-28" />
+        <Skeleton className="mb-4 h-4 w-80 max-w-full" />
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-52" />
+              </div>
+              <Skeleton className="h-6 w-11 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent reminders */}
       <div className="rounded-2xl border border-border/60 bg-surface/40 p-6">
         <Skeleton className="mb-4 h-5 w-40" />
         <div className="flex flex-col gap-3">

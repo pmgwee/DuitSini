@@ -182,7 +182,7 @@ export function ReminderScheduleCard({
         <p
           className={cn(
             "mt-3 text-xs",
-            flash.kind === "ok" ? "text-success" : "text-destructive",
+            flash.kind === "ok" ? "text-success" : "text-danger",
           )}
         >
           {flash.text}

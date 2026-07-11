@@ -112,7 +112,7 @@ export function SubscriptionCalendar({
         <div>
           <h2 className="text-lg font-semibold tracking-tight">{formatMonthYear(cursor)}</h2>
           <p className="text-xs text-muted-foreground">
-            {monthChargeCount} {monthChargeCount === 1 ? "charge" : "charges"} this month
+            {monthChargeCount} {monthChargeCount === 1 ? "subscription charge" : "subscriptions charge"} for this month
           </p>
         </div>
         <div className="flex items-center gap-1">
