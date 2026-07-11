@@ -109,6 +109,7 @@ export async function GET(req: NextRequest) {
     ingestUrl: `${base}/api/claude-usage/ingest`,
     pullUrl: `${base}/api/claude-usage/pull`,
     token: minted.token,
+    accountEmail: minted.email ?? "",
   });
 
   const zip = zipSync(

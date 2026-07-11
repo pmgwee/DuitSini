@@ -76,6 +76,13 @@
  *       count-based (dies near the same N) or time-based (dies near the same
  *       clock hours).
  *
+ * v6.1 — identity echo (2026-07-12). The URL token IS the dashboard identity:
+ * a member who ran a command copied from someone else's sign-in broadcast his
+ * usage onto that other account. The startup banner now names the dashboard
+ * account (email) the script pushes to — __ACCOUNT_EMAIL__, resolved from the
+ * token's owner at download time — with a "not your account?" warning, and
+ * /api/bridge/mac refuses tokens that are no longer registered (410).
+ *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
  * injected via the __PLACEHOLDER__ tokens.
@@ -94,9 +101,16 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 
-const SHARER_VERSION = "6";
+const SHARER_VERSION = "6.1";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
+// Which dashboard account this script broadcasts to. Baked in at download
+// time from the token's owner - the URL token IS the identity, so a script
+// copied from someone else pushes to THEIR account. The banner makes that
+// visible so a member can catch it instantly. Empty when the server could
+// not resolve it (self-hosted without admin creds); the banner line is
+// skipped then.
+const ACCOUNT_EMAIL = "__ACCOUNT_EMAIL__";
 const BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
 
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
@@ -852,6 +866,13 @@ async function loop() {
   console.log("");
   console.log("  ============================================");
   console.log("   Claude Usage Sharer v" + SHARER_VERSION + " is running.");
+  if (ACCOUNT_EMAIL) {
+    console.log("   Broadcasting to dashboard account:");
+    console.log("     >> " + ACCOUNT_EMAIL + " <<");
+    console.log("   Not YOUR account? Close this window, sign in to the");
+    console.log("   dashboard with YOUR Google account, and copy your own");
+    console.log("   command there. Never reuse someone else's command.");
+  }
   console.log("   Your usage now shows on the class dashboard, live.");
   console.log("   Keep this window open. Close it anytime to stop.");
   console.log("  ============================================");
@@ -868,11 +889,19 @@ export function buildMemberBridge(cfg: {
   ingestUrl: string;
   pullUrl: string;
   token: string;
+  /** Email of the token's owner, shown in the startup banner. "" hides it. */
+  accountEmail: string;
 }): string {
+  // Whitelist-sanitize: the email lands inside a string literal in SOURCE,
+  // which must stay free of backticks/backslashes/quotes. Real addresses only
+  // use these characters anyway; anything else is dropped.
+  const email = (cfg.accountEmail || "").replace(/[^A-Za-z0-9@._+-]/g, "");
   return SOURCE.split("__INGEST_URL__")
     .join(cfg.ingestUrl)
     .split("__PULL_URL__")
     .join(cfg.pullUrl)
     .split("__BRIDGE_TOKEN__")
-    .join(cfg.token);
+    .join(cfg.token)
+    .split("__ACCOUNT_EMAIL__")
+    .join(email);
 }

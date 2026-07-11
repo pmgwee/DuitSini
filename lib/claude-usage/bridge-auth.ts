@@ -38,12 +38,27 @@ export async function resolveBridgeUserId(header: string | null): Promise<string
   // 1) Per-user token (group members).
   try {
     const admin = createSupabaseAdminClient();
+    const tokenHash = hashBridgeToken(token);
     const { data } = await admin
       .from("bridge_tokens")
       .select("user_id")
-      .eq("token_hash", hashBridgeToken(token))
+      .eq("token_hash", tokenHash)
       .maybeSingle();
-    if (data?.user_id) return data.user_id;
+    if (data?.user_id) {
+      // Stamp last_used_at so "which token is pushing?" is answerable from the
+      // DB (a misrouted-sharer incident had to be reconstructed from mint
+      // timestamps because this was never written). Best-effort: a failed
+      // stamp must never fail an otherwise-authenticated push.
+      try {
+        await admin
+          .from("bridge_tokens")
+          .update({ last_used_at: new Date().toISOString() })
+          .eq("token_hash", tokenHash);
+      } catch {
+        // ignore — observability only
+      }
+      return data.user_id;
+    }
   } catch {
     // fall through to the legacy path
   }

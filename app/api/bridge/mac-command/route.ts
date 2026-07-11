@@ -23,5 +23,10 @@ export async function GET(req: NextRequest) {
   // as CommonJS while the sharer is an ES module.
   const command = `curl -fsSL "${url}" -o claude-usage-sharer.mjs && node claude-usage-sharer.mjs`;
 
-  return Response.json({ command }, { headers: { "Cache-Control": "no-store" } });
+  // `account` lets the UI label the command with its owner — the token in the
+  // URL is the identity, so a command must never be reused by another member.
+  return Response.json(
+    { command, account: res.email },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

@@ -6,7 +6,7 @@ import { hashBridgeToken } from "@/lib/claude-usage/bridge-auth";
 
 /** Shape of a freshly-minted bridge token, or a ready-to-return error. */
 export type MintResult =
-  | { ok: true; token: string; userId: string }
+  | { ok: true; token: string; userId: string; email: string | null }
   | { ok: false; status: number; message: string };
 
 /** A bridge token is `cub_` + 24 random bytes as hex (48 hex chars). */
@@ -88,6 +88,6 @@ export async function mintBridgeToken(): Promise<MintResult> {
     if (stale.length) await admin.from("bridge_tokens").delete().in("id", stale);
   }
 
-  return { ok: true, token, userId: user.id };
+  return { ok: true, token, userId: user.id, email: user.email ?? null };
 }
 

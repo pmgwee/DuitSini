@@ -297,6 +297,7 @@ function WindowsPanel() {
 
 function MacPanel() {
   const [command, setCommand] = useState<string | null>(null);
+  const [account, setAccount] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -309,6 +310,7 @@ function MacPanel() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d.command) throw new Error(d.error || "Couldn't prepare your command.");
       setCommand(d.command);
+      setAccount(typeof d.account === "string" ? d.account : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -347,6 +349,11 @@ function MacPanel() {
           <code className="block select-all overflow-x-auto whitespace-pre rounded-lg bg-background/70 px-3 py-2 font-mono text-xs text-foreground">
             {command}
           </code>
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+            Personal to <b className="text-foreground">{account ?? "your sign-in"}</b> — everything
+            this command shares lands on this account. Don&apos;t pass it to someone else; each
+            member copies their own from their own sign-in.
+          </p>
         </div>
       ) : (
         <Button size="lg" onClick={reveal} disabled={loading}>
