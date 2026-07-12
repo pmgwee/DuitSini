@@ -1,8 +1,19 @@
 # Subscription Agent
 
-A premium, design-led web app for tracking subscriptions, free trials, and recurring bills — with a calendar-first flow, spending analytics, and a live **Claude usage** broadcaster (monitor your Claude Pro and GLM plan usage in real time). Built Malaysian-first: every figure is shown in **Ringgit (MYR)**.
+**Your always-on second-screen dashboard: every subscription in Ringgit, your live Claude/GLM AI usage broadcast in real time, and monthly statements pushed straight to Telegram — no spreadsheets, no manual conversion, no API keys.**
+
+Built Malaysian-first: every figure is shown in **Ringgit (MYR)**, never USD you have to convert in your head.
 
 Built with Next.js 15 (App Router), React 19, Tailwind v4, and Supabase.
+
+---
+
+## Why people keep it open
+
+- 🇲🇾 **MYR-native, always.** No mental USD→RM math for Netflix, Spotify, Claude, ChatGPT — every figure converts and rounds once, correctly.
+- 🛰️ **Live AI usage, broadcast from your own machine.** Nobody else does this: a 2-minute setup turns your Claude Pro / GLM Coding plan usage into a live gauge on your dashboard — no API key ever leaves your computer.
+- 🖥️ **Built for the spare monitor.** Leave it open on a third screen while gaming, vibe-coding, or running a side hustle — a calendar of what's about to charge you, plus your live AI usage, always in view.
+- 📄 **Monthly/yearly statements, delivered, not dug for.** Auto-generated PDF statements land in your Telegram — no logging back in to check what you spent.
 
 ---
 
@@ -21,6 +32,16 @@ Share your real Claude plan usage to the dashboard — no API key wrangling:
 - **Windows** — download a ZIP, double-click `START-HERE (Windows).bat`.
 - **macOS** — copy one Terminal command (`curl → node`). Uses the Homebrew/nvm pattern so it isn't blocked by Gatekeeper.
 - Broadcasts **Claude Pro** _and_ **GLM Coding** usage side by side (read from a dedicated Claude login and your cc-switch setup respectively). Only usage percentages are ever sent — never your password or login.
+- Every sharer command is personal — tied to the Google account that generated it, and the dashboard tells you whose account it's feeding, on startup.
+
+### Monthly & yearly reports
+- Auto-generated statements (spend by category, totals, trends) on a daily cron sweep — no manual export.
+- One-click **PDF** download, or push straight to **Telegram** as a document.
+- Per-period detail pages so you can look back at any month or year.
+
+### Reminders & Telegram
+- Renewal reminders on a schedule you set, delivered to Telegram.
+- Connect once; toggle report delivery and reminders independently from Settings.
 
 ### Dashboard extras
 - Live Claude usage widget (session + weekly gauges, per source), with manual-estimate fallback.
