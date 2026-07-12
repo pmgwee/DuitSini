@@ -86,7 +86,14 @@ export function ClaudeUsageTracker() {
     <WidgetShell>
       {header}
       {liveReady && live.data ? (
-        <LiveView streams={streams} refreshedAt={live.data.refreshed_at} now={now} onPull={live.pull} pulling={live.pulling} />
+        <LiveView
+          streams={streams}
+          refreshedAt={live.data.refreshed_at}
+          now={now}
+          onPull={live.pull}
+          pulling={live.pulling}
+          pullCooldownEndsAt={live.pullCooldownEndsAt}
+        />
       ) : (
         <ManualView now={now} liveStatus={live.status} liveError={live.error} />
       )}
@@ -177,13 +184,20 @@ function LiveView({
   now,
   onPull,
   pulling,
+  pullCooldownEndsAt,
 }: {
   streams: UsageStream[];
   refreshedAt?: string;
   now: number;
   onPull: () => void;
   pulling: boolean;
+  pullCooldownEndsAt: number | null;
 }) {
+  // Server-enforced pull cooldown mirrored as a countdown: each honored pull
+  // costs one call against the member's own Anthropic rate-limit budget, so
+  // the button stays disabled until the server would accept the next one.
+  const cooldownS =
+    pullCooldownEndsAt !== null ? Math.max(0, Math.ceil((pullCooldownEndsAt - now) / 1000)) : 0;
   return (
     <div className="flex flex-col gap-5">
       <div className={cn("flex flex-col", streams.length > 1 ? "gap-5" : "gap-0")}>
@@ -199,12 +213,17 @@ function LiveView({
         <button
           type="button"
           onClick={onPull}
-          disabled={pulling}
+          disabled={pulling || cooldownS > 0}
           aria-label="Pull latest usage from the bridge"
+          title={
+            cooldownS > 0
+              ? "Just refreshed — manual pulls are limited to protect your account from Anthropic's rate limit. Usage still updates automatically."
+              : undefined
+          }
           className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
         >
           <RefreshCw className={cn("size-3.5", pulling && "animate-spin")} />
-          {pulling ? "Pulling…" : "Pull latest"}
+          {pulling ? "Pulling…" : cooldownS > 0 ? `Pull latest (${cooldownS}s)` : "Pull latest"}
         </button>
       </div>
       <p className="-mt-2 text-[11px] text-muted-foreground/60">

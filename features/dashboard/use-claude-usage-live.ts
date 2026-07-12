@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export interface LiveUsageWindow {
@@ -76,6 +77,8 @@ export function useClaudeUsageLive(intervalMs = 15_000): {
   refreshing: boolean;
   pull: () => void;
   pulling: boolean;
+  /** Epoch ms until which the pull button should stay disabled (server cooldown). */
+  pullCooldownEndsAt: number | null;
 } {
   const [state, setState] = useState<{
     status: LiveStatus;
@@ -84,6 +87,7 @@ export function useClaudeUsageLive(intervalMs = 15_000): {
   }>({ status: "connecting" });
   const [refreshing, setRefreshing] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [pullCooldownEndsAt, setPullCooldownEndsAt] = useState<number | null>(null);
   const tickRef = useRef<() => Promise<void>>(async () => {});
   const dataRef = useRef<LiveUsage | undefined>(undefined);
   const pullBaselineRef = useRef<string | undefined>(undefined);
@@ -124,23 +128,40 @@ export function useClaudeUsageLive(intervalMs = 15_000): {
     tick();
     const id = setInterval(tick, intervalMs);
 
-    // Realtime: a bridge push updates the row → re-read immediately.
+    // Realtime: a bridge push updates the row → re-read immediately. Scoped to
+    // this user's row — unfiltered, every member's push is evaluated against
+    // (and, depending on the socket's auth, delivered to) every open dashboard,
+    // which is O(members × viewers) work for events the callback would discard.
+    // No session (shouldn't happen inside the authed shell) falls back to the
+    // old unfiltered subscription rather than losing realtime entirely.
     const supabase = createSupabaseBrowserClient();
-    const channel = supabase
-      .channel("claude_usage_live_changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "claude_usage_live" },
-        () => {
-          void tickRef.current();
-        },
-      )
-      .subscribe();
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
+      const uid = session?.user?.id;
+      channel = supabase
+        .channel("claude_usage_live_changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "claude_usage_live",
+            ...(uid ? { filter: `user_id=eq.${uid}` } : {}),
+          },
+          () => {
+            void tickRef.current();
+          },
+        )
+        .subscribe();
+    });
 
     return () => {
       active = false;
+      cancelled = true;
       clearInterval(id);
-      void supabase.removeChannel(channel);
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [intervalMs]);
 
@@ -152,9 +173,25 @@ export function useClaudeUsageLive(intervalMs = 15_000): {
   const pull = useCallback(() => {
     setPulling(true);
     pullBaselineRef.current = dataRef.current?.refreshed_at;
-    void fetch("/api/claude-usage/pull", { method: "POST" }).catch(() => {
-      /* the burst re-poll below still catches any push */
-    });
+    void fetch("/api/claude-usage/pull", { method: "POST" })
+      .then(async (r) => {
+        const d: { throttled?: boolean; next_allowed_at?: string } = await r
+          .json()
+          .catch(() => ({}));
+        // Both an honored pull (ok) and a server throttle (429) tell us when
+        // the next pull is allowed; mirror it so the button shows a countdown
+        // instead of letting the user burn their Anthropic usage budget.
+        if ((r.ok || r.status === 429) && d.next_allowed_at) {
+          const until = Date.parse(d.next_allowed_at);
+          if (Number.isFinite(until)) setPullCooldownEndsAt(until);
+        }
+        // Throttled: nothing new was requested from the bridge — stop the
+        // spinner now instead of spinning through the 16s window.
+        if (r.status === 429) setPulling(false);
+      })
+      .catch(() => {
+        /* the burst re-poll below still catches any push */
+      });
     // Rapidly re-check for the bridge's fresh push, independent of realtime.
     let n = 0;
     const burst = window.setInterval(() => {
@@ -165,5 +202,5 @@ export function useClaudeUsageLive(intervalMs = 15_000): {
     window.setTimeout(() => setPulling(false), 16_000);
   }, []);
 
-  return { ...state, refresh, refreshing, pull, pulling };
+  return { ...state, refresh, refreshing, pull, pulling, pullCooldownEndsAt };
 }

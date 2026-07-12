@@ -76,6 +76,12 @@
  *       count-based (dies near the same N) or time-based (dies near the same
  *       clock hours).
  *
+ * v6.2 — self-reported cadence (2026-07-12). Each push now carries
+ * push_seconds (the member's PUSH_MS) and sharer_version. The live route
+ * derives its freshness window from push_seconds (2 cycles + grace) instead
+ * of a hardcoded 3-minute constant that guaranteed a live→manual flap at the
+ * 300s default cadence; sharer_version gives fleet visibility.
+ *
  * v6.1 — identity echo (2026-07-12). The URL token IS the dashboard identity:
  * a member who ran a command copied from someone else's sign-in broadcast his
  * usage onto that other account. The startup banner now names the dashboard
@@ -101,7 +107,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 
-const SHARER_VERSION = "6.1";
+const SHARER_VERSION = "6.2";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
 // Which dashboard account this script broadcasts to. Baked in at download
@@ -705,6 +711,12 @@ async function pushStreams(streams) {
   const body = {
     five_hour: primary.five_hour, seven_day: primary.seven_day, limits: primary.limits, provider: primary.provider,
     streams: streams,
+    // Self-described cadence: the dashboard derives its freshness window from
+    // this (2 cycles + grace) instead of a hardcoded constant, so a member on
+    // a custom pushSeconds never flaps between live and manual. The version
+    // gives the owner fleet visibility (who still runs an old script).
+    push_seconds: Math.round(PUSH_MS / 1000),
+    sharer_version: SHARER_VERSION,
   };
   const r = await safeFetch(INGEST_URL, { method: "POST", headers: { Authorization: "Bearer " + BRIDGE_TOKEN, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) { const t = await r.text().catch(function () { return ""; }); throw new Error("Sending to dashboard failed (" + r.status + ")" + (t ? ": " + t.slice(0, 120) : "")); }

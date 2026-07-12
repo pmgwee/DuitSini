@@ -60,6 +60,11 @@ const bodySchema = z.object({
   // send this; the legacy top-level fields above stay populated (mirroring the
   // primary stream) so older servers/readers keep working.
   streams: z.array(streamSchema).max(6).optional(),
+  // Self-reported push cadence (sharer v6.2+): lets the live route size its
+  // freshness window to the producer instead of a hardcoded constant. Bounds
+  // mirror the sharer's own clamp (120–3600) with slack for future changes.
+  push_seconds: z.number().int().min(60).max(7200).optional(),
+  sharer_version: z.string().max(16).optional(),
 });
 
 /**
@@ -102,7 +107,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "bad body" }, { status: 400 });
     }
 
-    const { five_hour, seven_day, limits, provider, streams } = parsed.data;
+    const { five_hour, seven_day, limits, provider, streams, push_seconds, sharer_version } =
+      parsed.data;
 
     // Normalize to a streams array — the UI reads from streams_json. Newer
     // bridges send `streams`; a legacy single-source push is wrapped so the row
@@ -144,21 +150,38 @@ export async function POST(req: NextRequest) {
       streams_json: normalized as unknown as Json,
       limits_json: (primary.limits ?? null) as Json,
       provider_json: (primary.provider ?? null) as Json,
+      push_seconds: push_seconds ?? null,
+      sharer_version: sharer_version ?? null,
     };
 
     let { error } = await admin.from("claude_usage_live").upsert(full);
+    if (error && /push_seconds|sharer_version/i.test(error.message)) {
+      ({ error } = await admin
+        .from("claude_usage_live")
+        .upsert(without(full, ["push_seconds", "sharer_version"])));
+    }
     if (error && /streams_json/i.test(error.message)) {
-      ({ error } = await admin.from("claude_usage_live").upsert(without(full, ["streams_json"])));
+      ({ error } = await admin
+        .from("claude_usage_live")
+        .upsert(without(full, ["push_seconds", "sharer_version", "streams_json"])));
     }
     if (error && /provider_json/i.test(error.message)) {
       ({ error } = await admin
         .from("claude_usage_live")
-        .upsert(without(full, ["streams_json", "provider_json"])));
+        .upsert(without(full, ["push_seconds", "sharer_version", "streams_json", "provider_json"])));
     }
     if (error && /limits_json/i.test(error.message)) {
       ({ error } = await admin
         .from("claude_usage_live")
-        .upsert(without(full, ["streams_json", "provider_json", "limits_json"])));
+        .upsert(
+          without(full, [
+            "push_seconds",
+            "sharer_version",
+            "streams_json",
+            "provider_json",
+            "limits_json",
+          ]),
+        ));
     }
     if (error) {
       console.error("[claude-usage/ingest] db error:", error.message);

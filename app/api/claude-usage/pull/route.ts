@@ -7,10 +7,21 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
+ * Server-side floor between honored pulls. Every honored pull costs one call
+ * against Anthropic's per-account usage-endpoint budget (~330–390 calls/day
+ * trips a 429 with hours-long recovery), on top of the sharer's ~192/day at
+ * the 300s default cadence. 60s caps spam at +60/h regardless of how many
+ * tabs or devices hammer the button — the client mirrors this as a countdown.
+ */
+const PULL_COOLDOWN_S = 60;
+
+/**
  * POST — the signed-in user asks the local bridge to fetch fresh usage now.
  * We stamp `pull_requested_at`; the bridge polls it (every few seconds) and
  * fetches + pushes immediately when it changes. Uses the service role because
- * the snapshot row is otherwise service-role-only.
+ * the snapshot row is otherwise service-role-only. Throttled: a pull within
+ * PULL_COOLDOWN_S of the last honored one returns 429 + next_allowed_at
+ * instead of a fresh stamp, protecting the member's own Anthropic budget.
  */
 export async function POST() {
   if (!isAdminConfigured()) {
@@ -25,14 +36,40 @@ export async function POST() {
   }
 
   const admin = createSupabaseAdminClient();
+  const now = Date.now();
+
+  const { data: row } = await admin
+    .from("claude_usage_live")
+    .select("pull_requested_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const lastMs = row?.pull_requested_at ? Date.parse(row.pull_requested_at) : 0;
+  if (Number.isFinite(lastMs) && lastMs > 0 && now - lastMs < PULL_COOLDOWN_S * 1000) {
+    const nextAllowedMs = lastMs + PULL_COOLDOWN_S * 1000;
+    return NextResponse.json(
+      {
+        ok: false,
+        throttled: true,
+        retry_after_s: Math.ceil((nextAllowedMs - now) / 1000),
+        next_allowed_at: new Date(nextAllowedMs).toISOString(),
+        cooldown_s: PULL_COOLDOWN_S,
+      },
+      { status: 429 },
+    );
+  }
+
   const { error } = await admin
     .from("claude_usage_live")
-    .upsert({ user_id: user.id, pull_requested_at: new Date().toISOString() });
+    .upsert({ user_id: user.id, pull_requested_at: new Date(now).toISOString() });
   if (error) {
     // Column not migrated yet, or other DB error — report but don't 500 the UI.
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    cooldown_s: PULL_COOLDOWN_S,
+    next_allowed_at: new Date(now + PULL_COOLDOWN_S * 1000).toISOString(),
+  });
 }
 
 /**

@@ -5,8 +5,20 @@ import type { Json } from "@/lib/supabase/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** A snapshot older than this is treated as "bridge offline" → manual fallback. */
-const FRESH_MS = 3 * 60 * 1000;
+/**
+ * How long a snapshot counts as "live", derived from the sharer's own
+ * self-reported push cadence (v6.2+): two full cycles + grace, so jitter or a
+ * single failed push never flaps the widget to the manual fallback — only two
+ * consecutive missed pushes (a real outage) do. Rows from older sharers carry
+ * no cadence; assume the 300s default (→ 11 min window). The clamp mirrors the
+ * sharer's own 120–3600s bounds so a corrupt value can't pin the widget live.
+ */
+const DEFAULT_PUSH_SECONDS = 300;
+const GRACE_MS = 60 * 1000;
+function staleAfterMs(pushSeconds: number | null | undefined): number {
+  const cadence = Math.min(3600, Math.max(120, pushSeconds ?? DEFAULT_PUSH_SECONDS));
+  return cadence * 2 * 1000 + GRACE_MS;
+}
 
 /** One usage stream as stored in streams_json (validated loosely at read). */
 type StreamRow = {
@@ -49,7 +61,7 @@ export async function GET() {
   }
 
   const ageMs = Date.now() - new Date(data.updated_at).getTime();
-  const fresh = ageMs < FRESH_MS;
+  const fresh = ageMs < staleAfterMs(data.push_seconds);
 
   // Normalize to a streams array. Newer rows carry streams_json (one or more
   // sources, e.g. Claude Pro + GLM); older rows synthesize a single stream

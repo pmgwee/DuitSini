@@ -50,8 +50,10 @@ export type Database = {
           provider_json: Json | null
           streams_json: Json | null
           pull_requested_at: string | null
+          push_seconds: number | null
           seven_day_resets_at: string | null
           seven_day_utilization: number | null
+          sharer_version: string | null
           updated_at: string
           user_id: string
         }
@@ -62,8 +64,10 @@ export type Database = {
           provider_json?: Json | null
           streams_json?: Json | null
           pull_requested_at?: string | null
+          push_seconds?: number | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
+          sharer_version?: string | null
           updated_at?: string
           user_id: string
         }
@@ -74,8 +78,10 @@ export type Database = {
           provider_json?: Json | null
           streams_json?: Json | null
           pull_requested_at?: string | null
+          push_seconds?: number | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
+          sharer_version?: string | null
           updated_at?: string
           user_id?: string
         }
