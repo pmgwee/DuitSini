@@ -30,6 +30,7 @@ export function SubscriptionIcon({
       color={color}
       slug={preset?.icon}
       domain={preset?.domain}
+      logoUrl={preset?.logoUrl}
       size={size}
       className={className}
       style={style}

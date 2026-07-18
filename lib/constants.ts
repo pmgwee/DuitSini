@@ -1,6 +1,7 @@
 export const CATEGORIES = [
   "streaming",
   "utilities",
+  "telecom",
   "saas",
   "ai",
   "music",
@@ -19,6 +20,7 @@ export type Category = (typeof CATEGORIES)[number];
 export const CATEGORY_META: Record<Category, { label: string; colorVar: string }> = {
   streaming: { label: "Streaming", colorVar: "var(--cat-streaming)" },
   utilities: { label: "Utilities", colorVar: "var(--cat-utilities)" },
+  telecom: { label: "Telecom", colorVar: "var(--cat-telecom)" },
   saas: { label: "SaaS", colorVar: "var(--cat-saas)" },
   ai: { label: "AI", colorVar: "var(--cat-ai)" },
   music: { label: "Music", colorVar: "var(--cat-music)" },
@@ -40,6 +42,7 @@ export const CATEGORY_META: Record<Category, { label: string; colorVar: string }
 export const CATEGORY_COLOR: Record<Category, string> = {
   streaming: "oklch(0.72 0.16 15)",
   utilities: "oklch(0.8 0.12 75)",
+  telecom: "oklch(0.72 0.14 195)",
   saas: "oklch(0.72 0.13 248)",
   ai: "oklch(0.74 0.15 292)",
   music: "oklch(0.74 0.17 342)",
@@ -62,6 +65,7 @@ export const CATEGORY_COLOR: Record<Category, string> = {
 export const CATEGORY_EMOJI: Record<Category, string> = {
   streaming: "🎬",
   utilities: "🛠️",
+  telecom: "📱",
   saas: "💼",
   ai: "🤖",
   music: "🎵",

@@ -32,6 +32,7 @@
   /* Category accents — curated, shared across themes */
   --cat-streaming: oklch(0.72 0.16 15);
   --cat-utilities: oklch(0.8 0.12 75);
+  --cat-telecom: oklch(0.72 0.14 195);
   --cat-saas: oklch(0.72 0.13 248);
   --cat-ai: oklch(0.74 0.15 292);
   --cat-music: oklch(0.74 0.17 342);
@@ -91,6 +92,7 @@
 
   --color-cat-streaming: var(--cat-streaming);
   --color-cat-utilities: var(--cat-utilities);
+  --color-cat-telecom: var(--cat-telecom);
   --color-cat-saas: var(--cat-saas);
   --color-cat-ai: var(--cat-ai);
   --color-cat-music: var(--cat-music);

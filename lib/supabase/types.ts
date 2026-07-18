@@ -592,6 +592,7 @@ export type Database = {
       subscription_category:
         | "streaming"
         | "utilities"
+        | "telecom"
         | "saas"
         | "ai"
         | "music"
@@ -746,6 +747,7 @@ export const Constants = {
       subscription_category: [
         "streaming",
         "utilities",
+        "telecom",
         "saas",
         "ai",
         "music",

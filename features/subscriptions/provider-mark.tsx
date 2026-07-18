@@ -13,23 +13,27 @@ const SIZE_CLASS: Record<string, string> = {
 };
 
 /**
- * The reusable brand mark behind every provider icon. Three tiers, cascading on
+ * The reusable brand mark behind every provider icon. Four tiers, cascading on
  * image error so EVERY provider can show a real logo:
- *   1. `slug`  → clean white Simple Icons glyph on the brand-color circle.
- *   2. `domain`→ full-color favicon (Google) on a white circle, for brands
- *                Simple Icons doesn't carry (OpenAI, Microsoft, Amazon, …).
- *   3. monogram → brand-color circle with white initials, the last resort.
+ *   1. `logoUrl` → a curated direct logo image (hosted locally for brands no
+ *                  icon service carries — e.g. regional telcos/utilities), on a
+ *                  white circle.
+ *   2. `slug`    → clean white Simple Icons glyph on the brand-color circle.
+ *   3. `domain`  → full-color favicon (Google) on a white circle, for brands
+ *                  Simple Icons doesn't carry (OpenAI, Microsoft, Amazon, …).
+ *   4. monogram  → brand-color circle with white initials, the last resort.
  *
  * Stateful only for the onError cascade, so it's a client component. Used by
  * `SubscriptionIcon` (from a subscription) and the provider combobox (preset).
  */
-type MarkStage = "logo" | "favicon" | "monogram";
+type MarkStage = "direct" | "logo" | "favicon" | "monogram";
 
 export function ProviderMark({
   name,
   color,
   slug,
   domain,
+  logoUrl,
   size = "md",
   className,
   style,
@@ -38,23 +42,30 @@ export function ProviderMark({
   color: string;
   slug?: string;
   domain?: string;
+  logoUrl?: string;
   size?: "xs" | "sm" | "md" | "lg";
   className?: string;
   style?: CSSProperties;
 }) {
+  const hasLogoUrl = Boolean(logoUrl);
   const hasSlug = Boolean(slug);
   const hasDomain = Boolean(domain);
   const [stage, setStage] = useState<MarkStage>(
-    hasSlug ? "logo" : hasDomain ? "favicon" : "monogram",
+    hasLogoUrl ? "direct" : hasSlug ? "logo" : hasDomain ? "favicon" : "monogram",
   );
 
-  // logo → favicon (if a domain is known) → monogram.
+  // direct → logo (slug) → favicon (domain) → monogram.
   const advance = () =>
-    setStage((s) => (s === "logo" && hasDomain ? "favicon" : "monogram"));
+    setStage((s) => {
+      if (s === "direct") return hasSlug ? "logo" : hasDomain ? "favicon" : "monogram";
+      if (s === "logo") return hasDomain ? "favicon" : "monogram";
+      return "monogram";
+    });
 
   // The white glyph and the monogram render on the brand-color circle; the
-  // favicon is a full-color image, so it sits on a white circle to read clearly.
-  const onWhite = stage === "favicon";
+  // curated direct logo and the full-color favicon are images, so they sit on a
+  // white circle to read clearly.
+  const onWhite = stage === "direct" || stage === "favicon";
 
   return (
     <span
@@ -67,7 +78,16 @@ export function ProviderMark({
       )}
       style={{ ...style, backgroundColor: onWhite ? "#fff" : color }}
     >
-      {stage === "logo" && slug ? (
+      {stage === "direct" && logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt=""
+          draggable={false}
+          onError={advance}
+          className="h-[80%] w-[80%] object-contain"
+        />
+      ) : stage === "logo" && slug ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={providerIconUrl(slug)}

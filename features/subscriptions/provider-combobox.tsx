@@ -157,6 +157,7 @@ export function ProviderCombobox({
                   color={preset.color}
                   slug={preset.icon}
                   domain={preset.domain}
+                  logoUrl={preset.logoUrl}
                   size="sm"
                 />
                 <span className="flex-1 truncate">{preset.name}</span>

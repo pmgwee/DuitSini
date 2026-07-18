@@ -26,6 +26,13 @@ export interface ProviderPreset {
    * a plain <img src>. The second-tier fallback before the monogram.
    */
   domain?: string;
+  /**
+   * Curated direct logo URL (usually a file under /public/logos/), the FIRST
+   * tier — used for brands no icon service carries a correct logo for (e.g.
+   * regional telcos/utilities whose Google favicon is a generic placeholder).
+   * Cascades to `icon` slug → `domain` favicon → monogram on error.
+   */
+  logoUrl?: string;
   /** Extra search terms (aliases) so "gpt" finds "OpenAI", etc. */
   keywords?: string[];
 }
@@ -129,12 +136,22 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   // ── Finance / Creators ──────────────────────────────────────────────
   { name: "YNAB", category: "finance", color: "#0033ff", domain: "ynab.com", keywords: ["you need a budget"] },
   { name: "Patreon", category: "finance", color: "#ff5900", icon: "patreon", domain: "patreon.com", keywords: [] },
+  { name: "Public Bank", category: "finance", color: "#0072bb", logoUrl: "/logos/public-bank.png", keywords: ["pbebank", "public bank berhad", "pb"] },
+
+  // ── Telecom (Malaysia) ──────────────────────────────────────────────
+  { name: "U Mobile", category: "telecom", color: "#ff7b00", logoUrl: "/logos/umobile.png", domain: "u.com.my", keywords: ["umobile", "u mobile"] },
+  { name: "redONE", category: "telecom", color: "#ed1c24", logoUrl: "/logos/redone-mobile.jpg", keywords: ["redone", "red one", "redone mobile"] },
+  { name: "CelcomDigi", category: "telecom", color: "#0033a0", logoUrl: "/logos/celcom-digi.png", domain: "celcomdigi.com", keywords: ["celcom", "digi", "celcom digi"] },
+  { name: "Maxis", category: "telecom", color: "#4db33c", logoUrl: "/logos/maxis.png", domain: "maxis.com.my", keywords: ["hotlink"] },
 
   // ── Utilities / Security ────────────────────────────────────────────
   { name: "NordVPN", category: "utilities", color: "#4687ff", icon: "nordvpn", domain: "nordvpn.com", keywords: ["vpn"] },
   { name: "ExpressVPN", category: "utilities", color: "#da3940", icon: "expressvpn", domain: "expressvpn.com", keywords: ["vpn"] },
   { name: "Mullvad", category: "utilities", color: "#44475a", icon: "mullvad", domain: "mullvad.net", keywords: ["mullvad vpn"] },
   { name: "Bitwarden", category: "utilities", color: "#175ddc", icon: "bitwarden", domain: "bitwarden.com", keywords: ["password"] },
+  { name: "TNB", category: "utilities", color: "#c8102e", logoUrl: "/logos/my-tnb.jpg", domain: "www.tnb.com.my", keywords: ["tenaga", "tenaga nasional", "tenaga nasional berhad", "mytnb"] },
+  { name: "Ranhill SAJ", category: "utilities", color: "#0072b5", logoUrl: "/logos/ranhill-saj.png", keywords: ["saj", "syarikat air johor", "ranhill", "ranhill saj"] },
+  { name: "Indah Water", category: "utilities", color: "#1e8a4c", logoUrl: "/logos/indah-water.jpg", domain: "iwk.com.my", keywords: ["iwk", "indah water konsortium", "sewerage"] },
 
   // ── News / Reading ──────────────────────────────────────────────────
   { name: "New York Times", category: "news", color: "#000000", icon: "newyorktimes", domain: "nytimes.com", keywords: ["nyt"] },
