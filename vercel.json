@@ -8,10 +8,6 @@
     {
       "path": "/api/cron/reports",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/serenity",
-      "schedule": "*/10 * * * *"
     }
   ]
 }

@@ -1,0 +1,68 @@
+# Warm the Serenity (Stocks) X-feed cache every 10 minutes.
+#
+# Why this lives in GitHub Actions and not vercel.json: Vercel's Hobby tier allows
+# at most 2 cron jobs, each running at most once per day
+# (https://vercel.com/docs/cron-jobs/usage-and-pricing). reminders + reports
+# already fill that budget, and this warmer needs a SUB-DAILY cadence — both for
+# ≤~10-min-old X posts AND to re-populate the per-instance LLM analysis map
+# (lib/serenity/analyzer.ts `analyzedMap`) after cold starts / instance recycles,
+# which is the only thing that ever triggers the LLM post-analysis. The route is
+# a plain authed GET, so it doesn't care what invokes it.
+#
+# One-time setup (repo → Settings → Secrets and variables → Actions):
+#   • Secret:   CRON_SECRET        — the SAME value as in Vercel's Production env
+#                                     (the reminders/reports crons already use it).
+#   • Variable: SERENITY_BASE_URL  — your production origin, e.g. https://duitsini.vercel.app.
+#   • schedule + workflow_dispatch only take effect once this file is on the
+#     default branch (main). Test it via Actions → "Serenity warm" → "Run workflow".
+#
+# Cost: ~4,320 runs/mo × ~10s ≈ 720 Linux-minutes/mo — well within the 2,000 free
+# monthly minutes for private repos. GitHub's cron is best-effort and may drift a
+# couple minutes under load; for a cache-warmer that's fine.
+name: Serenity warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 min, UTC
+  workflow_dispatch: {} # manual "Run workflow" button for testing
+
+# The job only curls an external URL — it needs no repo or GitHub permissions.
+permissions: {}
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Warm Serenity feed
+        env:
+          BASE_URL: ${{ vars.SERENITY_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -u
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "::error::SERENITY_BASE_URL Actions variable is not set (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET Actions secret is not set (Settings → Secrets and variables → Actions → Secrets)."
+            exit 1
+          fi
+          # -f: fail the job on HTTP 4xx/5xx (covers a 401 from a bad/missing secret).
+          # -m 110: the route caps at maxDuration=120s; leave margin under the job timeout.
+          # ${BASE_URL%/} strips a trailing slash so we don't get a double slash.
+          body=$(curl -fsS -m 110 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/cron/serenity") || {
+            echo "::error::Request failed — network error, bad CRON_SECRET (HTTP 401), or non-2xx from the route."
+            exit 1
+          }
+          echo "$body"
+          # The route returns HTTP 200 with ok:false if the warm itself threw
+          # (trackserenity/LLM hiccup) — surface that as a job failure too, not a
+          # silent green, so a persistent upstream outage is visible in Actions.
+          echo "$body" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' || {
+            echo "::error::Warm returned ok:false — see body above."
+            exit 1
+          }
+          echo "Serenity warm OK"
