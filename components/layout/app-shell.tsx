@@ -10,6 +10,7 @@ import {
   Loader2,
   Settings,
   Sparkles,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ const NAV: NavItem[] = [
   { href: "/subscriptions", label: "Subscriptions", icon: CalendarDays },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/reports", label: "Reports", icon: FileText },
+  { href: "/serenity", label: "Serenity", icon: TrendingUp },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
