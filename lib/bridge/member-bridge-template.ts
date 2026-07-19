@@ -89,6 +89,24 @@
  * token's owner at download time — with a "not your account?" warning, and
  * /api/bridge/mac refuses tokens that are no longer registered (410).
  *
+ * v7 — on-demand refresh at real expiry (2026-07-19). The first full day at
+ * the 300s cadence (2026-07-18: 187 usage calls — half the 429 trip band, no
+ * rate limit) exposed the OTHER limiter: the usage endpoint hard-rejects
+ * (401) an access token the moment its ~8h expiresAt passes — the v5
+ * "tokens outlive their recorded expiry" bet is dead — so with refresh
+ * disabled every session died exactly 8h after login (death at 20:57, the
+ * token's expiry minute) and needed a manual /logout + fresh browser
+ * re-login. v7 re-enables the kept-intact refresh machinery in a strictly
+ * ON-DEMAND mode: a token is still used AS-IS (v5 floor) until
+ * EXPIRY_BUFFER_MS before its recorded expiry — or until a real usage 401
+ * (force path) — and only then is ONE gated refresh spent; the settle
+ * windows, 45s min gap, 15-min ok-gap, persisted cooldown ladder and 4xx
+ * reauth hold all still apply, and every gate/failure DEGRADES to using the
+ * current token (the candidate walk + all-rejected pause stay the
+ * authority). Worst case equals v6 behavior (manual re-login); steady state
+ * is ~3 refresh POSTs/day at 8h lifetimes — far below v3's early-refresh
+ * schedule that produced the refresh-429 lockouts.
+ *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
  * injected via the __PLACEHOLDER__ tokens.
@@ -107,7 +125,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 
-const SHARER_VERSION = "6.2";
+const SHARER_VERSION = "7";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
 // Which dashboard account this script broadcasts to. Baked in at download
@@ -141,30 +159,33 @@ const UA = "claude-code/2.1.9";
 // PUSH_MS is configurable per member (cc-switch-style; see loadPushMs).
 let PUSH_MS = 300000;
 const PUSH_JITTER_MS = 8000, COMMAND_MS = 4000, MIN_GAP_MS = 9000, MIN_429_BACKOFF_MS = 60000;
-// Token-refresh discipline. Subscription access tokens live about 8 hours,
-// and the refresh endpoint flags a login that gets retried in a loop (that
-// flag is what bricked the sign-in for a whole night). So refreshes are:
-//   EARLY - scheduled REFRESH_LEAD_MS before expiry (minus a per-token random
-//     offset so members never line up), leaving hours of valid-token runway
-//     to wait out a cooldown if an attempt gets rate-limited;
-//   RARE - one network attempt per cooldown window, escalating through
-//     REFRESH_COOLDOWNS_MS on consecutive 429s (server retry-after wins if
-//     longer). A normal day needs only ~3 refreshes total;
-//   REMEMBERED - the cooldown lives in .sharer-state.json next to the creds,
-//     so restarting the window (or a second instance) honors an in-progress
-//     wait instead of resetting it and firing another attempt.
-// EXPIRY_BUFFER_MS is only the "stop using this token" cutoff, no longer the
-// refresh trigger. REFRESH_MIN_OK_GAP_MS stops a hot loop if token lifetimes
-// ever shrink below the lead time.
-// v5 KILL-SWITCH: auto-refresh against the token endpoint is DISABLED. Three
-// hardening rounds (early+jittered, cooldown ladder, persisted state) still
-// ended in refresh-429 lockouts on dedicated login dirs, so the sharer no
-// longer calls the token endpoint at all - tokens are used as-is and the
-// usage endpoint's own 401/403 is the only authority (cc-switch parity).
-// Every refresh function below is kept intact - set true to restore v3.
-const REFRESH_ENABLED = false;
-const EXPIRY_BUFFER_MS = 300000, REFRESH_MIN_MS = 45000;
-const REFRESH_LEAD_MS = 10800000, REFRESH_LEAD_JITTER_MS = 900000, REFRESH_MIN_OK_GAP_MS = 900000;
+// Token-refresh discipline (v7 - ON-DEMAND ONLY). Subscription access tokens
+// live about 8 hours and the usage endpoint hard-rejects them (401) the
+// moment the recorded expiresAt passes (proven 2026-07-18: a 187-call day at
+// 300s cadence died at the exact expiry minute; only a fresh login revived
+// it). The refresh endpoint, in turn, flags a login that gets hammered (the
+// v3-era lockouts that once bricked a sign-in for a night). v7 threads the
+// needle:
+//   AS-IS FIRST - a token is used unchanged (v5/cc-switch parity) until
+//     EXPIRY_BUFFER_MS before its recorded expiry, or until the server
+//     answers a real 401. No early/scheduled refreshes, ever (v3's
+//     early-at-expiry-minus-3h schedule is what generated enough token-
+//     endpoint traffic to hit the refresh-429 lockouts).
+//   ONE GATED ATTEMPT - a refresh POST is spent only when every guard
+//     agrees: outside the persisted cooldown (.sharer-state.json beside the
+//     creds - restarts and second instances honor an in-progress wait),
+//     outside the post-boot/wake settle window, at least REFRESH_MIN_MS
+//     since the last attempt, and at least REFRESH_MIN_OK_GAP_MS since a
+//     SUCCESSFUL refresh (a fresh token that still 401s cannot be fixed by
+//     refreshing harder).
+//   DEGRADE, NEVER BLOCK - every gate and every failure falls back to using
+//     the current token as-is; the usage endpoint stays the only authority
+//     and the candidate walk / all-rejected pause handle the rest. Worst
+//     case equals the old v5/v6 behavior (manual re-login); a working
+//     refresh removes the 8-hour ceiling (~3 refresh POSTs/day at 8h
+//     lifetimes).
+const REFRESH_ENABLED = true;
+const EXPIRY_BUFFER_MS = 300000, REFRESH_MIN_MS = 45000, REFRESH_MIN_OK_GAP_MS = 900000;
 const REFRESH_COOLDOWNS_MS = [900000, 1800000, 3600000, 7200000];
 // People run this from early morning (~6am boot/wake) to late night (~3am
 // sleep). Right after startup or waking from sleep the network is often only
@@ -403,7 +424,8 @@ async function writeState(credsPath, patch) {
 }
 
 async function refresh(creds, path) {
-  const rt = creds.claudeAiOauth && creds.claudeAiOauth.refreshToken;
+  const o = oauthEntryOf(creds);
+  const rt = o && o.refreshToken;
   if (!rt) throw new Error("Please open Claude Code and sign in first.");
   let lastErr;
   for (const url of TOKEN_ENDPOINTS) {
@@ -418,7 +440,7 @@ async function refresh(creds, path) {
       // genuinely long server-side limit.
       const ra = resp.headers.get("retry-after");
       const reset = resp.headers.get("anthropic-ratelimit-unified-reset");
-      const exp2 = creds.claudeAiOauth && creds.claudeAiOauth.expiresAt;
+      const exp2 = o.expiresAt;
       const ageMin = typeof exp2 === "number" ? Math.round((Date.now() - exp2) / 60000) : null;
       throw Object.assign(new Error("Anthropic token-refresh rate-limited (429) at " + url + (ra ? " retry-after=" + ra + "s" : "") + (reset ? " reset=" + reset : "") + " creds=" + path + (ageMin == null ? "" : " tokenAge=" + ageMin + "m")), { code: 429, retryMs: retryMsFrom(ra, reset) });
     }
@@ -433,12 +455,15 @@ async function refresh(creds, path) {
     }
     const j = await resp.json();
     if (!j.access_token) throw new Error("Refresh returned no token.");
-    creds.claudeAiOauth.accessToken = j.access_token;
-    if (j.refresh_token) creds.claudeAiOauth.refreshToken = j.refresh_token;
-    creds.claudeAiOauth.expiresAt = Date.now() + (j.expires_in || 3600) * 1000;
+    // Mutate the oauth entry IN PLACE inside the whole parsed credentials
+    // file, then write the whole file back - sibling fields (mcpOAuth etc.)
+    // and the key spelling ("claudeAiOauth" vs "claude.ai_oauth") survive.
+    o.accessToken = j.access_token;
+    if (j.refresh_token) o.refreshToken = j.refresh_token;
+    o.expiresAt = Date.now() + (j.expires_in || 3600) * 1000;
     await writeCreds(path, creds);
-    console.log("  " + stamp() + "  refreshed your Claude sign-in (" + noteRefresh() + " today)");
-    return creds.claudeAiOauth.accessToken;
+    console.log("  " + stamp() + "  refreshed your Claude sign-in (valid ~" + Math.max(1, Math.round((j.expires_in || 3600) / 3600)) + "h; " + noteRefresh() + " today)");
+    return o.accessToken;
   }
   throw lastErr || new Error("Refresh failed.");
 }
@@ -457,16 +482,18 @@ async function refreshOrAdoptFromDisk(creds, path, staleExp) {
   await new Promise(function (r) { setTimeout(r, 200 + Math.floor(Math.random() * 800)); });
   try {
     const fresh = JSON.parse(await readFile(path, "utf8"));
-    const fo = fresh.claudeAiOauth;
+    const fo = oauthEntryOf(fresh);
     if (fo && fo.accessToken && typeof fo.expiresAt === "number" && fo.expiresAt > staleExp && Date.now() < fo.expiresAt - EXPIRY_BUFFER_MS) {
-      // A sibling/other login refreshed it while we waited - use their token.
-      creds.claudeAiOauth = fo;
+      // A sibling/other login refreshed it while we waited - use their token
+      // (the next cycle re-reads the file anyway; no write needed here).
       console.log("  " + stamp() + "  adopted a fresher sign-in from disk (another process refreshed it)");
       return fo.accessToken;
     }
     // Refresh with the newest refresh token on disk, not our possibly-rotated
-    // in-memory one, so we never present a token a sibling already invalidated.
-    if (fo && fo.refreshToken) creds.claudeAiOauth = fo;
+    // in-memory one, so we never present a token a sibling already
+    // invalidated - and refresh the FRESH file object, so the write-back
+    // preserves whatever else the newest file holds.
+    if (fo && fo.refreshToken) return await refresh(fresh, path);
   } catch (e) { /* unreadable/torn write - fall through to refresh what we have */ }
   return await refresh(creds, path);
 }
@@ -501,51 +528,40 @@ async function attemptRefresh(creds, path, staleExp) {
   }
 }
 
-// Decides whether the current access token is fine, a refresh is due, or we
-// are inside a cooldown. Refreshes are scheduled REFRESH_LEAD_MS before expiry
-// (with a per-token random offset, remembered in the state file so cycles and
-// restarts agree), so a rate-limited attempt still has hours of runway on the
-// still-valid token. A cooldown error carries code "cooldown" so the caller
-// pauses this source quietly instead of climbing any backoff ladder.
-async function getToken(creds, path) {
-  const o = creds.claudeAiOauth;
+// v7: decide whether to spend a refresh POST before this usage call. The
+// token is used AS-IS (v5/cc-switch parity - the server is the authority)
+// until its recorded expiry is actually upon us; force=true means a real 401
+// just came back on this token, which overrides the clock. Every gate below
+// DEGRADES to returning the current token instead of throwing: refresh here
+// is pure upside, and the candidate walk / all-rejected pause in
+// fetchProSnapshot remain the only failure authority.
+async function getToken(creds, path, force) {
+  const o = oauthEntryOf(creds);
   if (!o || !o.accessToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
-  // v5 (cc-switch parity): with auto-refresh off, the on-disk token is used
-  // AS-IS even past its recorded expiresAt - the server is the authority, and
-  // a real 401/403 is handled by the candidate walk in fetchProSnapshot.
-  // (Normally unreachable while REFRESH_ENABLED is false - the walk bypasses
-  // getToken - kept as a guard so nothing can reach the refresh code below.)
-  if (!REFRESH_ENABLED) return o.accessToken;
-  if (!o.refreshToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
+  if (!REFRESH_ENABLED || !o.refreshToken || !path) return o.accessToken;
   const now = Date.now(), exp = typeof o.expiresAt === "number" ? o.expiresAt : 0;
-  const usable = now < exp - EXPIRY_BUFFER_MS;
+  // No early/scheduled refreshes, ever: v3's expiry-minus-3h schedule is what
+  // generated enough token-endpoint traffic to trip refresh-429 lockouts.
+  const usable = !force && now < exp - EXPIRY_BUFFER_MS;
+  if (usable) return o.accessToken;
   const st = await readState(path);
-  let lead = (st.jitterForExp === exp && typeof st.jitterMs === "number") ? st.jitterMs : -1;
-  if (lead < 0) { lead = Math.floor(Math.random() * REFRESH_LEAD_JITTER_MS); await writeState(path, { jitterForExp: exp, jitterMs: lead }); }
+  // A refresh that SUCCEEDED minutes ago and still yields 401s cannot be
+  // fixed by refreshing harder - this gate (not bypassed by force) caps a
+  // pathological loop at one refresh per REFRESH_MIN_OK_GAP_MS per source.
   const lastOk = typeof st.lastRefreshOkAt === "number" ? st.lastRefreshOkAt : 0;
-  const due = now >= exp - REFRESH_LEAD_MS + lead && now - lastOk >= REFRESH_MIN_OK_GAP_MS;
-  if (usable && !due) return o.accessToken;
+  if (now - lastOk < REFRESH_MIN_OK_GAP_MS) return o.accessToken;
   const blockedUntil = typeof st.refreshBlockedUntil === "number" ? st.refreshBlockedUntil : 0;
-  if (now < blockedUntil) {
-    if (usable) return o.accessToken;
-    throw Object.assign(new Error("Claude sign-in expired; next refresh attempt " + fmtClock(blockedUntil) + ". A re-login on this computer is picked up automatically."), { code: "cooldown", until: blockedUntil });
-  }
-  if (now < settleUntil) {
-    if (usable) return o.accessToken;
-    throw Object.assign(new Error("letting the connection settle after startup/wake before refreshing the sign-in"), { code: "cooldown", until: settleUntil });
-  }
-  if (now - lastRefreshAt < REFRESH_MIN_MS) {
-    if (usable) return o.accessToken;
-    throw Object.assign(new Error("waiting a moment before the next refresh"), { code: "cooldown", until: lastRefreshAt + REFRESH_MIN_MS });
-  }
+  if (now < blockedUntil) return o.accessToken;
+  // A refresh POST into a half-up network right after boot/wake can succeed
+  // server-side (rotating the refresh token) while the response is lost -
+  // stranding the login. Usage calls are safe to retry; refreshes are not.
+  if (now < settleUntil) return o.accessToken;
+  if (now - lastRefreshAt < REFRESH_MIN_MS) return o.accessToken;
   lastRefreshAt = now;
   try { return await attemptRefresh(creds, path, exp); }
   catch (e) {
-    if (usable) {
-      warnOnce("couldn't refresh yet (" + ((e && e.message) || "error") + "); using current sign-in" + (e && e.blockedUntil ? "; next try " + fmtClock(e.blockedUntil) : ""));
-      return o.accessToken;
-    }
-    throw e;
+    warnOnce("couldn't refresh the sign-in (" + ((e && e.message) || "error") + "); using the current one" + (e && e.blockedUntil ? "; next attempt " + fmtClock(e.blockedUntil) : ""));
+    return o.accessToken;
   }
 }
 
@@ -625,10 +641,14 @@ function noteActiveSource(label) {
 }
 
 /**
- * Claude Pro snapshot - the v5 walk (cc-switch parity). Each credential source
- * (dedicated dirs -> macOS Keychain -> general dirs) is tried in order. Every
- * token is used AS-IS with no expiry gating - the server is the authority:
- *   - 401/403  -> this login can't serve usage; advance to the next source.
+ * Claude Pro snapshot - the v5 walk (cc-switch parity) + v7 on-demand
+ * refresh. Each credential source (dedicated dirs -> macOS Keychain ->
+ * general dirs) is tried in order. A token is used AS-IS until its recorded
+ * expiry actually arrives (getToken refreshes it then, gated hard); the
+ * server stays the authority:
+ *   - 401      -> one force-gated refresh + single retry for a refresh-
+ *                 capable file source; otherwise advance to the next source.
+ *   - 403      -> this login can't serve usage; advance to the next source.
  *   - 429      -> STOP the walk (throttling is endpoint-level; trying more
  *                 candidates would multiply pressure) - pauseSource backs off.
  *   - network  -> STOP (safeFetch already retried; says nothing about tokens).
@@ -645,14 +665,15 @@ async function fetchProSnapshot() {
   let sawCreds = false;
   const rejects = [];
   for (const src of proCredSources()) {
-    const oauth = oauthEntryOf(await src.read());
+    const creds = await src.read();
+    const oauth = oauthEntryOf(creds);
     if (!oauth || !oauth.accessToken) continue;
     sawCreds = true;
-    // REFRESH_ENABLED is the dormant v3 path: file sources would go through
-    // getToken's scheduled refresh. With refresh off (v5) the token is used
-    // as-is; the keychain source is always as-is (nothing can write it back).
+    // v7: file sources go through getToken, which refreshes ON DEMAND (at
+    // real expiry only) and otherwise returns the token as-is; the keychain
+    // source is always as-is (nothing can write a rotation back to it).
     const token = (src.path && REFRESH_ENABLED)
-      ? await getToken({ claudeAiOauth: oauth }, src.path)
+      ? await getToken(creds, src.path)
       : oauth.accessToken;
     try {
       const snap = snapFromUsage(await fetchUsage(token));
@@ -660,6 +681,25 @@ async function fetchProSnapshot() {
       return snap;
     } catch (e) {
       if (e && (e.code === 401 || e.code === 403)) {
+        // v7 reactive path: a 401 can mean the server retired this token
+        // EARLIER than its recorded expiry. For a refresh-capable file
+        // source, spend one force-gated refresh and retry usage ONCE with a
+        // genuinely NEW token. All refresh guards still apply (cooldowns,
+        // settle window, 15-min ok-gap), so a dead login costs at most one
+        // refresh POST per hold window - never one per cycle.
+        if (e.code === 401 && src.path && REFRESH_ENABLED && oauth.refreshToken) {
+          let token2 = null;
+          try { token2 = await getToken(creds, src.path, true); } catch (e2) { token2 = null; }
+          if (token2 && token2 !== token) {
+            try {
+              const snap2 = snapFromUsage(await fetchUsage(token2));
+              noteActiveSource(src.label);
+              return snap2;
+            } catch (e3) {
+              if (!(e3 && (e3.code === 401 || e3.code === 403))) throw e3;
+            }
+          }
+        }
         rejects.push(src.label + " (" + e.code + ")");
         continue;
       }
@@ -892,7 +932,8 @@ async function loop() {
   console.log("  " + stamp() + "  update cadence: every " + Math.round(PUSH_MS / 1000) + "s  (change via sharer-config.json pushSeconds or CLAUDE_SHARER_PUSH_SECONDS, 120-3600)");
   console.log("  " + stamp() + "  usage-endpoint budget meter: " + usageCallSummary());
   console.log("  " + stamp() + "  reading your Claude Code sign-in(s) from disk (dedicated folders -> macOS Keychain -> ~/.claude).");
-  console.log("  If sharing stops later, just sign in to Claude Code again - it is picked up automatically.");
+  console.log("  " + stamp() + "  expired sign-ins renew themselves now (v7 on-demand refresh) - no more 8-hour re-login.");
+  console.log("  If sharing still stops later, sign in to Claude Code again - it is picked up automatically.");
   loop();
 })();
 `;
