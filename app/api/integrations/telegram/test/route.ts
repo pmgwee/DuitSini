@@ -29,7 +29,7 @@ export async function POST() {
 
   const result = await sendTelegramMessage(
     chatId,
-    "✅ <b>Test message</b> — your Subscription Agent reminders are wired up.",
+    "✅ <b>Test message</b> — your DuitSini_Agent are wired up.",
   );
   if (result.outcome === "sent") return NextResponse.json({ ok: true });
   if (result.outcome === "skipped") {

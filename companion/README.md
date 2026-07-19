@@ -1,7 +1,7 @@
 # Claude Usage Bridge (local companion)
 
 A tiny **local** Node script that reads your Claude Code OAuth token and
-**pushes** your real 5-hour / 7-day plan usage to your Subscription Agent site.
+**pushes** your real 5-hour / 7-day plan usage to your DuitSini site.
 It is **not** part of the deployed app — it runs on your own machine.
 
 ```

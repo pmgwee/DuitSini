@@ -4,12 +4,12 @@ import { ClaudeUsageTracker } from "@/features/dashboard/claude-usage-tracker";
 import { ConnectClaudeCard } from "@/features/dashboard/connect-claude-card";
 import { MusicWidget } from "@/features/dashboard/music/music-widget";
 
-export default function DashboardPage() {
+export default function AiUsagePage() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       {/* <PageHeader
-        title="Dashboard"
-        description="A calm personal command center — usage, music, and time at a glance."
+        title="AI Usage"
+        description="Your live usage across every AI provider — plus music and time at a glance."
       /> */}
 
       {/* Flip clock — hero */}

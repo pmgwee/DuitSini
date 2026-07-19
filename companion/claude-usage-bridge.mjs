@@ -4,7 +4,7 @@
  *
  * Reads your Claude Code OAuth token from the local credentials file, fetches
  * your real 5-hour / 7-day plan usage from Anthropic's (unofficial)
- * `GET /api/oauth/usage` endpoint, and PUSHES it to your Subscription Agent
+ * `GET /api/oauth/usage` endpoint, and PUSHES it to your DuitSini
  * site's ingest route. The site then shows the live % on the dashboard — on any
  * device, including the deployed HTTPS site (a browser there cannot reliably
  * reach http://localhost, so we push instead of being polled).

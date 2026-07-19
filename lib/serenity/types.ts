@@ -41,13 +41,32 @@ export interface SerenityHolding {
 
 /** The seven themes serenitytrades.com itself organises the universe into. */
 export type SerenityTheme =
-  | "AI photonics / optical interconnect (CPO)"
-  | "Memory / NAND-DRAM supercycle"
-  | "Advanced packaging & semicap chokepoints"
-  | "AI power / grid bottleneck"
-  | "Neoclouds"
-  | "Defense / drones & space"
-  | "Fintech / crypto & high-margin compounders";
+  | "Optics / Silicon Photonics"
+  | "Memory, Storage & Servers"
+  | "Advanced Packaging & Semicap"
+  | "Energy, Nuclear & Battery"
+  | "Data Center & Cloud"
+  | "Drones & Airbus"
+  | "Space & Satellites"
+  | "Robot / Humanoid"
+  | "Fintech & Crypto";
+
+/**
+ * The full post topic taxonomy (19 areas) — superset of SerenityTheme. A post can
+ * be tagged with several. Used by the LLM/deterministic analyzer + the feed filter.
+ */
+export type Topic =
+  | SerenityTheme
+  | "Mega-Cap Tech & Semiconductors"
+  | "Networking"
+  | "Rare Earth Materials"
+  | "Quantum"
+  | "SaaS"
+  | "Medical / Healthcare"
+  | "Cybersecurity"
+  | "Meme"
+  | "Core / Keystone"
+  | "Macro & Market Analysis";
 
 /** A daily commentary post (from /commentary). */
 export interface SerenityPost {
@@ -56,6 +75,26 @@ export interface SerenityPost {
   summary: string;
   tickers: string[]; // tagged tickers (e.g. "AAOI"), in order of appearance
   url: string; // /commentary/YYYY-MM-DD on the source site
+}
+
+/** A ticker the analyzer pulled from a post, with its contextual stance. */
+export interface AnalyzedTicker {
+  ticker: string;
+  company?: string;
+  stance: Stance;
+}
+
+/**
+ * A Serenity X post enriched by the analyzer: topic tags, a one-line insight, and
+ * tickers resolved from BOTH $-cashtags and prose (e.g. "Apptronik"/"Tesla") with
+ * per-ticker bullish/bearish stance. `llmAnalyzed=false` means it fell back to the
+ * deterministic tagger (no Z.ai key or cache miss) — topics still set, insight empty.
+ */
+export interface AnalyzedTweet extends SerenityTweet {
+  topics: Topic[];
+  insight: string;
+  analyzedTickers: AnalyzedTicker[];
+  llmAnalyzed: boolean;
 }
 
 /**
@@ -116,7 +155,7 @@ export interface SerenityData {
   holdings: HoldingView[];
   universe: NameView[];
   themes: ThemeGroup[];
-  feed: SerenityTweet[]; // trackserenity X posts (the commentary)
+  feed: AnalyzedTweet[]; // trackserenity X posts, enriched by the analyzer
   watchlist: WatchlistItem[]; // trackserenity recently-mentioned tickers
   prices: Record<string, number>; // ticker → trailing 1-year % (FMP); {} when no key/failure
   feedUpdatedAt: string | null; // trackserenity's own last-sync timestamp (ISO) — proves the X feed is live
@@ -131,11 +170,13 @@ export const SERENITYTRADES_URL = "https://serenitytrades.com";
 export const TRACKSERENITY_URL = "https://www.trackserenity.com";
 
 export const SERENITY_THEMES: SerenityTheme[] = [
-  "AI photonics / optical interconnect (CPO)",
-  "Memory / NAND-DRAM supercycle",
-  "Advanced packaging & semicap chokepoints",
-  "AI power / grid bottleneck",
-  "Neoclouds",
-  "Defense / drones & space",
-  "Fintech / crypto & high-margin compounders",
+  "Optics / Silicon Photonics",
+  "Memory, Storage & Servers",
+  "Advanced Packaging & Semicap",
+  "Energy, Nuclear & Battery",
+  "Data Center & Cloud",
+  "Drones & Airbus",
+  "Space & Satellites",
+  "Robot / Humanoid",
+  "Fintech & Crypto",
 ];

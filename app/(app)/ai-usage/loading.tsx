@@ -1,11 +1,11 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
- * Shown instantly while the dashboard's server component resolves. Mirrors the
+ * Shown instantly while the AI Usage server component resolves. Mirrors the
  * real layout (flip-clock hero, then a two-column usage + music grid) so the
  * transition reads as the page arriving, not a blank freeze.
  */
-export default function DashboardLoading() {
+export default function AiUsageLoading() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       {/* Flip clock hero */}

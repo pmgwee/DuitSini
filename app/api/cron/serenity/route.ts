@@ -1,10 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
-import { getSerenityData } from "@/lib/serenity";
+import { getSerenityData, warmSerenityAnalysis } from "@/lib/serenity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// Cold-cache warm can analyze the whole feed (first run); 120s is headroom.
+export const maxDuration = 120;
 
 /**
  * Headless warmer — the proactive half of the freshness pipeline.
@@ -36,7 +37,10 @@ export async function GET(req: NextRequest) {
   try {
     // Purge the X-feed cache so the next read pulls fresh from trackserenity.
     revalidateTag("serenity-feed");
-    // Re-read immediately to repopulate the cache (warming it for real visitors).
+    // Warm every feed tweet's analysis (LLM where configured, cached durably) so
+    // the page's peek-only read has enriched insight/topics/tickers ready.
+    const warmed = await warmSerenityAnalysis();
+    // Also prime the aggregated payload the page/api serves.
     const data = await getSerenityData();
     return NextResponse.json({
       ok: true,
@@ -44,6 +48,8 @@ export async function GET(req: NextRequest) {
       feedUpdatedAt: data.feedUpdatedAt,
       tweets: data.feed.length,
       watchlist: data.watchlist.length,
+      analyzed: warmed.warmed,
+      llm: warmed.llm,
       stale: data.stale,
     });
   } catch (e) {

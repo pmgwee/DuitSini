@@ -4,9 +4,12 @@ import { holdingSchema, nameSchema } from "./schema";
 import { classifyTheme, isCoreHolding, isUsInvestable, rating } from "./metrics";
 import { fetchTrackSerenitySignals } from "./trackserenity";
 import { getYearlyChanges } from "./prices";
+import { getAnalysis, warmAnalysis } from "./analyzer";
+import { isZaiConfigured } from "@/lib/ai/zai";
 import {
   SERENITY_THEMES,
   TRACKSERENITY_URL,
+  type AnalyzedTweet,
   type Centrality,
   type HoldingView,
   type LikelyOwned,
@@ -172,11 +175,17 @@ async function fetchFresh(): Promise<SerenityData> {
     base.holdings.map((h) => ({ ticker: h.ticker, fmpSymbol: h.fmpSymbol })),
   ).catch(() => ({}));
 
+  // Enrich the X feed with analysis (topics/insight/tickers-stance). getAnalysis
+  // never triggers an LLM call — it peeks the per-instance map (warmed by the cron)
+  // or falls back to the deterministic tagger.
+  const byTicker = new Map<string, NameView>(base.universe.map((n) => [n.ticker, n]));
+  const feed: AnalyzedTweet[] = (signals?.tweets ?? []).map((t) => getAnalysis(t, byTicker));
+
   return {
     holdings: base.holdings,
     universe: base.universe,
     themes: base.themes,
-    feed: signals?.tweets ?? [],
+    feed,
     watchlist: signals?.watchlist ?? [],
     prices: prices ?? {},
     feedUpdatedAt: signals?.updatedAt ?? null,
@@ -186,6 +195,26 @@ async function fetchFresh(): Promise<SerenityData> {
     stale: false,
     unavailable: false,
   };
+}
+
+/**
+ * Cron-only: warm every feed tweet's analysis so the page (which only peeks) has
+ * LLM-enriched insight/topics/tickers ready. The LLM result is cached durably per
+ * post (unstable_cache), so the heavy extraction runs once per post ever — later
+ * warms are cache hits. Modest concurrency to respect Z.ai rate limits.
+ */
+export async function warmSerenityAnalysis(): Promise<{ warmed: number; llm: boolean }> {
+  const [base, signals] = await Promise.all([
+    fetchSerenityBase(),
+    fetchTrackSerenitySignals().catch(() => null),
+  ]);
+  const byTicker = new Map<string, NameView>(base.universe.map((n) => [n.ticker, n]));
+  const tweets = signals?.tweets ?? [];
+  const concurrency = 4;
+  for (let i = 0; i < tweets.length; i += concurrency) {
+    await Promise.all(tweets.slice(i, i + concurrency).map((t) => warmAnalysis(t, byTicker)));
+  }
+  return { warmed: tweets.length, llm: isZaiConfigured() };
 }
 
 /**

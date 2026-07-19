@@ -26,7 +26,7 @@
 const YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart";
 const REVALIDATE_SECONDS = 86_400; // 1 day — not time-critical
 const UA =
-  "Mozilla/5.0 (compatible; subscription-agent-serenity-view/1.0; +price data for personal use)";
+  "Mozilla/5.0 (compatible; duitsini-serenity-view/1.0; +price data for personal use)";
 
 interface YahooChartMeta {
   regularMarketPrice?: unknown;

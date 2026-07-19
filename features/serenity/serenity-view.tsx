@@ -196,7 +196,7 @@ export function SerenityView({ initialData }: { initialData: SerenityData }) {
           <HoldingsRing holdings={data.holdings} />
           <ThemeConstellation themes={data.themes} />
           <RobotVision universe={data.universe} />
-          <PostsFeed feed={data.feed} universe={data.universe} />
+          <PostsFeed feed={data.feed} />
         </>
       )}
 

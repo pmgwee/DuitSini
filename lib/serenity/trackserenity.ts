@@ -20,7 +20,7 @@ import type { SerenityTweet, WatchlistItem } from "./types";
 
 const SIGNALS_REVALIDATE_SECONDS = 300; // 5 min — it's a live X feed
 const UA =
-  "subscription-agent-serenity-view/1.0 (+derived view of trackserenity.com; respectful, cached, attributed)";
+  "duitsini-serenity-view/1.0 (+derived view of trackserenity.com; respectful, cached, attributed)";
 
 export interface TrackSerenitySignals {
   tweets: SerenityTweet[];

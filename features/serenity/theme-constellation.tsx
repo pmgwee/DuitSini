@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import {
+  Bot,
   Cloud,
   Coins,
   MemoryStick,
   Package,
+  Plane,
   Rocket,
   Waves,
   Zap,
@@ -18,13 +20,15 @@ import { RATING_STYLE, RATING_TIERS, SOURCE_BASE, StanceDot, STANCE_LEGEND, THEM
 
 /** A representative icon per theme, in place of a plain colored bubble. */
 const THEME_ICON: Record<SerenityTheme, LucideIcon> = {
-  "AI photonics / optical interconnect (CPO)": Waves,
-  "Memory / NAND-DRAM supercycle": MemoryStick,
-  "Advanced packaging & semicap chokepoints": Package,
-  "AI power / grid bottleneck": Zap,
-  Neoclouds: Cloud,
-  "Defense / drones & space": Rocket,
-  "Fintech / crypto & high-margin compounders": Coins,
+  "Optics / Silicon Photonics": Waves,
+  "Memory, Storage & Servers": MemoryStick,
+  "Advanced Packaging & Semicap": Package,
+  "Energy, Nuclear & Battery": Zap,
+  "Data Center & Cloud": Cloud,
+  "Drones & Airbus": Plane,
+  "Space & Satellites": Rocket,
+  "Robot / Humanoid": Bot,
+  "Fintech & Crypto": Coins,
 };
 
 function TickerChip({ t, accentVar }: { t: NameView; accentVar: string }) {

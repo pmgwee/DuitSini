@@ -35,6 +35,23 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },
+  // The Dashboard surface was renamed to "AI Usage" in the DuitSini rebrand and
+  // its route moved /dashboard → /ai-usage. Keep the old path alive permanently:
+  // members have it bookmarked, and it was the landing page's secondary CTA.
+  // Three surfaces were renamed in the DuitSini rebrand: Dashboard → AI Usage,
+  // Serenity → Stocks, Subscriptions → Bills. All three old paths shipped to main
+  // before the rename, so keep them alive permanently — members have them
+  // bookmarked, and /subscriptions was the post-login landing page.
+  async redirects() {
+    return [
+      { source: "/dashboard", destination: "/ai-usage", permanent: true },
+      { source: "/dashboard/:path*", destination: "/ai-usage/:path*", permanent: true },
+      { source: "/serenity", destination: "/stocks", permanent: true },
+      { source: "/serenity/:path*", destination: "/stocks/:path*", permanent: true },
+      { source: "/subscriptions", destination: "/bills", permanent: true },
+      { source: "/subscriptions/:path*", destination: "/bills/:path*", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

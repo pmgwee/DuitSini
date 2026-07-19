@@ -51,36 +51,44 @@ export function isUsInvestable(name: { region: string; ticker: string }): boolea
 // photonics first (his flagship, most specific vocabulary), then down to the catch-all.
 const THEME_RULES: { theme: SerenityTheme; re: RegExp }[] = [
   {
-    theme: "AI photonics / optical interconnect (CPO)",
+    theme: "Optics / Silicon Photonics",
     re: /photon|optical|laser|\binp\b|indium phosphid|co-packaged|\bcpo\b|transceiv|waveguide|\bdfb\b|silicon photonic|\bgaas\b|epiwafer|epitax|soitec|\biqe\b|axt[^a-z]|sive|aaoi|\blite\b|cohr|lumentum|aehr|\blpk\b|poet|ayar|lightmatter|lpth|\bflnc\b| fibre|fiber optic|semicap test/i,
   },
   {
-    theme: "Memory / NAND-DRAM supercycle",
-    re: /memory|\bdram\b|\bnand\b|\bhbm\b|micron|hynix|samsung|sandisk|\bsndk\b|\bmu\b|win semi|nextronic|\b8147\b|2344|2337|supercycle/i,
+    theme: "Memory, Storage & Servers",
+    re: /memory|\bdram\b|\bnand\b|\bhbm\b|micron|hynix|samsung|sandisk|\bsndk\b|\bmu\b|win semi|nextronic|\b8147\b|2344|2337|supercycle|storage|ssd/i,
   },
   {
-    theme: "Advanced packaging & semicap chokepoints",
+    theme: "Advanced Packaging & Semicap",
     re: /packag|\bosat\b|amkor|towe|towa|glass.?core|interpos|advanced pack|\bxfab\b|tower semi|shunsin|\b6451\b|\b6830\b|\b3363\b|foci|substrate|foundry|test & metro|metrology|\bmsscorp/i,
   },
   {
-    theme: "AI power / grid bottleneck",
-    re: /power|grid|utilit|transform|switchgear|gallium nitride|\bgan\b|silicon carbid|\bsic\b|\bxlu\b|copper|\bamsc\b|hammond|\bhps\b|energy select|data.?center power/i,
+    theme: "Energy, Nuclear & Battery",
+    re: /power|grid|nuclear|reactor|smr|uranium|battery|gallium nitride|\bgan\b|silicon carbid|\bsic\b|\bxlu\b|copper|\bamsc\b|hammond|\bhps\b|energy|utilit|transform|switchgear/i,
   },
   {
-    theme: "Neoclouds",
-    re: /neocloud|gpu cloud|coreweave|\bnbis\b|hyperscaler|data.?center|\barm\b|\bmeta\b|\bgoogl\b|alphabet|stargate|\btsm\b|taiwan semi/i,
+    theme: "Data Center & Cloud",
+    re: /neocloud|gpu cloud|coreweave|\bnbis\b|hyperscaler|data.?center|cloud|\barm\b|\bmeta\b|\bgoogl\b|alphabet|stargate|\btsm\b|taiwan semi/i,
   },
   {
-    theme: "Defense / drones & space",
-    re: /defense|drone|space|rocket|aerovironment|\bavav\b|ast space|\basts\b|blue origin|anduril|satellite|harmonic drive|humanoid|robot/i,
+    theme: "Space & Satellites",
+    re: /space|satellite|rocket|rocket lab|\brklb\b|ast space|\basts\b|blue origin|starlink|orbit|spacex|anduril/i,
   },
   {
-    theme: "Fintech / crypto & high-margin compounders",
-    re: /crypto|fintech|coinbase|\bcoin\b|reddit|\brddt\b|circle|\bcrcl\b|\bhood\b|robinhood|\bintc\b|intel|bank|insurance|compounder|circle internet/i,
+    theme: "Drones & Airbus",
+    re: /drone|uav|aerial|airbus|boeing|aerovironment|\bavav\b|fighter|aircraft|defense/i,
+  },
+  {
+    theme: "Robot / Humanoid",
+    re: /robot|humanoid|agility|apptronik|boston dynamics|atlas|optimus|actuator|harmonic drive|\bfigure ai\b/i,
+  },
+  {
+    theme: "Fintech & Crypto",
+    re: /crypto|bitcoin|ethereum|fintech|coinbase|\bcoin\b|reddit|\brddt\b|circle|\bcrcl\b|\bhood\b|robinhood|bank|insurance|compounder|stablecoin|defi/i,
   },
 ];
 
-const FALLBACK_THEME: SerenityTheme = "AI photonics / optical interconnect (CPO)";
+const FALLBACK_THEME: SerenityTheme = "Optics / Silicon Photonics";
 
 export function classifyTheme(name: SerenityName): SerenityTheme {
   const blob = `${name.ticker} ${name.company} ${name.thesisSummary}`;

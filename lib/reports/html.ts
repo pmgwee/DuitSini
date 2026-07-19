@@ -271,7 +271,7 @@ export function renderMonthlyReportHTML(totals: MonthlyReportTotalsV1): string {
     chargesCard +
     forwardCard +
     savingsCard +
-    `<div class="foot muted">Subscription Agent · Monthly Report · ${escapeHtml(
+    `<div class="foot muted">DuitSini · Monthly Report · ${escapeHtml(
       totals.monthKey,
     )}</div>` +
     documentClose
@@ -337,7 +337,7 @@ export function renderYearlyReportHTML(totals: YearlyReportTotalsV1): string {
     categoriesCard(totals.categories, "MYR") +
     topCard +
     savingsCard +
-    `<div class="foot muted">Subscription Agent · Yearly Report · ${escapeHtml(
+    `<div class="foot muted">DuitSini · Yearly Report · ${escapeHtml(
       totals.yearKey,
     )}</div>` +
     documentClose

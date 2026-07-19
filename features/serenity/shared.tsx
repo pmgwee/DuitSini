@@ -96,13 +96,15 @@ export const STANCE_LEGEND: { stance: Stance; label: string }[] = [
 
 // ── Theme accent (CSS var per theme, theme-aware via light/dark tokens) ─────────────────
 export const THEME_ACCENT_VAR: Record<SerenityTheme, string> = {
-  "AI photonics / optical interconnect (CPO)": "var(--cat-ai)",
-  "Memory / NAND-DRAM supercycle": "var(--cat-cloud)",
-  "Advanced packaging & semicap chokepoints": "var(--cat-productivity)",
-  "AI power / grid bottleneck": "var(--cat-utilities)",
-  Neoclouds: "var(--cat-saas)",
-  "Defense / drones & space": "var(--cat-gaming)",
-  "Fintech / crypto & high-margin compounders": "var(--cat-finance)",
+  "Optics / Silicon Photonics": "var(--cat-ai)",
+  "Memory, Storage & Servers": "var(--cat-cloud)",
+  "Advanced Packaging & Semicap": "var(--cat-productivity)",
+  "Energy, Nuclear & Battery": "var(--cat-utilities)",
+  "Data Center & Cloud": "var(--cat-saas)",
+  "Drones & Airbus": "var(--cat-gaming)",
+  "Space & Satellites": "var(--cat-news)",
+  "Robot / Humanoid": "var(--cat-music)",
+  "Fintech & Crypto": "var(--cat-finance)",
 };
 
 /** Return-color for an SVG element (red ↔ green via theme tokens). */

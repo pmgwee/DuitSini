@@ -23,7 +23,7 @@
 
 const BASE = "https://serenitytrades.com";
 const UA =
-  "subscription-agent-serenity-view/1.0 (+derived view of serenitytrades.com; respectful, cached, attributed)";
+  "duitsini-serenity-view/1.0 (+derived view of serenitytrades.com; respectful, cached, attributed)";
 
 /** How often the platform revalidates the upstream snapshot (seconds). */
 export const SERENITY_REVALIDATE_SECONDS = 900; // 15 min

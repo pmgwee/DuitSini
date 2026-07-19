@@ -9,12 +9,12 @@ import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: {
-    default: "Subscription Agent",
-    template: "%s · Subscription Agent",
+    default: "DuitSini",
+    template: "%s · DuitSini",
   },
   description:
-    "Track subscriptions, free trials, and renewals with premium clarity — plus a calm personal dashboard.",
-  applicationName: "Subscription Agent",
+    "Your day-to-day financing platform — subscription tracking, live AI usage across every provider, and stocks analysis. All in Ringgit.",
+  applicationName: "DuitSini",
 };
 
 export const viewport: Viewport = {

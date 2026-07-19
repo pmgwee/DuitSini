@@ -8,8 +8,20 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
 const supabaseKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string;
 
-/** Routes that require an authenticated session. */
-const PROTECTED_PREFIXES = ["/subscriptions", "/dashboard"];
+/**
+ * Routes that require an authenticated session — must list EVERY route in the
+ * `(app)` group. The group layout also redirects unauthenticated users, but that
+ * fallback drops the intended destination: a signed-out deep link to a route
+ * missing from this list lands on a bare /login and, after sign-in, dumps the user
+ * somewhere they didn't ask for. Only this middleware preserves `?next=`.
+ */
+const PROTECTED_PREFIXES = [
+  "/bills",
+  "/ai-usage",
+  "/stocks",
+  "/reports",
+  "/settings",
+];
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -107,7 +119,7 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
   // rotated cookies here is what prevents the silent-logout footgun.
   if (user && isLogin) {
     const url = request.nextUrl.clone();
-    url.pathname = "/subscriptions";
+    url.pathname = "/bills";
     url.search = "";
     return redirectWithCookies(url, supabaseResponse);
   }

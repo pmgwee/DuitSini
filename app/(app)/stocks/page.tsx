@@ -6,20 +6,24 @@ import { SerenityView } from "@/features/serenity/serenity-view";
 export const dynamic = "force-dynamic";
 
 /**
- * /serenity — a premium view of the reconstructed portfolio, themes and daily
- * commentary of the AI-photonics stock-picker @aleabitoreddit ("Serenity"),
- * derived from serenitytrades.com. All data is fetched, parsed, cached and
- * remapped server-side (lib/serenity) and handed to the client view as plain
- * serializable props. Not affiliated with the account; not investment advice.
+ * /stocks — DuitSini's stocks-analysis pillar. Currently a single provider: a
+ * premium view of the reconstructed portfolio, themes and daily commentary of the
+ * AI-photonics stock-picker @aleabitoreddit ("Serenity"), derived from
+ * serenitytrades.com. All data is fetched, parsed, cached and remapped server-side
+ * (lib/serenity) and handed to the client view as plain serializable props.
+ *
+ * The route is named for the *surface* (stocks) while the module keeps the
+ * *provider's* name (serenity) — so a second source can slot in later without
+ * renaming the page. Not affiliated with the account; not investment advice.
  */
-export default async function SerenityPage() {
+export default async function StocksPage() {
   const data = await getSerenityData();
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Serenity Tracker"
-        description="Reconstructed portfolio, themes & daily read on @aleabitoreddit — the AI-photonics stock-picker. Derived from serenitytrades.com."
+        title="Stocks"
+        description="Reconstructed portfolio, themes & daily read on @aleabitoreddit (“Serenity”) — the AI-photonics stock-picker. Derived from serenitytrades.com."
         actions={
           <a
             href={data.sourceUrl}

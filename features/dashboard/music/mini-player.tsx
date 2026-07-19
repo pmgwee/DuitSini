@@ -28,7 +28,7 @@ import { useMusicPlayer } from "./player-context";
 export function MiniPlayer() {
   const p = useMusicPlayer();
   const pathname = usePathname();
-  const onDashboard = pathname.startsWith("/dashboard");
+  const onDashboard = pathname.startsWith("/ai-usage");
   // Visible only while a queue exists AND we're away from the dashboard dock.
   const visible = p.queueLength > 0 && !onDashboard;
   const pct = p.duration > 0 ? Math.min(100, (p.position / p.duration) * 100) : 0;

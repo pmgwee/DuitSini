@@ -4,9 +4,9 @@ import type { ReactNode } from "react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   CalendarDays,
   FileText,
-  LayoutDashboard,
   Loader2,
   Settings,
   Sparkles,
@@ -24,20 +24,20 @@ import { RouteProgress, startRouteProgress } from "@/components/layout/route-pro
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
 const NAV: NavItem[] = [
-  { href: "/subscriptions", label: "Subscriptions", icon: CalendarDays },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/ai-usage", label: "AI Usage", icon: Activity },
+  { href: "/stocks", label: "Stocks", icon: TrendingUp },
+  { href: "/bills", label: "Bills", icon: CalendarDays },
   { href: "/reports", label: "Reports", icon: FileText },
-  { href: "/serenity", label: "Serenity", icon: TrendingUp },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell({ children, user }: { children: ReactNode; user?: AuthUser }) {
   const pathname = usePathname();
   const player = useMusicPlayer();
-  // The mini-player floats only on non-dashboard routes (on /dashboard the
+  // The mini-player floats only on non-AI-Usage routes (on /ai-usage the
   // live player is docked inline inside the Music card). Reserve bottom space
   // for the bar only where it actually shows — extra on mobile to clear nav.
-  const musicActive = player.queueLength > 0 && !pathname.startsWith("/dashboard");
+  const musicActive = player.queueLength > 0 && !pathname.startsWith("/ai-usage");
 
   return (
     <div className="min-h-dvh">
@@ -52,8 +52,8 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
             <Sparkles className="size-4" />
           </div>
           <div className="leading-tight">
-            <div className="text-sm font-semibold tracking-tight">Subscription</div>
-            <div className="text-xs text-muted-foreground">Agent</div>
+            <div className="text-sm font-semibold tracking-tight">DuitSini</div>
+            <div className="text-xs text-muted-foreground">Money, sorted</div>
           </div>
         </div>
 
@@ -76,7 +76,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
       <div className="lg:pl-[248px] print:pl-0">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border/60 glass px-4 sm:px-6 print:hidden">
           <span className="text-sm font-medium text-muted-foreground lg:hidden">
-            Subscription Agent
+            DuitSini
           </span>
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />

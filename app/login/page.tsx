@@ -5,7 +5,7 @@ import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to Subscription Agent with email or Google.",
+  description: "Sign in to DuitSini with email or Google.",
 };
 
 export default async function LoginPage({
@@ -26,8 +26,8 @@ export default async function LoginPage({
             Welcome back
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Sign in or create your account to manage every subscription, trial,
-            and renewal.
+            Sign in or create your account to track your bills, your AI usage, and
+            the market — all in Ringgit, all in one place.
           </p>
         </div>
 
