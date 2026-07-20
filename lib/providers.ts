@@ -143,6 +143,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { name: "redONE", category: "telecom", color: "#ed1c24", logoUrl: "/logos/redone-mobile.jpg", keywords: ["redone", "red one", "redone mobile"] },
   { name: "CelcomDigi", category: "telecom", color: "#0033a0", logoUrl: "/logos/celcom-digi.png", domain: "celcomdigi.com", keywords: ["celcom", "digi", "celcom digi"] },
   { name: "Maxis", category: "telecom", color: "#4db33c", logoUrl: "/logos/maxis.png", domain: "maxis.com.my", keywords: ["hotlink"] },
+  { name: "unifi", category: "telecom", color: "#ff6900", logoUrl: "/logos/unifi.png", domain: "unifi.com.my", keywords: ["tm", "telekom malaysia", "unifi home", "unifi tv", "unifi mobile"] },
 
   // ── Utilities / Security ────────────────────────────────────────────
   { name: "NordVPN", category: "utilities", color: "#4687ff", icon: "nordvpn", domain: "nordvpn.com", keywords: ["vpn"] },
