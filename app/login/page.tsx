@@ -45,6 +45,20 @@ export default async function LoginPage({
       <p className="mt-6 text-center text-xs text-muted-foreground">
         Passwordless sign-in · Protected by Supabase Auth
       </p>
+
+      {/* Legal links — users see them at sign-in, and Google reviewers reach
+          them without a session. */}
+      <p className="mt-3 text-center text-xs text-muted-foreground">
+        By continuing you agree to the{" "}
+        <Link href="/terms" className="hover:text-foreground hover:underline">
+          Terms
+        </Link>{" "}
+        and{" "}
+        <Link href="/privacy" className="hover:text-foreground hover:underline">
+          Privacy Policy
+        </Link>
+        .
+      </p>
     </main>
   );
 }

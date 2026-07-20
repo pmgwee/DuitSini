@@ -15,6 +15,13 @@ export const metadata: Metadata = {
   description:
     "Your day-to-day financing platform — subscription tracking, live AI usage across every provider, and stocks analysis. All in Ringgit.",
   applicationName: "DuitSini",
+  // Google Search Console ownership verification. Set the
+  // GOOGLE_SITE_VERIFICATION env var (Vercel → Production) to the token from
+  // Search Console's "HTML tag" method; Next renders the matching meta tag.
+  // Omitted (no tag rendered) when the env var is unset.
+  verification: {
+    google: process.env.GOOGLE_SITE_VERIFICATION || undefined,
+  },
 };
 
 export const viewport: Viewport = {
