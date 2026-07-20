@@ -132,8 +132,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 }
 
 export const config = {
-  // Run on everything except static assets and Next internals.
+  // Run on everything except static assets and Next internals. `html`/`txt` are
+  // excluded too so a Search Console verification file (public/googleXXXX.html)
+  // or robots.txt is served as a pure static asset — no Supabase getUser() call.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|map)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|map|html|txt)$).*)",
   ],
 };
