@@ -70,6 +70,26 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
           <div className="text-xs font-medium">Beta Versions 0.1</div>
           <div className="mt-1 text-xs text-muted-foreground">Up to 10 Testers</div>
         </div>
+
+        {/* Legal links — required to be reachable from inside the app for
+            Google OAuth sensitive-scope verification (demo + reviewers). */}
+        <div className="mt-3 flex items-center gap-3 px-2 text-xs text-muted-foreground">
+          <Link
+            href="/privacy"
+            className="transition-colors hover:text-foreground hover:underline"
+          >
+            Privacy
+          </Link>
+          <span aria-hidden className="text-border/60">
+            ·
+          </span>
+          <Link
+            href="/terms"
+            className="transition-colors hover:text-foreground hover:underline"
+          >
+            Terms
+          </Link>
+        </div>
       </aside>
 
       {/* Main column */}
