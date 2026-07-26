@@ -10,7 +10,8 @@ next-env.d.ts
 
 # production
 /build
-/docs
+/docs/*
+!/docs/agents/
 
 # misc
 .DS_Store

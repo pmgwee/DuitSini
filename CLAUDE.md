@@ -98,3 +98,13 @@ The phase pipeline is automated by three project skills in `.claude/skills/` (ad
 - `/uat-runbook` — every human-facing testing/setup doc uses the house format (`.claude/skills/uat-runbook/references/TEMPLATE.md`).
 
 If `handoff/00-MANIFEST.md` exists (first line `handoff-plan v1`), a plan is live: resume by reading its `NEXT:` line and following phase-autopilot. `/docs` and `/handoff` are gitignored on purpose — plans, charters and runbooks stay local; commits carry code only (message convention `handoff: brief NN <state>`).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`github.com/pmgwee/subscription-agent`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context — one root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
