@@ -183,4 +183,7 @@ export function applySubscriptionPatch(target: Subscription, patch: Subscription
   if (patch.notificationChannels !== undefined) {
     target.notificationChannels = patch.notificationChannels;
   }
+  if (patch.paymentMethodId !== undefined) {
+    target.paymentMethodId = patch.paymentMethodId ?? null;
+  }
 }

@@ -8,18 +8,29 @@ import {
   computeNextRenewalInstant,
 } from "@/lib/domain/subscription";
 import type { SubscriptionRepository } from "../types";
+import { rowToPaymentMethod } from "./payment-method-repo";
 
 type Row = Database["public"]["Tables"]["subscriptions"]["Row"];
 type Insert = Database["public"]["Tables"]["subscriptions"]["Insert"];
 type UpdateRow = Database["public"]["Tables"]["subscriptions"]["Update"];
 
+/** A subscriptions row plus the optional nested payment_method from a join. */
+type SubRow = Row & {
+  payment_method?: Database["public"]["Tables"]["payment_methods"]["Row"] | null;
+};
+
+/** Selects the subscription row with its payment method joined in one round-trip. */
+const WITH_METHOD = "*, payment_method:payment_methods(*)";
+
 /**
  * Map a raw subscriptions row (snake_case) to the domain `Subscription`
- * (camelCase). Exported so the cron sweep — which reads rows with the
- * service-role client across all users (the cookie-bound repo can't) — reuses
- * the SAME mapping the repo uses, instead of duplicating it.
+ * (camelCase). Accepts an optional joined `payment_method` (resolved when the
+ * row came from a `WITH_METHOD` select); plain `*` selects pass `Row`, which is
+ * assignable (the join key is optional) — so the cron sweep and other `*`
+ * callers keep compiling unchanged. Exported so the cron sweep — which reads
+ * rows with the service-role client across all users — reuses the SAME mapping.
  */
-export function rowToSubscription(row: Row): Subscription {
+export function rowToSubscription(row: SubRow): Subscription {
   return {
     id: row.id,
     userId: row.user_id,
@@ -47,6 +58,8 @@ export function rowToSubscription(row: Row): Subscription {
     notificationChannels: (row.notification_channels ?? []) as NotificationChannel[],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    paymentMethodId: row.payment_method_id ?? null,
+    paymentMethod: row.payment_method ? rowToPaymentMethod(row.payment_method) : null,
   };
 }
 
@@ -75,6 +88,7 @@ function subscriptionToColumns(sub: Subscription): UpdateRow {
     reminder_offsets_days: sub.reminderOffsetsDays,
     reminder_time_local: sub.reminderTimeLocal,
     notification_channels: sub.notificationChannels,
+    payment_method_id: sub.paymentMethodId,
   };
 }
 
@@ -90,21 +104,21 @@ export function createSupabaseSubscriptionRepository(
   return {
     async list(userId) {
       const { data, error } = await table()
-        .select("*")
+        .select(WITH_METHOD)
         .eq("user_id", userId)
         .order("next_renewal_at", { ascending: true });
       if (error) throw error;
-      return (data ?? []).map(rowToSubscription);
+      return ((data ?? []) as unknown as SubRow[]).map(rowToSubscription);
     },
 
     async get(userId, id) {
       const { data, error } = await table()
-        .select("*")
+        .select(WITH_METHOD)
         .eq("id", id)
         .eq("user_id", userId)
         .maybeSingle();
       if (error) throw error;
-      return data ? rowToSubscription(data) : null;
+      return data ? rowToSubscription(data as unknown as SubRow) : null;
     },
 
     async create(userId, input: SubscriptionInput) {
@@ -139,22 +153,23 @@ export function createSupabaseSubscriptionRepository(
         reminder_offsets_days: input.reminderOffsetsDays ?? null,
         reminder_time_local: input.reminderTimeLocal,
         notification_channels: input.notificationChannels,
+        payment_method_id: input.paymentMethodId,
       };
-      const { data, error } = await table().insert(insert).select("*").single();
+      const { data, error } = await table().insert(insert).select(WITH_METHOD).single();
       if (error) throw error;
-      return rowToSubscription(data);
+      return rowToSubscription(data as unknown as SubRow);
     },
 
     async update(userId, id, patch: SubscriptionPatch) {
       const { data: existing, error: fetchError } = await table()
-        .select("*")
+        .select(WITH_METHOD)
         .eq("id", id)
         .eq("user_id", userId)
         .maybeSingle();
       if (fetchError) throw fetchError;
       if (!existing) return null;
 
-      const merged = rowToSubscription(existing);
+      const merged = rowToSubscription(existing as unknown as SubRow);
       applySubscriptionPatch(merged, patch);
       merged.nextRenewalAt = computeNextRenewalInstant(merged);
 
@@ -162,10 +177,10 @@ export function createSupabaseSubscriptionRepository(
         .update(subscriptionToColumns(merged))
         .eq("id", id)
         .eq("user_id", userId)
-        .select("*")
+        .select(WITH_METHOD)
         .single();
       if (error) throw error;
-      return rowToSubscription(data);
+      return rowToSubscription(data as unknown as SubRow);
     },
 
     async remove(userId, id) {
@@ -183,10 +198,10 @@ export function createSupabaseSubscriptionRepository(
         .update({ is_paused: paused })
         .eq("id", id)
         .eq("user_id", userId)
-        .select("*")
+        .select(WITH_METHOD)
         .maybeSingle();
       if (error) throw error;
-      return data ? rowToSubscription(data) : null;
+      return data ? rowToSubscription(data as unknown as SubRow) : null;
     },
 
     async setCancelled(userId, id, cancelled) {
@@ -194,10 +209,10 @@ export function createSupabaseSubscriptionRepository(
         .update({ is_cancelled: cancelled })
         .eq("id", id)
         .eq("user_id", userId)
-        .select("*")
+        .select(WITH_METHOD)
         .maybeSingle();
       if (error) throw error;
-      return data ? rowToSubscription(data) : null;
+      return data ? rowToSubscription(data as unknown as SubRow) : null;
     },
   };
 }

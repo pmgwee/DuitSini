@@ -61,8 +61,19 @@ export const subscriptionFieldsSchema = z.object({
   notificationChannels: z.array(notificationChannelSchema).default(["telegram", "in_app"]),
 });
 
+// Payment method: required when creating a subscription; optional + clearable
+// (null) when editing, so backfilled subs can remain "unspecified" until the
+// user picks one. The empty-string form value is normalized to null on the
+// patch path, mirroring the "" → null rule above.
+const paymentMethodIdRequired = z.string().trim().min(1, "Pick a payment method");
+const paymentMethodIdOptional = z.preprocess(
+  (v) => (v === "" || v == null ? null : v),
+  z.string().trim().min(1, "Pick a payment method").nullish(),
+);
+
 /** Create: full object with trial cross-field checks. */
 export const subscriptionInputSchema = subscriptionFieldsSchema
+  .extend({ paymentMethodId: paymentMethodIdRequired })
   .refine((data) => !data.isTrial || Boolean(data.freeTrialEndAt), {
     message: "Trial subscriptions need a trial end date",
     path: ["freeTrialEndAt"],
@@ -76,6 +87,7 @@ export const subscriptionInputSchema = subscriptionFieldsSchema
  * Carries the same trial cross-field checks as create, scoped to partials. */
 export const subscriptionPatchSchema = subscriptionFieldsSchema
   .partial()
+  .extend({ paymentMethodId: paymentMethodIdOptional })
   .refine((data) => data.isTrial !== true || Boolean(data.freeTrialEndAt), {
     message: "Trial subscriptions need a trial end date",
     path: ["freeTrialEndAt"],

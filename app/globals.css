@@ -44,6 +44,12 @@
   --cat-news: oklch(0.58 0.14 257);
   --cat-health: oklch(0.74 0.14 165);
   --cat-other: oklch(0.72 0.02 265);
+
+  /* Payment-method-type accents — curated, shared across themes */
+  --pm-card: oklch(0.72 0.13 275);
+  --pm-fpx: oklch(0.7 0.12 195);
+  --pm-ewallet: oklch(0.74 0.15 150);
+  --pm-other: oklch(0.72 0.02 265);
 }
 
 .dark {
@@ -104,6 +110,11 @@
   --color-cat-news: var(--cat-news);
   --color-cat-health: var(--cat-health);
   --color-cat-other: var(--cat-other);
+
+  --color-pm-card: var(--pm-card);
+  --color-pm-fpx: var(--pm-fpx);
+  --color-pm-ewallet: var(--pm-ewallet);
+  --color-pm-other: var(--pm-other);
 
   --radius-sm: calc(var(--radius) - 0.35rem);
   --radius-md: calc(var(--radius) - 0.2rem);

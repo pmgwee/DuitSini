@@ -6,6 +6,7 @@ import {
 } from "@/lib/domain/subscription";
 import { DEMO_USER_ID, type SubscriptionRepository } from "../types";
 import { seedSubscriptions } from "./seed";
+import { paymentMethodStore } from "./payment-method-store";
 
 // In-memory store. Persists for the lifetime of the server process (dev use).
 const store = new Map<string, Subscription>();
@@ -14,6 +15,19 @@ let sequence = store.size;
 
 function nextId(): string {
   return `sub_${(++sequence).toString().padStart(3, "0")}`;
+}
+
+/**
+ * Resolve a subscription's payment method from the shared in-memory store — the
+ * mock mirror of the Supabase nested-select join. A missing or stale id (e.g.
+ * the method was deleted) resolves to null, so the badge simply hides — same
+ * graceful behavior as the DB's ON DELETE SET NULL.
+ */
+function attachMethod(sub: Subscription): Subscription {
+  sub.paymentMethod = sub.paymentMethodId
+    ? (paymentMethodStore.get(sub.paymentMethodId) ?? null)
+    : null;
+  return sub;
 }
 
 function ownedBy(userId: string, id: string): Subscription | null {
@@ -25,11 +39,13 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
   async list(userId) {
     return [...store.values()]
       .filter((sub) => sub.userId === userId)
-      .sort((a, b) => a.nextRenewalAt.localeCompare(b.nextRenewalAt));
+      .sort((a, b) => a.nextRenewalAt.localeCompare(b.nextRenewalAt))
+      .map(attachMethod);
   },
 
   async get(userId, id) {
-    return ownedBy(userId, id);
+    const sub = ownedBy(userId, id);
+    return sub ? attachMethod(sub) : null;
   },
 
   async create(userId, input: SubscriptionInput) {
@@ -59,12 +75,13 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
       reminderOffsetsDays: input.reminderOffsetsDays ?? null,
       reminderTimeLocal: input.reminderTimeLocal,
       notificationChannels: input.notificationChannels,
+      paymentMethodId: input.paymentMethodId,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     sub.nextRenewalAt = computeNextRenewalInstant(sub);
     store.set(sub.id, sub);
-    return sub;
+    return attachMethod(sub);
   },
 
   async update(userId, id, patch) {
@@ -74,7 +91,7 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
     current.updatedAt = new Date().toISOString();
     current.nextRenewalAt = computeNextRenewalInstant(current);
     store.set(id, current);
-    return current;
+    return attachMethod(current);
   },
 
   async remove(userId, id) {
@@ -88,7 +105,7 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
     current.isPaused = paused;
     current.updatedAt = new Date().toISOString();
     store.set(id, current);
-    return current;
+    return attachMethod(current);
   },
 
   async setCancelled(userId, id, cancelled) {
@@ -97,7 +114,7 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
     current.isCancelled = cancelled;
     current.updatedAt = new Date().toISOString();
     store.set(id, current);
-    return current;
+    return attachMethod(current);
   },
 };
 

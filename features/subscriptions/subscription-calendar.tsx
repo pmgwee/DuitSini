@@ -13,6 +13,7 @@ import { formatLongDate, formatMonthYear, toISODate } from "@/lib/domain/dates";
 import { cn } from "@/lib/utils";
 import { Dialog } from "@/components/ui/dialog";
 import { SubscriptionIcon } from "./subscription-icon";
+import { PaymentMethodBadge } from "./payment-method-badge";
 import { SubscriptionRow } from "./subscription-list";
 import {
   AddSubscriptionButton,
@@ -350,6 +351,7 @@ function DayCharges({ iso, charges }: { iso: string; charges: DayCharge[] }) {
                         Trial converts
                       </span>
                     )}
+                    {c.sub.paymentMethod ? <PaymentMethodBadge method={c.sub.paymentMethod} /> : null}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

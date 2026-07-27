@@ -14,6 +14,7 @@ import { formatLongDate, formatRelativeDay, toISODate } from "@/lib/domain/dates
 import { cn } from "@/lib/utils";
 import { SubscriptionIcon } from "./subscription-icon";
 import { EditSubscriptionButton } from "./subscription-dialogs";
+import { PaymentMethodBadge } from "./payment-method-badge";
 
 const STATUS_META: Record<
   SubscriptionStatus,
@@ -156,6 +157,9 @@ export function SubscriptionRow({ sub }: { sub: Subscription }) {
               : "/mo"}
           {myr && <span className="text-muted-foreground/70"> (≈ {myr}/charge)</span>}
         </div>
+        {sub.paymentMethod ? (
+          <PaymentMethodBadge method={sub.paymentMethod} className="mt-1" />
+        ) : null}
       </div>
       <div className="hidden text-right sm:block">
         <div className="text-xs text-muted-foreground">

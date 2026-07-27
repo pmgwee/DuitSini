@@ -372,6 +372,7 @@ export type Database = {
       }
       subscriptions: {
         Row: {
+          payment_method_id: string | null
           amount: number
           billing_cycle: Database["public"]["Enums"]["billing_cycle"]
           category: Database["public"]["Enums"]["subscription_category"]
@@ -400,6 +401,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          payment_method_id?: string | null
           amount?: number
           billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
           category?: Database["public"]["Enums"]["subscription_category"]
@@ -428,6 +430,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          payment_method_id?: string | null
           amount?: number
           billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
           category?: Database["public"]["Enums"]["subscription_category"]
@@ -454,6 +457,36 @@ export type Database = {
           unsubscribe_url?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      payment_methods: {
+        Row: {
+          id: string
+          user_id: string
+          kind: Database["public"]["Enums"]["payment_kind"]
+          issuer_slug: string | null
+          issuer_name: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          kind?: Database["public"]["Enums"]["payment_kind"]
+          issuer_slug?: string | null
+          issuer_name: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          kind?: Database["public"]["Enums"]["payment_kind"]
+          issuer_slug?: string | null
+          issuer_name?: string
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -604,6 +637,7 @@ export type Database = {
         | "news"
         | "health"
         | "other"
+      payment_kind: "credit_card" | "debit_card" | "fpx" | "e_wallet" | "other"
       usage_state: "light" | "medium" | "heavy"
     }
     CompositeTypes: {
