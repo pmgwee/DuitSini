@@ -11,6 +11,14 @@
   color-scheme: light;
   --radius: 0.85rem;
 
+  /* Motion durations + easings. Dashboard = Material ease-out (restraint);
+     expo-out is marketing/login only — see lib/motion.ts. */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
   --background: oklch(0.985 0.002 265);
   --foreground: oklch(0.22 0.01 265);
   --surface: oklch(1 0 0);
@@ -410,5 +418,38 @@
   }
   .skeleton::after {
     animation: none;
+  }
+}
+
+/* ============================================================
+   Motion utilities + view-transition reduced-motion guard
+   ============================================================ */
+
+/* Subtle SVG grain — opt-in via .grain on a surface. Zero runtime cost
+   (GPU-composited, no JS). Recommended on dark hero/login surfaces at ~3%
+   opacity; it kills the flat-plastic feel and LCD banding without competing
+   with data. Kept off the data dashboard body by default. */
+.grain {
+  position: relative;
+}
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.03;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  border-radius: inherit;
+}
+
+/* Native view-transition reduced-motion guard (forward-looking — engages only
+   if experimental.viewTransition is ever enabled in next.config.ts). */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
   }
 }
