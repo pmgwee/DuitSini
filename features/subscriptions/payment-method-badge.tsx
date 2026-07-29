@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 /**
  * Compact pill showing a subscription's payment instrument — issuer logo (via
  * the `ProviderMark` cascade) + name, with a compact kind suffix (Credit / Debit
- * / Duitnow / FPX / E-wallet). Callers gate on `sub.paymentMethod` non-null.
+ * / Account / DuitNow / FPX / E-wallet). Callers gate on `sub.paymentMethod` non-null.
  */
 export function PaymentMethodBadge({
   method,

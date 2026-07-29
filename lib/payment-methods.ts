@@ -21,6 +21,7 @@ export const PAYMENT_KINDS = [
   "credit_card",
   "debit_card",
   "bank_account",
+  "duitnow",
   "fpx",
   "e_wallet",
   "other",
@@ -51,8 +52,12 @@ export const PAYMENT_KIND_META: Record<PaymentKind, PaymentKindMeta> = {
   credit_card: { label: "Credit card", short: "Credit", colorVar: "var(--pm-card)", emoji: "💳", isCard: true, issuerGroup: "bank" },
   debit_card: { label: "Debit card", short: "Debit", colorVar: "var(--pm-card)", emoji: "💳", isCard: true, issuerGroup: "bank" },
   // Standing instructions / auto-debits / loan installments pulled from a bank
-  // account balance — distinct from FPX (one-time e-commerce) and from a card.
-  bank_account: { label: "Bank account/Duitnow", short: "Duitnow", colorVar: "var(--pm-bank)", emoji: "💰", isCard: false, issuerGroup: "bank" },
+  // account balance — distinct from FPX (one-time e-commerce), DuitNow (PayNet
+  // real-time transfer / Autopay), and a card.
+  bank_account: { label: "Bank account", short: "Account", colorVar: "var(--pm-bank)", emoji: "💰", isCard: false, issuerGroup: "bank" },
+  // DuitNow — PayNet real-time payment rail (DuitNow Transfer / QR / Autopay).
+  // Draws from a bank account, hence issuerGroup "bank".
+  duitnow: { label: "DuitNow", short: "DuitNow", colorVar: "var(--pm-duitnow)", emoji: "⚡", isCard: false, issuerGroup: "bank" },
   fpx: { label: "Online banking (FPX)", short: "FPX", colorVar: "var(--pm-fpx)", emoji: "🏦", isCard: false, issuerGroup: "bank" },
   e_wallet: { label: "E-wallet", short: "E-wallet", colorVar: "var(--pm-ewallet)", emoji: "📱", isCard: false, issuerGroup: "wallet" },
   other: { label: "Other", short: "Other", colorVar: "var(--pm-other)", emoji: "💸", isCard: false, issuerGroup: "any" },
@@ -67,6 +72,7 @@ export const PAYMENT_KIND_COLOR: Record<PaymentKind, string> = {
   credit_card: "oklch(0.72 0.13 275)",
   debit_card: "oklch(0.72 0.13 275)",
   bank_account: "oklch(0.78 0.13 75)",
+  duitnow: "oklch(0.66 0.17 38)",
   fpx: "oklch(0.7 0.12 195)",
   e_wallet: "oklch(0.74 0.15 150)",
   other: "oklch(0.72 0.02 265)",
@@ -74,9 +80,9 @@ export const PAYMENT_KIND_COLOR: Record<PaymentKind, string> = {
 
 /**
  * Display label combining an issuer name with a compact payment-kind suffix —
- * e.g. "Wise · Debit", "Wise · Duitnow" (bank account), "Wise · FPX" (online
- * banking), "Wise · E-wallet". "Other" methods show just the issuer name, since
- * the suffix would carry no information.
+ * e.g. "Wise · Debit", "Wise · Account" (bank account), "Wise · DuitNow",
+ * "Wise · FPX" (online banking), "Wise · E-wallet". "Other" methods show just
+ * the issuer name, since the suffix would carry no information.
  */
 export function paymentMethodLabel(issuerName: string, kind: PaymentKind): string {
   if (kind === "other") return issuerName;

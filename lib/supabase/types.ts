@@ -642,6 +642,7 @@ export type Database = {
         | "e_wallet"
         | "other"
         | "bank_account"
+        | "duitnow"
       subscription_category:
         | "streaming"
         | "utilities"
@@ -804,6 +805,7 @@ export const Constants = {
         "e_wallet",
         "other",
         "bank_account",
+        "duitnow",
       ],
       subscription_category: [
         "streaming",
