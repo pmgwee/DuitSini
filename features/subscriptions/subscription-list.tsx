@@ -8,6 +8,8 @@ import {
   getStatus,
   grossMonthlyCost,
 } from "@/lib/domain/subscription";
+import { compareSubs, type SubscriptionSortKey } from "./subscription-sort";
+import { SubscriptionSortControl } from "./subscription-sort-control";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
 import { HOME_CURRENCY, myrEquivalentOf, toMYR } from "@/lib/domain/fx";
 import { formatLongDate, formatRelativeDay, toISODate } from "@/lib/domain/dates";
@@ -52,6 +54,7 @@ const STATUS_ORDER: Record<SubscriptionStatus, number> = {
  */
 export function SubscriptionList({ subscriptions }: { subscriptions: Subscription[] }) {
   const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<SubscriptionSortKey>("status");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -62,12 +65,25 @@ export function SubscriptionList({ subscriptions }: { subscriptions: Subscriptio
             .some((v) => (v as string).toLowerCase().includes(q)),
         )
       : subscriptions;
-    return [...matches].sort((a, b) => {
-      const so = STATUS_ORDER[getStatus(a)] - STATUS_ORDER[getStatus(b)];
-      if (so !== 0) return so;
-      return (a.nextRenewalAt || "").localeCompare(b.nextRenewalAt || "");
+    const list = [...matches];
+    list.sort((a, b) => {
+      // "status" is the default grouping (active/trial/cancelled, then renewal).
+      if (sortKey === "status") {
+        const so = STATUS_ORDER[getStatus(a)] - STATUS_ORDER[getStatus(b)];
+        if (so !== 0) return so;
+        return (a.nextRenewalAt || "").localeCompare(b.nextRenewalAt || "");
+      }
+      // "date" = next upcoming charge; cancelled subs (no next charge) sink.
+      if (sortKey === "date") {
+        return (
+          (getNextChargeDate(a) ?? "9999").localeCompare(getNextChargeDate(b) ?? "9999") ||
+          a.name.localeCompare(b.name)
+        );
+      }
+      return compareSubs(a, b, sortKey) || a.name.localeCompare(b.name);
     });
-  }, [subscriptions, query]);
+    return list;
+  }, [subscriptions, query, sortKey]);
 
   const activeMonthlyMYR = useMemo(
     () =>
@@ -86,15 +102,18 @@ export function SubscriptionList({ subscriptions }: { subscriptions: Subscriptio
           {subscriptions.length} {subscriptions.length === 1 ? "subscription" : "subscriptions"} ·{" "}
           {formatCurrency(activeMonthlyMYR, HOME_CURRENCY)}/mo active
         </p>
-        <div className="relative sm:w-64">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            aria-label="Search subscriptions"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, provider…"
-            className="h-10 w-full rounded-xl border border-border/60 bg-input/50 pl-9 pr-3 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative sm:w-64">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              aria-label="Search subscriptions"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name, provider…"
+              className="h-10 w-full rounded-xl border border-border/60 bg-input/50 pl-9 pr-3 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40"
+            />
+          </div>
+          <SubscriptionSortControl value={sortKey} onChange={setSortKey} ariaLabel="Sort bills" />
         </div>
       </div>
 

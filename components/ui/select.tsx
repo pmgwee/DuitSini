@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +49,8 @@ export function Select({
   id,
   searchable = true,
   searchPlaceholder = "Search…",
+  triggerClassName,
+  leadingIcon,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -59,6 +61,10 @@ export function Select({
   /** Show the search box (only has an effect when there are > VISIBLE_ROWS options). */
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** Extra classes for the trigger button (merged last, so e.g. `h-8` overrides the default `h-11`). */
+  triggerClassName?: string;
+  /** Optional node rendered before the label inside the trigger (e.g. a leading icon). */
+  leadingIcon?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -235,11 +241,15 @@ export function Select({
         aria-label={ariaLabel}
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onKeyDownTrigger}
-        className="flex h-11 w-full items-center gap-2 rounded-xl border border-border/60 bg-input/50 px-3 text-left text-sm outline-none transition-[border-color,box-shadow] focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40"
+        className={cn(
+          "flex h-11 w-full items-center gap-2 rounded-xl border border-border/60 bg-input/50 px-3 text-left text-sm outline-none transition-[border-color,box-shadow] focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40",
+          triggerClassName,
+        )}
       >
         {selected?.color ? (
           <span className="size-2.5 shrink-0 rounded-full" style={{ background: selected.color }} />
         ) : null}
+        {leadingIcon}
         <span className={cn("flex-1 truncate", !selected && "text-muted-foreground")}>
           {selected?.label ?? "Select…"}
         </span>

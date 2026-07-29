@@ -6,6 +6,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Subscription } from "@/types/subscription";
 import { CATEGORY_META } from "@/lib/constants";
 import { chargeDatesInRange, subscriptionsChargingInRange } from "@/lib/domain/subscription";
+import { compareSubs, type SubscriptionSortKey } from "./subscription-sort";
+import { SubscriptionSortControl } from "./subscription-sort-control";
 import { calendarGrid, monthBounds, WEEKDAY_LABELS } from "@/lib/domain/calendar";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
 import { myrEquivalentOf, toMYR } from "@/lib/domain/fx";
@@ -281,24 +283,34 @@ function MonthChargeList({
   year: number;
   month: number;
 }) {
+  const [sortKey, setSortKey] = useState<SubscriptionSortKey>("date");
+
   const items = useMemo(() => {
     const { startISO, endISO } = monthBounds(year, month);
-    return subscriptionsChargingInRange(subscriptions, startISO, endISO).sort((a, b) =>
-      a.dates[0].localeCompare(b.dates[0]),
-    );
-  }, [subscriptions, year, month]);
+    const list = subscriptionsChargingInRange(subscriptions, startISO, endISO);
+    list.sort((a, b) => {
+      // "date" = the month's first charge date; other keys compare the sub and
+      // fall back to charge date for a stable, month-meaningful order.
+      if (sortKey === "date") return a.dates[0].localeCompare(b.dates[0]);
+      return compareSubs(a.sub, b.sub, sortKey) || a.dates[0].localeCompare(b.dates[0]);
+    });
+    return list;
+  }, [subscriptions, year, month, sortKey]);
 
   if (items.length === 0) return null;
 
   return (
     <div className="mt-2 flex flex-col gap-3">
-      <div className="flex items-baseline justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold tracking-tight">
           {formatMonthYear(new Date(year, month, 1))} renewals
         </h3>
-        <span className="text-xs text-muted-foreground">
-          {items.length} {items.length === 1 ? "subscription" : "subscriptions"}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {items.length} {items.length === 1 ? "subscription" : "subscriptions"}
+          </span>
+          <SubscriptionSortControl value={sortKey} onChange={setSortKey} ariaLabel="Sort month renewals" />
+        </div>
       </div>
       <ul className="flex flex-col divide-y divide-border/50 rounded-2xl border border-border/60 bg-surface/40">
         {items.map((it) => (
