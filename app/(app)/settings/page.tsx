@@ -1,5 +1,6 @@
 import { Bell } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Reveal } from "@/components/ui/reveal";
 import { TelegramCard } from "@/features/settings/telegram-card";
 import { ReminderScheduleCard } from "@/features/settings/reminder-schedule-card";
 import { ReportsCard } from "@/features/settings/reports-card";
@@ -74,18 +75,23 @@ export default async function SettingsPage() {
         description="Reminders, reports, and messaging integrations for your account."
       />
 
-      <TelegramCard initialConnected={connected} initialEnabled={enabled} />
-
-      <ReminderScheduleCard initialOffsets={offsets} customizedCount={customizedCount} />
-
-      <ReportsCard initialMonthly={monthlyReport} initialYearly={yearlyReport} />
-
-      <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-medium">
-          <Bell className="size-4 text-primary" /> Recent reminders
-        </h2>
-        <RecentDeliveries deliveries={deliveries} />
-      </section>
+      <Reveal>
+        <TelegramCard initialConnected={connected} initialEnabled={enabled} />
+      </Reveal>
+      <Reveal delay={0.04}>
+        <ReminderScheduleCard initialOffsets={offsets} customizedCount={customizedCount} />
+      </Reveal>
+      <Reveal delay={0.08}>
+        <ReportsCard initialMonthly={monthlyReport} initialYearly={yearlyReport} />
+      </Reveal>
+      <Reveal delay={0.12}>
+        <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-medium">
+            <Bell className="size-4 text-primary" /> Recent reminders
+          </h2>
+          <RecentDeliveries deliveries={deliveries} />
+        </section>
+      </Reveal>
     </div>
   );
 }

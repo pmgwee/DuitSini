@@ -131,7 +131,8 @@ export function ProviderCombobox({
           id={listboxId}
           role="listbox"
           tabIndex={-1}
-          className="absolute left-0 top-[calc(100%+0.25rem)] z-50 max-h-30 w-full overflow-y-auto rounded-xl border border-border/60 bg-surface p-1 shadow-xl shadow-black/40"
+          className="absolute left-0 top-[calc(100%+0.25rem)] z-50 w-full overflow-y-auto rounded-xl border border-border/60 bg-surface p-1 shadow-xl shadow-black/40"
+          style={{ maxHeight: 4 * 36 + 8 }}
         >
           {matches.map((preset, i) => {
             const isActive = i === activeIndex;

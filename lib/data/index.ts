@@ -1,8 +1,9 @@
 import { mockSubscriptionRepository } from "./mock/mock-repo";
-import { DEMO_USER_ID, type SubscriptionRepository } from "./types";
+import { mockPaymentMethodRepository } from "./mock/payment-method-repo";
+import { DEMO_USER_ID, type SubscriptionRepository, type PaymentMethodRepository } from "./types";
 
 export { DEMO_USER_ID };
-export type { SubscriptionRepository } from "./types";
+export type { SubscriptionRepository, PaymentMethodRepository } from "./types";
 
 const dataSource = process.env.NEXT_PUBLIC_DATA_SOURCE ?? "mock";
 
@@ -43,4 +44,22 @@ export async function getSubscriptionRepository(): Promise<SubscriptionRepositor
     return createSupabaseSubscriptionRepository(client);
   }
   return mockSubscriptionRepository;
+}
+
+/**
+ * Returns the active payment-method repository (same mock/supabase switch as
+ * `getSubscriptionRepository`). Used by the form's method picker and (later) a
+ * dedicated payment-methods management page.
+ */
+export async function getPaymentMethodRepository(): Promise<PaymentMethodRepository> {
+  if (isSupabaseEnabled()) {
+    const [{ createSupabaseServerClient }, { createSupabasePaymentMethodRepository }] =
+      await Promise.all([
+        import("@/lib/supabase/server"),
+        import("./supabase/payment-method-repo"),
+      ]);
+    const client = await createSupabaseServerClient();
+    return createSupabasePaymentMethodRepository(client);
+  }
+  return mockPaymentMethodRepository;
 }

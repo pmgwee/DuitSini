@@ -12,6 +12,7 @@ next-env.d.ts
 /build
 /docs/*
 !/docs/agents/
+!/docs/adr/
 
 # misc
 .DS_Store

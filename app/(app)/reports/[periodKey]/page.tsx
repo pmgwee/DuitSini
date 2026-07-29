@@ -10,6 +10,7 @@ import {
   FileText,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { ReportHeroTotal } from "@/features/reports/hero-total";
 import { EmptyState } from "@/components/ui/empty-state";
 import { isSupabaseEnabled } from "@/lib/data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -20,7 +21,7 @@ import type {
   YearlyReportTotalsV1,
 } from "@/lib/reports/types";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
-import { HOME_CURRENCY, formatMYR } from "@/lib/domain/fx";
+import { formatMYR } from "@/lib/domain/fx";
 import { formatLongDate, formatShortDate } from "@/lib/domain/dates";
 import { CATEGORY_COLOR } from "@/lib/constants";
 import { ReportCategoryChart } from "@/features/reports/report-category-chart";
@@ -61,7 +62,7 @@ function StatTile({
   const color = accent === "success" ? "text-success" : accent === "danger" ? "text-danger" : "text-foreground";
   return (
     <div className="rounded-xl border border-border/50 bg-surface/30 p-3">
-      <div className={`text-lg font-semibold ${color}`}>{value}</div>
+      <div className={`text-lg font-semibold tabular-nums ${color}`}>{value}</div>
       <div className="text-[11px] text-muted-foreground">{label}</div>
     </div>
   );
@@ -235,7 +236,7 @@ function MonthlyDetail({
               Spent this month (MYR)
             </div>
             <div className="text-3xl font-semibold tracking-tight">
-              {formatCurrency(totals.totalMYR, HOME_CURRENCY)}
+              <ReportHeroTotal value={totals.totalMYR} />
             </div>
             <div className="mt-0.5 text-xs">
               <span className={`font-semibold ${deltaColor(totals.deltaPct)}`}>
@@ -418,7 +419,7 @@ function YearlyDetail({ totals }: { totals: YearlyReportTotalsV1 }) {
               Spent this year (MYR)
             </div>
             <div className="text-3xl font-semibold tracking-tight">
-              {formatCurrency(totals.totalMYR, HOME_CURRENCY)}
+              <ReportHeroTotal value={totals.totalMYR} />
             </div>
             <div className="mt-0.5 text-xs">
               <span className={`font-semibold ${deltaColor(totals.deltaPct)}`}>
@@ -432,7 +433,7 @@ function YearlyDetail({ totals }: { totals: YearlyReportTotalsV1 }) {
           <StatTile label="avg / month" value={formatMYR(roundMoney(totals.totalMYR / 12))} />
           <StatTile label="categories" value={String(totals.categories.length)} />
           <StatTile label="top subs" value={String(totals.topSubscriptions.length)} />
-          <StatTile label="charges" value={String(totals.monthlyBuckets.reduce((s, b) => s + (b.totalMYR > 0 ? 1 : 0), 0))} />
+          <StatTile label="active months" value={String(totals.monthlyBuckets.reduce((s, b) => s + (b.totalMYR > 0 ? 1 : 0), 0))} />
         </div>
       </section>
 
@@ -462,7 +463,7 @@ function YearlyDetail({ totals }: { totals: YearlyReportTotalsV1 }) {
       <section className="rounded-2xl border border-border/60 bg-surface/40 p-6 print:break-inside-avoid">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-medium">By category</h2>
-          <span className="text-xs text-muted-foreground">Spent this month (MYR)</span>
+          <span className="text-xs text-muted-foreground">Spent this year (MYR)</span>
         </div>
         {totals.categories.length === 0 ? (
           <p className="text-xs text-muted-foreground">No spend this year.</p>
