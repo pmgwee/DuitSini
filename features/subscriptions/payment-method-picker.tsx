@@ -65,8 +65,8 @@ export function PaymentMethodPicker({
 
   const issuerPool = issuersForKind(kind);
   const issuerOptions = [
-    { value: CUSTOM_ISSUER, label: "Other (type a name)…" },
-    ...issuerPool.map((i) => ({ value: i.slug, label: i.label })),
+    { value: CUSTOM_ISSUER, label: "Other (type a name)…", keywords: ["other", "custom", "type"] },
+    ...issuerPool.map((i) => ({ value: i.slug, label: i.label, keywords: i.keywords })),
   ];
 
   const onKindChange = (k: string) => {
@@ -144,6 +144,7 @@ export function PaymentMethodPicker({
         value={adding ? ADD_NEW : value}
         onChange={onSelectChange}
         options={selectOptions}
+        searchable={false}
       />
       {required && !value && !adding ? (
         <p className="text-[11px] text-muted-foreground">Pick or add the card / account this charges.</p>

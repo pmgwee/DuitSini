@@ -20,6 +20,7 @@
 export const PAYMENT_KINDS = [
   "credit_card",
   "debit_card",
+  "bank_account",
   "fpx",
   "e_wallet",
   "other",
@@ -49,6 +50,9 @@ export interface PaymentKindMeta {
 export const PAYMENT_KIND_META: Record<PaymentKind, PaymentKindMeta> = {
   credit_card: { label: "Credit card", short: "Credit", colorVar: "var(--pm-card)", emoji: "💳", isCard: true, issuerGroup: "bank" },
   debit_card: { label: "Debit card", short: "Debit", colorVar: "var(--pm-card)", emoji: "💳", isCard: true, issuerGroup: "bank" },
+  // Standing instructions / auto-debits / loan installments pulled from a bank
+  // account balance — distinct from FPX (one-time e-commerce) and from a card.
+  bank_account: { label: "Bank account", short: "Account", colorVar: "var(--pm-bank)", emoji: "💰", isCard: false, issuerGroup: "bank" },
   fpx: { label: "Online banking (FPX)", short: "FPX", colorVar: "var(--pm-fpx)", emoji: "🏦", isCard: false, issuerGroup: "bank" },
   e_wallet: { label: "E-wallet", short: "E-wallet", colorVar: "var(--pm-ewallet)", emoji: "📱", isCard: false, issuerGroup: "wallet" },
   other: { label: "Other", short: "Other", colorVar: "var(--pm-other)", emoji: "💸", isCard: false, issuerGroup: "any" },
@@ -62,6 +66,7 @@ export const PAYMENT_KIND_META: Record<PaymentKind, PaymentKindMeta> = {
 export const PAYMENT_KIND_COLOR: Record<PaymentKind, string> = {
   credit_card: "oklch(0.72 0.13 275)",
   debit_card: "oklch(0.72 0.13 275)",
+  bank_account: "oklch(0.78 0.13 75)",
   fpx: "oklch(0.7 0.12 195)",
   e_wallet: "oklch(0.74 0.15 150)",
   other: "oklch(0.72 0.02 265)",

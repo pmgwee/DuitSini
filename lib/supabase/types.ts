@@ -637,7 +637,13 @@ export type Database = {
         | "news"
         | "health"
         | "other"
-      payment_kind: "credit_card" | "debit_card" | "fpx" | "e_wallet" | "other"
+      payment_kind:
+        | "credit_card"
+        | "debit_card"
+        | "fpx"
+        | "e_wallet"
+        | "other"
+        | "bank_account"
       usage_state: "light" | "medium" | "heavy"
     }
     CompositeTypes: {
