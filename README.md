@@ -36,9 +36,10 @@ Everything else — reports, reminders, settings — exists to serve those three
 Covers all three kinds of recurring outgoing: **subscriptions** (Netflix, Spotify, Claude),
 **utilities** (TNB, Ranhill SAJ, Indah Water), and **bank repayments** — only the first of
 which is literally a subscription, which is why the surface is called Bills.
-- **Calendar** — monthly grid of upcoming charges, free-trial conversions, and renewals. Each day stacks provider icons; tap a day for its charge breakdown. Below the grid, the focused month's renewals are listed as cards.
-- **All** — searchable list of every bill (active, trial, paused, cancelled) with edit / pause / resume / delete.
-- **Statistics** — lazy-loaded charts (Recharts) breaking down spend by category, currency, and billing cycle.
+- **Calendar** — monthly grid of upcoming charges, free-trial conversions, and renewals. Each day stacks provider icons; tap a day for its charge breakdown, with the focused month's renewals also listed as cards below the grid.
+- **All** — searchable, sortable (date / amount / name / provider / payment method / status) list of every bill (active, trial, cancelled) with edit / cancel / restore / delete. Cancelling stamps a `cancelledAt` date rather than deleting — past charges stay on record, only future ones stop.
+- **Statistics** — lazy-loaded charts (Recharts) breaking down spend by category, plus a 6-month cash-flow trend and cancellation savings.
+- **Payment methods** — reusable instruments (credit/debit card, bank account, DuitNow, FPX, e-wallet, other) picked from a bank/e-wallet catalog or typed free-form; each subscription links to one, shown as a badge with the issuer's logo.
 - **Category dock** — a sticky overview showing two differentiated figures:
   - _This month_ — the **actual** count + MYR of charges landing in the current month.
   - _Recurring_ — the **normalized** monthly cost (any billing cycle smoothed to /mo).
@@ -64,8 +65,8 @@ Share your real Claude plan usage to the platform — no API key wrangling:
 - Per-period detail pages so you can look back at any month or year.
 
 ### Reminders & Telegram
-- Renewal reminders on a schedule you set, delivered to Telegram.
-- Connect once; toggle report delivery and reminders independently from Settings.
+- Renewal reminders on a schedule you set (a global default, overridable per subscription), bundled into one daily digest per Telegram chat instead of one message per bill.
+- Connect once; toggle report delivery and reminders independently from Settings, and manage saved payment methods there too.
 
 ---
 
@@ -80,6 +81,7 @@ Share your real Claude plan usage to the platform — no API key wrangling:
 | Cloud / APIs | Google Cloud — YouTube Data API v3 (music search), Google OAuth 2.0 (Google sign-in identity) |
 | Market data | Yahoo Finance public chart endpoint (keyless, 1-day cache) |
 | Forms / validation | React Hook Form + Zod |
+| Testing | Vitest (pure `lib/` modules — the sharer policy modules + protocol schema) |
 | Language | TypeScript (strict) |
 | Package manager | pnpm |
 
@@ -123,19 +125,26 @@ pnpm start
 ```
 app/
   (app)/            # authed shell — ai-usage, stocks, bills, reports, settings
-  api/              # route handlers (bridge mint/serve, usage ingest/live, stocks, YouTube)
+  api/              # route handlers (bridge mint/serve, usage ingest/live, cron, stocks, YouTube)
   auth/callback, login
 components/         # shared UI primitives + layout (app shell)
 features/
   dashboard/        # AI-usage tracker, music player, connect-claude card, flip clock
   serenity/         # stocks provider UI (holdings ring, themes, posts feed)
-  subscriptions/    # calendar, list, statistics, category dock
+  subscriptions/    # calendar, list, statistics, category dock, payment-method picker/badge
+  reports/          # report detail page islands (hero total, category chart, send buttons)
+  settings/         # Telegram, reminder schedule, reports toggles, payment methods card
 lib/
   domain/           # pure money/date/renewal logic (the source of truth for figures)
-  data/             # repository abstraction (mock ↔ supabase)
+  data/             # repository abstraction (mock ↔ supabase) — subscriptions + payment methods
+  reminders/        # pure due-reminder derivation, consumed by the cron sweep
+  notify/           # Telegram/WhatsApp provider registry + message builders
+  reports/          # pure statement builders (monthly/yearly) + HTML/PDF renderers
   serenity/         # stocks provider data layer (fetch, parse, prices, merge)
   supabase/         # server / client / admin(service-role) clients
-  bridge/           # the downloadable usage-sharer script builder
+  bridge/           # the downloadable usage-sharer script builder + sharer/ (policy modules)
+  payment-methods.ts# payment-instrument catalog (issuers/kinds) + card-network helpers
+  providers.ts      # subscription-provider catalog (brand color/logo presets)
 supabase/migrations/# SQL migrations (applied to the live project)
 ```
 
@@ -150,6 +159,7 @@ A few things that matter when working in this codebase:
 - **MYR-home.** All totals convert to Ringgit via `lib/domain/fx.ts`; round once after summing.
 - **Civil dates.** Charge dates are calendar dates, parsed via `parseISODate` (not `new Date(iso)`) to avoid timezone off-by-one.
 - **Renewal engine.** Charge series are derived from `startDate + billingCycle` in `lib/domain/renewal.ts` — that's what powers "what's charged this month."
+- **Single `cancelledAt` cutoff, no pause.** Stopping a subscription stamps today's date on `cancelledAt`; charges before it stay (paid history is preserved), charges on/after it drop. There's no separate pause state — the tracker never talks to the merchant, so pause and cancel were the same thing.
 - **Deterministic SSR.** "Now"-dependent values are computed server-side and passed down (e.g. `todayISO`) to prevent hydration mismatches.
 
 See [CLAUDE.md](CLAUDE.md) for the full architectural guide.
