@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/ui/page-header";
+import { Reveal } from "@/components/ui/reveal";
 import { getEffectiveUserId, getSubscriptionRepository } from "@/lib/data";
 import { toISODate } from "@/lib/domain/dates";
 import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
@@ -31,7 +32,9 @@ export default async function BillsPage() {
         actions={<AddSubscriptionButton />}
       />
 
-      <SubscriptionsView subscriptions={subscriptions} todayISO={todayISO} />
+      <Reveal>
+        <SubscriptionsView subscriptions={subscriptions} todayISO={todayISO} />
+      </Reveal>
     </div>
   );
 }

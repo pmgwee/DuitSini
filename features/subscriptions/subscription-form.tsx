@@ -32,6 +32,7 @@ import { Select } from "@/components/ui/select";
 import { toISODate } from "@/lib/domain/dates";
 import { cn } from "@/lib/utils";
 import { ProviderCombobox } from "./provider-combobox";
+import { PaymentMethodPicker } from "./payment-method-picker";
 import type { ProviderPreset } from "@/lib/providers";
 import {
   getGlobalReminderDefaults,
@@ -64,6 +65,7 @@ interface FieldValues {
   reminderOffsetsDays: number[] | null;
   notes: string;
   color: string;
+  paymentMethodId: string;
 }
 
 /**
@@ -134,6 +136,7 @@ export function SubscriptionForm({
       reminderOffsetsDays: subscription != null ? subscription.reminderOffsetsDays ?? null : null,
       notes: subscription?.notes ?? "",
       color: subscription?.color ?? "",
+      paymentMethodId: subscription?.paymentMethodId ?? "",
     },
   });
 
@@ -143,6 +146,7 @@ export function SubscriptionForm({
   const provider = watch("provider");
   const category = watch("category");
   const currency = watch("currency");
+  const paymentMethodId = watch("paymentMethodId");
   const showInterval = billingCycle === "custom_days" || billingCycle === "custom_months";
   const reminderOffsetsDays = watch("reminderOffsetsDays");
 
@@ -223,6 +227,19 @@ export function SubscriptionForm({
           value={category}
           onChange={(v) => setValue("category", v, { shouldDirty: true })}
           options={CATEGORY_OPTIONS}
+        />
+      </Field>
+
+      <Field
+        label="Payment method"
+        hint={mode === "create" ? "how this is paid" : "optional"}
+        error={errors.paymentMethodId?.message as string | undefined}
+        required={mode === "create"}
+      >
+        <PaymentMethodPicker
+          value={paymentMethodId}
+          onChange={(v) => setValue("paymentMethodId", v, { shouldDirty: true })}
+          required={mode === "create"}
         />
       </Field>
 
@@ -431,7 +448,12 @@ export function SubscriptionForm({
         <Button type="button" variant="ghost" onClick={onDone} disabled={submitting}>
           Cancel
         </Button>
-        <Button type="submit" disabled={submitting} aria-busy={submitting} className="gap-1.5">
+        <Button
+          type="submit"
+          disabled={submitting || (mode === "create" && !paymentMethodId)}
+          aria-busy={submitting}
+          className="gap-1.5"
+        >
           {submitting ? <Loader2 className="size-4 animate-spin" /> : null}
           {mode === "edit" ? "Save changes" : "Add subscription"}
         </Button>

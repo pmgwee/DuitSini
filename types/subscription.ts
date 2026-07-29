@@ -1,4 +1,5 @@
 import type { BillingCycle, Category, CurrencyCode } from "@/lib/constants";
+import type { PaymentMethod } from "@/types/payment-method";
 
 export type NotificationChannel = "telegram" | "whatsapp" | "email" | "in_app";
 
@@ -39,4 +40,8 @@ export interface Subscription {
   notificationChannels: NotificationChannel[];
   createdAt: string;
   updatedAt: string;
+  /** FK to payment_methods (write path). Null = unspecified / backfilled. */
+  paymentMethodId: string | null;
+  /** Resolved instrument, attached by repos at read time (mock/Supabase join). */
+  paymentMethod?: PaymentMethod | null;
 }

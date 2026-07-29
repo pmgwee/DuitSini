@@ -1,6 +1,7 @@
 import { addDays } from "date-fns";
 import type { BillingCycle, Category, CurrencyCode } from "@/lib/constants";
 import type { NotificationChannel, Subscription } from "@/types/subscription";
+import type { PaymentMethod } from "@/types/payment-method";
 import { toISODate } from "@/lib/domain/dates";
 import { nextChargeOnOrAfter } from "@/lib/domain/renewal";
 import { DEMO_USER_ID } from "../types";
@@ -36,6 +37,8 @@ interface SeedSpec {
   notes?: string;
   reminderOffsetsDays?: number[] | null;
   notificationChannels?: NotificationChannel[];
+  /** Links this demo sub to a seeded `seedPaymentMethods()` id (e.g. "pm_001"). */
+  paymentMethodId?: string;
 }
 
 let sequence = 0;
@@ -75,6 +78,7 @@ function make(spec: SeedSpec): Subscription {
     reminderOffsetsDays: spec.reminderOffsetsDays ?? null,
     reminderTimeLocal: "09:00",
     notificationChannels: spec.notificationChannels ?? ["in_app"],
+    paymentMethodId: spec.paymentMethodId ?? null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -86,6 +90,7 @@ export function seedSubscriptions(): Subscription[] {
   return [
     make({
       name: "Netflix",
+      paymentMethodId: "pm_001",
       category: "streaming",
       amount: 17.99,
       billingCycle: "monthly",
@@ -96,6 +101,7 @@ export function seedSubscriptions(): Subscription[] {
     }),
     make({
       name: "Spotify",
+      paymentMethodId: "pm_001",
       category: "music",
       amount: 11.99,
       billingCycle: "monthly",
@@ -104,6 +110,7 @@ export function seedSubscriptions(): Subscription[] {
     }),
     make({
       name: "Claude Pro",
+      paymentMethodId: "pm_002",
       provider: "Anthropic",
       category: "ai",
       amount: 20,
@@ -213,6 +220,7 @@ export function seedSubscriptions(): Subscription[] {
     // ── Malaysia: telecommunications & utilities (MYR) ─────────────────
     make({
       name: "U Mobile",
+      paymentMethodId: "pm_003",
       category: "telecom",
       amount: 68,
       currency: "MYR",
@@ -257,6 +265,7 @@ export function seedSubscriptions(): Subscription[] {
     }),
     make({
       name: "TNB",
+      paymentMethodId: "pm_004",
       category: "utilities",
       amount: 150,
       currency: "MYR",
@@ -292,6 +301,7 @@ export function seedSubscriptions(): Subscription[] {
     // ── Malaysia: banking / home loan (MYR) ───────────────────────────
     make({
       name: "Home Loan",
+      paymentMethodId: "pm_004",
       provider: "Public Bank",
       category: "finance",
       amount: 1800,
@@ -302,5 +312,52 @@ export function seedSubscriptions(): Subscription[] {
       unsubscribeUrl: "https://www.pbebank.com",
       notes: "Monthly housing loan installment. Placeholder amount — set to your actual monthly installment.",
     }),
+  ];
+}
+
+/**
+ * Demo payment methods (cards / FPX / e-wallet). Referenced by the seeded demo
+ * subscriptions via `SeedSpec.paymentMethodId`. ids are stable (`pm_NNN`) so the
+ * subscription seed can link to them; the mock store loads these at import.
+ */
+export function seedPaymentMethods(): PaymentMethod[] {
+  const timestamp = new Date().toISOString();
+  return [
+    {
+      id: "pm_001",
+      userId: DEMO_USER_ID,
+      kind: "credit_card",
+      issuerSlug: "maybank",
+      issuerName: "Maybank",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    {
+      id: "pm_002",
+      userId: DEMO_USER_ID,
+      kind: "debit_card",
+      issuerSlug: "gx_bank",
+      issuerName: "GX Bank",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    {
+      id: "pm_003",
+      userId: DEMO_USER_ID,
+      kind: "e_wallet",
+      issuerSlug: "tng_ewallet",
+      issuerName: "Touch 'n Go eWallet",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    {
+      id: "pm_004",
+      userId: DEMO_USER_ID,
+      kind: "fpx",
+      issuerSlug: "cimb",
+      issuerName: "CIMB Bank",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
   ];
 }

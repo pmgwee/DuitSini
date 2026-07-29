@@ -33,6 +33,7 @@ const NAV: NavItem[] = [
 
 export function AppShell({ children, user }: { children: ReactNode; user?: AuthUser }) {
   const pathname = usePathname();
+  const activeNav = NAV.find((n) => pathname.startsWith(n.href));
   const player = useMusicPlayer();
   // The mini-player floats only on non-AI-Usage routes (on /ai-usage the
   // live player is docked inline inside the Music card). Reserve bottom space
@@ -66,14 +67,9 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
           })}
         </nav>
 
-        <div className="mt-auto rounded-xl border border-border/60 bg-surface/50 p-3">
-          <div className="text-xs font-medium">Beta Versions 0.1</div>
-          <div className="mt-1 text-xs text-muted-foreground">Up to 10 Testers</div>
-        </div>
-
         {/* Legal links — required to be reachable from inside the app for
             Google OAuth sensitive-scope verification (demo + reviewers). */}
-        <div className="mt-3 flex items-center gap-3 px-2 text-xs text-muted-foreground">
+        <div className="mt-auto flex items-center gap-3 px-2 text-xs text-muted-foreground">
           <Link
             href="/privacy"
             className="transition-colors hover:text-foreground hover:underline"
@@ -95,8 +91,8 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
       {/* Main column */}
       <div className="lg:pl-[248px] print:pl-0">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-border/60 glass px-4 sm:px-6 print:hidden">
-          <span className="text-sm font-medium text-muted-foreground lg:hidden">
-            DuitSini
+          <span className="text-sm font-semibold tracking-tight lg:hidden">
+            {activeNav?.label ?? "DuitSini"}
           </span>
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
