@@ -8,6 +8,7 @@ import {
   PAYMENT_KINDS,
   PAYMENT_KIND_META,
   issuersForKind,
+  paymentMethodLabel,
   type PaymentKind,
 } from "@/lib/payment-methods";
 import type { PaymentMethod } from "@/types/payment-method";
@@ -21,8 +22,7 @@ const inputClass =
   "h-11 w-full rounded-xl border border-border/60 bg-input/50 px-3 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40";
 
 function methodLabel(m: PaymentMethod): string {
-  const isCard = m.kind === "credit_card" || m.kind === "debit_card";
-  return isCard ? `${m.issuerName} · ${PAYMENT_KIND_META[m.kind].short}` : m.issuerName;
+  return paymentMethodLabel(m.issuerName, m.kind);
 }
 
 /**

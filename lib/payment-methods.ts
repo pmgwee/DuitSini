@@ -52,7 +52,7 @@ export const PAYMENT_KIND_META: Record<PaymentKind, PaymentKindMeta> = {
   debit_card: { label: "Debit card", short: "Debit", colorVar: "var(--pm-card)", emoji: "💳", isCard: true, issuerGroup: "bank" },
   // Standing instructions / auto-debits / loan installments pulled from a bank
   // account balance — distinct from FPX (one-time e-commerce) and from a card.
-  bank_account: { label: "Bank account/Duitnow", short: "Account", colorVar: "var(--pm-bank)", emoji: "💰", isCard: false, issuerGroup: "bank" },
+  bank_account: { label: "Bank account/Duitnow", short: "Duitnow", colorVar: "var(--pm-bank)", emoji: "💰", isCard: false, issuerGroup: "bank" },
   fpx: { label: "Online banking (FPX)", short: "FPX", colorVar: "var(--pm-fpx)", emoji: "🏦", isCard: false, issuerGroup: "bank" },
   e_wallet: { label: "E-wallet", short: "E-wallet", colorVar: "var(--pm-ewallet)", emoji: "📱", isCard: false, issuerGroup: "wallet" },
   other: { label: "Other", short: "Other", colorVar: "var(--pm-other)", emoji: "💸", isCard: false, issuerGroup: "any" },
@@ -71,6 +71,17 @@ export const PAYMENT_KIND_COLOR: Record<PaymentKind, string> = {
   e_wallet: "oklch(0.74 0.15 150)",
   other: "oklch(0.72 0.02 265)",
 };
+
+/**
+ * Display label combining an issuer name with a compact payment-kind suffix —
+ * e.g. "Wise · Debit", "Wise · Duitnow" (bank account), "Wise · FPX" (online
+ * banking), "Wise · E-wallet". "Other" methods show just the issuer name, since
+ * the suffix would carry no information.
+ */
+export function paymentMethodLabel(issuerName: string, kind: PaymentKind): string {
+  if (kind === "other") return issuerName;
+  return `${issuerName} · ${PAYMENT_KIND_META[kind].short}`;
+}
 
 // ─── Issuers (banks + digital banks + e-wallets) ──────────────────────────
 export type IssuerType =

@@ -13,6 +13,7 @@ import {
   PAYMENT_KIND_META,
   findIssuer,
   issuersForKind,
+  paymentMethodLabel,
   type PaymentKind,
 } from "@/lib/payment-methods";
 import type { PaymentMethod } from "@/types/payment-method";
@@ -23,10 +24,9 @@ const CUSTOM_ISSUER = "__custom__";
 const inputClass =
   "h-11 w-full rounded-xl border border-border/60 bg-input/50 px-3 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40";
 
-/** Card kinds append "· Credit"/"· Debit"; others show the issuer name alone. */
+/** Issuer name plus a compact kind suffix (Credit / Debit / Duitnow / FPX / E-wallet). */
 function methodLabel(m: PaymentMethod): string {
-  const isCard = m.kind === "credit_card" || m.kind === "debit_card";
-  return isCard ? `${m.issuerName} · ${PAYMENT_KIND_META[m.kind].short}` : m.issuerName;
+  return paymentMethodLabel(m.issuerName, m.kind);
 }
 
 /**
