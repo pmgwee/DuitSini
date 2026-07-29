@@ -52,7 +52,7 @@ export const PAYMENT_KIND_META: Record<PaymentKind, PaymentKindMeta> = {
   debit_card: { label: "Debit card", short: "Debit", colorVar: "var(--pm-card)", emoji: "💳", isCard: true, issuerGroup: "bank" },
   // Standing instructions / auto-debits / loan installments pulled from a bank
   // account balance — distinct from FPX (one-time e-commerce) and from a card.
-  bank_account: { label: "Bank account", short: "Account", colorVar: "var(--pm-bank)", emoji: "💰", isCard: false, issuerGroup: "bank" },
+  bank_account: { label: "Bank account/Duitnow", short: "Account", colorVar: "var(--pm-bank)", emoji: "💰", isCard: false, issuerGroup: "bank" },
   fpx: { label: "Online banking (FPX)", short: "FPX", colorVar: "var(--pm-fpx)", emoji: "🏦", isCard: false, issuerGroup: "bank" },
   e_wallet: { label: "E-wallet", short: "E-wallet", colorVar: "var(--pm-ewallet)", emoji: "📱", isCard: false, issuerGroup: "wallet" },
   other: { label: "Other", short: "Other", colorVar: "var(--pm-other)", emoji: "💸", isCard: false, issuerGroup: "any" },
