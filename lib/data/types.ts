@@ -12,7 +12,6 @@ export interface SubscriptionRepository {
   create(userId: string, input: SubscriptionInput): Promise<Subscription>;
   update(userId: string, id: string, patch: SubscriptionPatch): Promise<Subscription | null>;
   remove(userId: string, id: string): Promise<boolean>;
-  setPaused(userId: string, id: string, paused: boolean): Promise<Subscription | null>;
   setCancelled(userId: string, id: string, cancelled: boolean): Promise<Subscription | null>;
 }
 

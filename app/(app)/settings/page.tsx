@@ -4,6 +4,7 @@ import { Reveal } from "@/components/ui/reveal";
 import { TelegramCard } from "@/features/settings/telegram-card";
 import { ReminderScheduleCard } from "@/features/settings/reminder-schedule-card";
 import { ReportsCard } from "@/features/settings/reports-card";
+import { PaymentMethodsCard } from "@/features/settings/payment-methods-card";
 import { RecentDeliveries } from "@/features/settings/deliveries-list";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { sanitizeOffsets } from "@/lib/reminders/engine";
@@ -85,6 +86,9 @@ export default async function SettingsPage() {
         <ReportsCard initialMonthly={monthlyReport} initialYearly={yearlyReport} />
       </Reveal>
       <Reveal delay={0.12}>
+        <PaymentMethodsCard />
+      </Reveal>
+      <Reveal delay={0.16}>
         <section className="rounded-2xl border border-border/60 bg-surface/40 p-6">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-medium">
             <Bell className="size-4 text-primary" /> Recent reminders

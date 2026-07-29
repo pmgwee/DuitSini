@@ -30,8 +30,7 @@ interface SeedSpec {
   startDate: string;
   freeTrialEndAt?: string;
   isTrial?: boolean;
-  isPaused?: boolean;
-  isCancelled?: boolean;
+  cancelledAt?: string;
   unsubscribeUrl?: string;
   color?: string;
   notes?: string;
@@ -68,8 +67,7 @@ function make(spec: SeedSpec): Subscription {
     nextRenewalAt: `${nextDate}T09:00:00.000Z`,
     freeTrialEndAt,
     isTrial,
-    isPaused: spec.isPaused ?? false,
-    isCancelled: spec.isCancelled ?? false,
+    cancelledAt: spec.cancelledAt ?? null,
     unsubscribeUrl: spec.unsubscribeUrl ?? null,
     iconType: "monogram",
     iconUrl: null,
@@ -182,8 +180,8 @@ export function seedSubscriptions(): Subscription[] {
       amount: 19.99,
       billingCycle: "monthly",
       startDate: monthlyAnchor(11, 3),
-      isPaused: true,
-      notes: "Paused until the next big release.",
+      cancelledAt: isoIn(-10),
+      notes: "Cancelled — will resubscribe for the next big release.",
     }),
     make({
       name: "Amazon Prime",
@@ -213,7 +211,7 @@ export function seedSubscriptions(): Subscription[] {
       amount: 13.99,
       billingCycle: "monthly",
       startDate: monthlyAnchor(8, 9),
-      isCancelled: true,
+      cancelledAt: isoIn(-60),
       notes: "Cancelled — saving the monthly fee.",
     }),
 

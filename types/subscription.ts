@@ -3,7 +3,7 @@ import type { PaymentMethod } from "@/types/payment-method";
 
 export type NotificationChannel = "telegram" | "whatsapp" | "email" | "in_app";
 
-export type SubscriptionStatus = "active" | "trial" | "paused" | "cancelled";
+export type SubscriptionStatus = "active" | "trial" | "cancelled";
 
 export type IconType = "provider" | "custom" | "monogram";
 
@@ -28,8 +28,13 @@ export interface Subscription {
   nextRenewalAt: string; // ISO datetime (UTC)
   freeTrialEndAt: string | null; // YYYY-MM-DD
   isTrial: boolean;
-  isPaused: boolean;
-  isCancelled: boolean;
+  /**
+   * Civil date (YYYY-MM-DD) the subscription was cancelled/stopped, or null
+   * while active. This is the single source of truth for "stopped" state — it
+   * bounds the charge series so charges dated BEFORE this still count (past
+   * history is preserved) and charges on/after drop. Set by `setCancelled`.
+   */
+  cancelledAt: string | null;
   unsubscribeUrl: string | null;
   iconType: IconType;
   iconUrl: string | null;

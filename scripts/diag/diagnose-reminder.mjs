@@ -64,7 +64,7 @@ const MIN_LOOKAHEAD = 7;
 // ---- mirror engine.ts deriveDueReminders (for ONE sub) ----
 function deriveForSub(sub, todayISO) {
   const offsets = (sub.reminderOffsetsDays ?? []).filter((n) => Number.isFinite(n) && n >= 0);
-  if (sub.isPaused || sub.isCancelled) return { skipped: "inactive", charges: [], due: [] };
+  if (sub.cancelledAt) return { skipped: "inactive", charges: [], due: [] };
   if (offsets.length === 0) return { skipped: "no offsets", charges: [], due: [] };
   const yesterdayISO = shiftISO(todayISO, -1);
   const maxOffset = Math.max(...offsets, MIN_LOOKAHEAD);
@@ -101,13 +101,12 @@ const sub = {
   intervalCount: row.interval_count,
   isTrial: row.is_trial,
   freeTrialEndAt: row.free_trial_end_at,
-  isPaused: row.is_paused,
-  isCancelled: row.is_cancelled,
+  cancelledAt: row.cancelled_at,
   reminderOffsetsDays: effectiveOffsets,
 };
 
 console.log("=== U Mobile sub (effective) ===");
-console.log({ name: row.name, start_date: row.start_date, billing_cycle: row.billing_cycle, interval_count: row.interval_count, is_trial: row.is_trial, is_paused: row.is_paused, is_cancelled: row.is_cancelled, raw_offsets: row.reminder_offsets_days, effective_offsets: effectiveOffsets, channels: row.notification_channels });
+console.log({ name: row.name, start_date: row.start_date, billing_cycle: row.billing_cycle, interval_count: row.interval_count, is_trial: row.is_trial, cancelled_at: row.cancelled_at, raw_offsets: row.reminder_offsets_days, effective_offsets: effectiveOffsets, channels: row.notification_channels });
 console.log("=== profile ===");
 console.log({ timezone: prof.timezone, telegram_enabled: prof.telegram_enabled, telegram_chat_id: prof.telegram_chat_id, global_offsets: rawGlobal });
 

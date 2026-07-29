@@ -23,6 +23,7 @@ import {
   chargesTotalMYRInRange,
   grossMonthlyCost,
   isActive,
+  isCancelled,
   monthlyAmount,
 } from "@/lib/domain/subscription";
 import { toMYR } from "@/lib/domain/fx";
@@ -54,7 +55,8 @@ function deltaPct(curr: number, prev: number): number | null {
 /**
  * Build the statement lines for every charge landing in [startISO, endISO]:
  * date, name, native amount + MYR equivalent, category, trial-conversion flag.
- * Sorted by date then name (stable). Paused/cancelled subs contribute nothing.
+ * Sorted by date then name (stable). A cancelled sub still contributes charges
+ * dated before its `cancelledAt` cutoff (its paid history stays on the books).
  */
 function collectChargeLines(
   subs: Subscription[],
@@ -63,7 +65,8 @@ function collectChargeLines(
 ): ReportChargeLine[] {
   const lines: ReportChargeLine[] = [];
   for (const sub of subs) {
-    if (!isActive(sub)) continue;
+    // No `isActive` gate here: `chargeDatesInRange` already drops a cancelled
+    // sub's on/after-cutoff charges, so past statements keep what was paid.
     const dates = chargeDatesInRange(sub, startISO, endISO);
     for (const dateISO of dates) {
       lines.push({
@@ -107,7 +110,7 @@ function cancelledSavingsMYR(subs: Subscription[], annualized: boolean): number 
   const factor = annualized ? 12 : 1;
   return roundMoney(
     subs
-      .filter((s) => s.isCancelled)
+      .filter(isCancelled)
       .reduce((sum, sub) => sum + toMYR(grossMonthlyCost(sub) * factor, sub.currency), 0),
   );
 }

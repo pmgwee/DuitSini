@@ -12,19 +12,23 @@ export function chargeAnchorISO(sub: Subscription): string {
 }
 
 export function getStatus(sub: Subscription): SubscriptionStatus {
-  if (sub.isCancelled) return "cancelled";
-  if (sub.isPaused) return "paused";
+  if (sub.cancelledAt) return "cancelled";
   if (sub.isTrial && sub.freeTrialEndAt && daysUntil(sub.freeTrialEndAt) >= 0) {
     return "trial";
   }
   return "active";
 }
 
-export function isActive(sub: Subscription): boolean {
-  return !sub.isCancelled && !sub.isPaused;
+/** Whether the subscription has been cancelled/stopped (any time). */
+export function isCancelled(sub: Subscription): boolean {
+  return sub.cancelledAt !== null;
 }
 
-/** Next real charge date (civil), or null if paused/cancelled/expired one-off. */
+export function isActive(sub: Subscription): boolean {
+  return sub.cancelledAt === null;
+}
+
+/** Next real charge date (civil), or null if cancelled/expired one-off. */
 export function getNextChargeDate(
   sub: Subscription,
   fromISO: string = toISODate(new Date()),
@@ -33,7 +37,7 @@ export function getNextChargeDate(
   return nextChargeOnOrAfter(chargeAnchorISO(sub), sub.billingCycle, sub.intervalCount, fromISO);
 }
 
-/** Normalized monthly cost; paused/cancelled subs contribute nothing. */
+/** Normalized monthly cost; cancelled subs contribute nothing. */
 export function monthlyAmount(sub: Subscription): number {
   if (!isActive(sub)) return 0;
   return monthlyEquivalent(sub.amount, sub.billingCycle, sub.intervalCount);
@@ -46,7 +50,7 @@ export function yearlyAmount(sub: Subscription): number {
 
 /**
  * Monthly cost IGNORING pause/cancel state — used to show how much a now-
- * cancelled (or paused) subscription was costing, i.e. the "saved" figure.
+ * cancelled subscription was costing, i.e. the "saved" figure.
  * (`monthlyAmount` returns 0 for inactive subs, which is correct everywhere
  * except the savings calculation, where we specifically want the would-be cost.)
  */
@@ -54,20 +58,27 @@ export function grossMonthlyCost(sub: Subscription): number {
   return monthlyEquivalent(sub.amount, sub.billingCycle, sub.intervalCount);
 }
 
-/** Charge dates for an active subscription within a civil-date range. */
+/**
+ * Charge dates within a civil-date range. A cancelled subscription still
+ * contributes charges dated BEFORE its `cancelledAt` cutoff (its paid history
+ * is preserved); charges on/after `cancelledAt` are dropped. `cancelledAt` is
+ * treated as the first UNPAID charge date (exclusive), so cancelling on a
+ * renewal date assumes the renewal did not go through.
+ */
 export function chargeDatesInRange(
   sub: Subscription,
   startISO: string,
   endISO: string,
 ): string[] {
-  if (!isActive(sub)) return [];
-  return chargesInRange(
+  const dates = chargesInRange(
     chargeAnchorISO(sub),
     sub.billingCycle,
     sub.intervalCount,
     startISO,
     endISO,
   );
+  const cutoff = sub.cancelledAt;
+  return cutoff ? dates.filter((d) => d < cutoff) : dates;
 }
 
 /** A subscription paired with the charge dates it has within a civil range. */
@@ -77,11 +88,11 @@ export interface RangeChargeItem {
 }
 
 /**
- * Active subscriptions that charge at least once within [startISO, endISO],
- * each paired with its charge dates in that range (a sub can charge more than
- * once — e.g. weekly). Powers "this month's charges" (count + actual total)
- * without each call site re-walking the renewal engine. Paused/cancelled subs
- * are excluded. Unsorted — callers sort as needed.
+ * Subscriptions that charge at least once within [startISO, endISO], each
+ * paired with its charge dates in that range (a sub can charge more than once
+ * — e.g. weekly). Powers "this month's charges" (count + actual total) without
+ * each call site re-walking the renewal engine. A cancelled sub still appears
+ * for charges dated before its `cancelledAt` cutoff. Unsorted — callers sort.
  */
 export function subscriptionsChargingInRange(
   subs: Subscription[],
@@ -90,7 +101,9 @@ export function subscriptionsChargingInRange(
 ): RangeChargeItem[] {
   const out: RangeChargeItem[] = [];
   for (const sub of subs) {
-    if (!isActive(sub)) continue;
+    // No `isActive` gate: a cancelled sub still contributes charges dated
+    // before its `cancelledAt` cutoff (handled inside `chargeDatesInRange`),
+    // so past months keep their paid history.
     const dates = chargeDatesInRange(sub, startISO, endISO);
     if (dates.length > 0) out.push({ sub, dates });
   }
@@ -102,8 +115,8 @@ export function subscriptionsChargingInRange(
  * subscriptions: each subscription contributes (its charge count in the window) ×
  * (its amount in MYR), summed at full float precision and rounded ONCE. This is
  * the "this month (actual)" figure — a weekly sub charging four times counts
- * four times; an annual sub counts only in its renewal month. Paused/cancelled
- * subs contribute nothing (`chargeDatesInRange` returns [] for them).
+ * four times; an annual sub counts only in its renewal month. A cancelled sub
+ * contributes only charges dated before its `cancelledAt` cutoff.
  *
  * Shared so the reports builder and any future "actual spend" surface use the
  * identical math (CLAUDE.md money rule: convert per-line, sum, round once).

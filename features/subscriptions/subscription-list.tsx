@@ -28,10 +28,6 @@ const STATUS_META: Record<
     label: "Trial",
     className: "bg-warning/15 text-warning ring-1 ring-warning/25",
   },
-  paused: {
-    label: "Paused",
-    className: "bg-muted text-muted-foreground ring-1 ring-border/60",
-  },
   cancelled: {
     label: "Cancelled",
     className: "bg-danger/10 text-danger ring-1 ring-danger/25",
@@ -41,19 +37,18 @@ const STATUS_META: Record<
 const STATUS_ORDER: Record<SubscriptionStatus, number> = {
   active: 0,
   trial: 1,
-  paused: 2,
-  cancelled: 3,
+  cancelled: 2,
 };
 
 /**
  * The full, searchable list of every subscription regardless of status or
  * whether it has a charge in the visible calendar window. This is the only
- * surface from which paused, cancelled, or out-of-window annual subscriptions
- * can be reached to edit / resume / restore / delete.
+ * surface from which cancelled or out-of-window annual subscriptions can be
+ * reached to edit / restore / delete.
  *
- * Monthly cost is the nominal (gross) figure in MYR so a paused or cancelled
- * sub still shows what it would cost; the status badge conveys that it isn't
- * currently being charged.
+ * Monthly cost is the nominal (gross) figure in MYR so a cancelled sub still
+ * shows what it would cost; the status badge conveys that it isn't currently
+ * being charged.
  */
 export function SubscriptionList({ subscriptions }: { subscriptions: Subscription[] }) {
   const [query, setQuery] = useState("");

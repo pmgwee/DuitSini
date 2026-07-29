@@ -85,7 +85,7 @@ const MIN_LOOKAHEAD = 7;
  * (normal) or YESTERDAY (one-day catch-up for a missed cron run), never older.
  *
  * Reminders come straight from the existing charge-series engine, so:
- *  - paused/cancelled subs are dropped by `isActive` (no cancel logic needed);
+ *  - cancelled subs are dropped by `isActive` (no cancel logic needed);
  *  - a changed renewal date just re-derives on the next run (no reschedule);
  *  - a trial's first charge IS its trial-end date (the engine anchors there),
  *    so that reminder is labelled "trial".

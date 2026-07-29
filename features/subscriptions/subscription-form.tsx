@@ -4,7 +4,7 @@ import { Children, cloneElement, useEffect, useId, useState, type ReactElement }
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Ban, Loader2, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
+import { Ban, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import {
   BILLING_CYCLES,
   BILLING_CYCLE_LABELS,
@@ -23,7 +23,6 @@ import {
   createSubscription,
   deleteSubscription,
   setSubscriptionCancelled,
-  setSubscriptionPaused,
   updateSubscription,
 } from "@/lib/data/actions";
 import type { Subscription } from "@/types/subscription";
@@ -494,34 +493,22 @@ function LifecycleActions({
       <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         Manage
       </div>
+      <p className="mb-2 text-xs text-muted-foreground">
+        {subscription.cancelledAt
+          ? "Cancelled — past charges stay on your records. Restore to resume from the next cycle."
+          : "Cancelling stops future charges. Your past charges stay on your records."}
+      </p>
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
           size="sm"
           variant="secondary"
           disabled={busy}
-          onClick={() => run(() => setSubscriptionPaused(subscription.id, !subscription.isPaused))}
-        >
-          {subscription.isPaused ? (
-            <>
-              <Play className="size-3.5" /> Resume
-            </>
-          ) : (
-            <>
-              <Pause className="size-3.5" /> Pause
-            </>
-          )}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          disabled={busy}
           onClick={() =>
-            run(() => setSubscriptionCancelled(subscription.id, !subscription.isCancelled))
+            run(() => setSubscriptionCancelled(subscription.id, subscription.cancelledAt === null))
           }
         >
-          {subscription.isCancelled ? (
+          {subscription.cancelledAt ? (
             <>
               <RotateCcw className="size-3.5" /> Restore
             </>

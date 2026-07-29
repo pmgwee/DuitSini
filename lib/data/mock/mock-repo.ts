@@ -4,6 +4,7 @@ import {
   applySubscriptionPatch,
   computeNextRenewalInstant,
 } from "@/lib/domain/subscription";
+import { toISODate } from "@/lib/domain/dates";
 import { DEMO_USER_ID, type SubscriptionRepository } from "../types";
 import { seedSubscriptions } from "./seed";
 import { paymentMethodStore } from "./payment-method-store";
@@ -65,8 +66,7 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
       nextRenewalAt: "",
       freeTrialEndAt: input.freeTrialEndAt ?? null,
       isTrial: input.isTrial,
-      isPaused: false,
-      isCancelled: false,
+      cancelledAt: null,
       unsubscribeUrl: input.unsubscribeUrl ? input.unsubscribeUrl : null,
       iconType: "monogram",
       iconUrl: null,
@@ -99,19 +99,12 @@ export const mockSubscriptionRepository: SubscriptionRepository = {
     return store.delete(id);
   },
 
-  async setPaused(userId, id, paused) {
-    const current = ownedBy(userId, id);
-    if (!current) return null;
-    current.isPaused = paused;
-    current.updatedAt = new Date().toISOString();
-    store.set(id, current);
-    return attachMethod(current);
-  },
-
   async setCancelled(userId, id, cancelled) {
     const current = ownedBy(userId, id);
     if (!current) return null;
-    current.isCancelled = cancelled;
+    // Stamp the cutoff when stopping (bounds the charge series — past charges
+    // stay, future ones drop); clear it when restoring.
+    current.cancelledAt = cancelled ? toISODate(new Date()) : null;
     current.updatedAt = new Date().toISOString();
     store.set(id, current);
     return attachMethod(current);

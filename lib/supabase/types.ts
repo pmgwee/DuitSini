@@ -20,22 +20,22 @@ export type Database = {
     Tables: {
       bridge_tokens: {
         Row: {
-          id: string
           created_at: string
+          id: string
           last_used_at: string | null
           token_hash: string
           user_id: string
         }
         Insert: {
-          id?: string
           created_at?: string
+          id?: string
           last_used_at?: string | null
           token_hash: string
           user_id: string
         }
         Update: {
-          id?: string
           created_at?: string
+          id?: string
           last_used_at?: string | null
           token_hash?: string
           user_id?: string
@@ -48,12 +48,12 @@ export type Database = {
           five_hour_utilization: number | null
           limits_json: Json | null
           provider_json: Json | null
-          streams_json: Json | null
           pull_requested_at: string | null
           push_seconds: number | null
           seven_day_resets_at: string | null
           seven_day_utilization: number | null
           sharer_version: string | null
+          streams_json: Json | null
           updated_at: string
           user_id: string
         }
@@ -62,12 +62,12 @@ export type Database = {
           five_hour_utilization?: number | null
           limits_json?: Json | null
           provider_json?: Json | null
-          streams_json?: Json | null
           pull_requested_at?: string | null
           push_seconds?: number | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
           sharer_version?: string | null
+          streams_json?: Json | null
           updated_at?: string
           user_id: string
         }
@@ -76,32 +76,14 @@ export type Database = {
           five_hour_utilization?: number | null
           limits_json?: Json | null
           provider_json?: Json | null
-          streams_json?: Json | null
           pull_requested_at?: string | null
           push_seconds?: number | null
           seven_day_resets_at?: string | null
           seven_day_utilization?: number | null
           sharer_version?: string | null
+          streams_json?: Json | null
           updated_at?: string
           user_id?: string
-        }
-        Relationships: []
-      }
-      music_settings: {
-        Row: {
-          user_id: string
-          volume: number
-          updated_at: string
-        }
-        Insert: {
-          user_id: string
-          volume?: number
-          updated_at?: string
-        }
-        Update: {
-          user_id?: string
-          volume?: number
-          updated_at?: string
         }
         Relationships: []
       }
@@ -239,7 +221,6 @@ export type Database = {
           thumbnail?: string | null
           title?: string
           user_id?: string
-          video_id?: string
         }
         Relationships: []
       }
@@ -276,6 +257,24 @@ export type Database = {
           track_title?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      music_settings: {
+        Row: {
+          updated_at: string
+          user_id: string
+          volume: number
+        }
+        Insert: {
+          updated_at?: string
+          user_id: string
+          volume?: number
+        }
+        Update: {
+          updated_at?: string
+          user_id?: string
+          volume?: number
         }
         Relationships: []
       }
@@ -329,6 +328,45 @@ export type Database = {
           },
         ]
       }
+      payment_methods: {
+        Row: {
+          created_at: string
+          id: string
+          issuer_name: string
+          issuer_slug: string | null
+          kind: Database["public"]["Enums"]["payment_kind"]
+          label: string | null
+          last4: string | null
+          network: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          issuer_name: string
+          issuer_slug?: string | null
+          kind: Database["public"]["Enums"]["payment_kind"]
+          label?: string | null
+          last4?: string | null
+          network?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          issuer_name?: string
+          issuer_slug?: string | null
+          kind?: Database["public"]["Enums"]["payment_kind"]
+          label?: string | null
+          last4?: string | null
+          network?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       subscription_notifications: {
         Row: {
           channel: Database["public"]["Enums"]["notification_channel"]
@@ -372,9 +410,9 @@ export type Database = {
       }
       subscriptions: {
         Row: {
-          payment_method_id: string | null
           amount: number
           billing_cycle: Database["public"]["Enums"]["billing_cycle"]
+          cancelled_at: string | null
           category: Database["public"]["Enums"]["subscription_category"]
           color: string | null
           created_at: string
@@ -384,13 +422,12 @@ export type Database = {
           icon_url: string | null
           id: string
           interval_count: number
-          is_cancelled: boolean
-          is_paused: boolean
           is_trial: boolean
           name: string
           next_renewal_at: string | null
           notes: string | null
           notification_channels: Database["public"]["Enums"]["notification_channel"][]
+          payment_method_id: string | null
           plan_type: string | null
           provider: string | null
           reminder_offsets_days: number[] | null
@@ -401,9 +438,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
-          payment_method_id?: string | null
           amount?: number
           billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
+          cancelled_at?: string | null
           category?: Database["public"]["Enums"]["subscription_category"]
           color?: string | null
           created_at?: string
@@ -413,13 +450,12 @@ export type Database = {
           icon_url?: string | null
           id?: string
           interval_count?: number
-          is_cancelled?: boolean
-          is_paused?: boolean
           is_trial?: boolean
           name: string
           next_renewal_at?: string | null
           notes?: string | null
           notification_channels?: Database["public"]["Enums"]["notification_channel"][]
+          payment_method_id?: string | null
           plan_type?: string | null
           provider?: string | null
           reminder_offsets_days?: number[] | null
@@ -430,9 +466,9 @@ export type Database = {
           user_id: string
         }
         Update: {
-          payment_method_id?: string | null
           amount?: number
           billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
+          cancelled_at?: string | null
           category?: Database["public"]["Enums"]["subscription_category"]
           color?: string | null
           created_at?: string
@@ -442,13 +478,12 @@ export type Database = {
           icon_url?: string | null
           id?: string
           interval_count?: number
-          is_cancelled?: boolean
-          is_paused?: boolean
           is_trial?: boolean
           name?: string
           next_renewal_at?: string | null
           notes?: string | null
           notification_channels?: Database["public"]["Enums"]["notification_channel"][]
+          payment_method_id?: string | null
           plan_type?: string | null
           provider?: string | null
           reminder_offsets_days?: number[] | null
@@ -458,37 +493,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
-      }
-      payment_methods: {
-        Row: {
-          id: string
-          user_id: string
-          kind: Database["public"]["Enums"]["payment_kind"]
-          issuer_slug: string | null
-          issuer_name: string
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          kind?: Database["public"]["Enums"]["payment_kind"]
-          issuer_slug?: string | null
-          issuer_name: string
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          kind?: Database["public"]["Enums"]["payment_kind"]
-          issuer_slug?: string | null
-          issuer_name?: string
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_payment_method_id_fkey"
+            columns: ["payment_method_id"]
+            isOneToOne: false
+            referencedRelation: "payment_methods"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_profiles: {
         Row: {
@@ -622,10 +635,16 @@ export type Database = {
         | "one_off"
       delivery_status: "pending" | "sent" | "failed" | "skipped"
       notification_channel: "telegram" | "whatsapp" | "email" | "in_app"
+      payment_kind:
+        | "credit_card"
+        | "debit_card"
+        | "fpx"
+        | "e_wallet"
+        | "other"
+        | "bank_account"
       subscription_category:
         | "streaming"
         | "utilities"
-        | "telecom"
         | "saas"
         | "ai"
         | "music"
@@ -634,16 +653,10 @@ export type Database = {
         | "finance"
         | "education"
         | "cloud"
+        | "other"
         | "news"
         | "health"
-        | "other"
-      payment_kind:
-        | "credit_card"
-        | "debit_card"
-        | "fpx"
-        | "e_wallet"
-        | "other"
-        | "bank_account"
+        | "telecom"
       usage_state: "light" | "medium" | "heavy"
     }
     CompositeTypes: {
@@ -784,10 +797,17 @@ export const Constants = {
       ],
       delivery_status: ["pending", "sent", "failed", "skipped"],
       notification_channel: ["telegram", "whatsapp", "email", "in_app"],
+      payment_kind: [
+        "credit_card",
+        "debit_card",
+        "fpx",
+        "e_wallet",
+        "other",
+        "bank_account",
+      ],
       subscription_category: [
         "streaming",
         "utilities",
-        "telecom",
         "saas",
         "ai",
         "music",
@@ -796,9 +816,10 @@ export const Constants = {
         "finance",
         "education",
         "cloud",
+        "other",
         "news",
         "health",
-        "other",
+        "telecom",
       ],
       usage_state: ["light", "medium", "heavy"],
     },

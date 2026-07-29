@@ -9,6 +9,7 @@ import {
   chargeDatesInRange,
   grossMonthlyCost,
   isActive,
+  isCancelled,
   isTrialConvertingWithin,
   monthlyAmount,
   yearlyAmount,
@@ -30,7 +31,7 @@ import { SubscriptionIcon } from "./subscription-icon";
 export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subscription[] }) {
   const stats = useMemo(() => {
     const active = subscriptions.filter(isActive);
-    const cancelled = subscriptions.filter((s) => s.isCancelled);
+    const cancelled = subscriptions.filter(isCancelled);
 
     const monthly = roundMoney(
       active.reduce((sum, s) => sum + toMYR(monthlyAmount(s), s.currency), 0),
@@ -61,7 +62,10 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
     // month, summed in MYR. Distinct from the normalized "monthly equivalent"
     // above (which smooths annual/weekly cycles to a per-month figure).
     const thisMonthBounds = monthBounds(now.getFullYear(), now.getMonth());
-    const thisMonthCharges = active.flatMap((sub) =>
+    // Iterate ALL subscriptions (not just active): a sub cancelled this month
+    // still counts charges that landed before its cutoff. `chargeDatesInRange`
+    // drops on/after-cutoff charges, so a long-cancelled sub contributes nothing.
+    const thisMonthCharges = subscriptions.flatMap((sub) =>
       chargeDatesInRange(sub, thisMonthBounds.startISO, thisMonthBounds.endISO).map((iso) => ({ sub, iso })),
     );
     const thisMonthTotal = roundMoney(
@@ -72,7 +76,7 @@ export function SubscriptionStatistics({ subscriptions }: { subscriptions: Subsc
       const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
       const { startISO, endISO } = monthBounds(d.getFullYear(), d.getMonth());
       const total = roundMoney(
-        active.reduce(
+        subscriptions.reduce(
           (sum, sub) =>
             sum + chargeDatesInRange(sub, startISO, endISO).reduce(
               (a) => a + toMYR(sub.amount, sub.currency),

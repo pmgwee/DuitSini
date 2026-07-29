@@ -5,7 +5,7 @@ import { addMonths } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Subscription } from "@/types/subscription";
 import { CATEGORY_META } from "@/lib/constants";
-import { chargeDatesInRange, isActive, subscriptionsChargingInRange } from "@/lib/domain/subscription";
+import { chargeDatesInRange, subscriptionsChargingInRange } from "@/lib/domain/subscription";
 import { calendarGrid, monthBounds, WEEKDAY_LABELS } from "@/lib/domain/calendar";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
 import { myrEquivalentOf, toMYR } from "@/lib/domain/fx";
@@ -62,7 +62,9 @@ export function SubscriptionCalendar({
     const lastISO = grid[grid.length - 1].iso;
     const map = new Map<string, DayCharge[]>();
     for (const sub of subscriptions) {
-      if (!isActive(sub)) continue;
+      // No `isActive` gate: a cancelled sub still shows charges dated before
+      // its `cancelledAt` cutoff, so navigating to a past month keeps what was
+      // actually paid. `chargeDatesInRange` drops on/after-cutoff charges.
       for (const iso of chargeDatesInRange(sub, firstISO, lastISO)) {
         const entry: DayCharge = {
           sub,
@@ -81,7 +83,6 @@ export function SubscriptionCalendar({
     const { startISO, endISO } = monthBounds(year, month);
     let n = 0;
     for (const sub of subscriptions) {
-      if (!isActive(sub)) continue;
       n += chargeDatesInRange(sub, startISO, endISO).length;
     }
     return n;

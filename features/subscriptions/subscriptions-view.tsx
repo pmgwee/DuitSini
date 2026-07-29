@@ -28,7 +28,7 @@ const TABS: Array<{ id: Tab; label: string; icon: LucideIcon }> = [
 
 /**
  * Tabbed Page-1 surface: Calendar (charges by day), All (every subscription,
- * searchable, incl. paused/cancelled), and Statistics (lazy-loaded).
+ * searchable, incl. cancelled), and Statistics (lazy-loaded).
  */
 export function SubscriptionsView({
   subscriptions,

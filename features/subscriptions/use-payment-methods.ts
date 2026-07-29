@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createPaymentMethod, listPaymentMethods } from "@/lib/data/actions";
+import {
+  createPaymentMethod,
+  deletePaymentMethod,
+  listPaymentMethods,
+} from "@/lib/data/actions";
 import type { PaymentMethod } from "@/types/payment-method";
 import type { PaymentMethodInput } from "@/lib/validation/payment-method";
 
@@ -43,5 +47,20 @@ export function usePaymentMethods() {
     return created;
   };
 
-  return { methods, loaded, create };
+  // Deletes via the server action and, on success, drops the method from the
+  // shared session cache — so the subscription-form picker reflects it too on
+  // the next open. Returns false (without mutating state) on failure so the
+  // caller can surface the error and keep the row.
+  const remove = async (id: string): Promise<boolean> => {
+    try {
+      await deletePaymentMethod(id);
+    } catch {
+      return false;
+    }
+    cache = (cache ?? []).filter((m) => m.id !== id);
+    setMethods(cache);
+    return true;
+  };
+
+  return { methods, loaded, create, remove };
 }

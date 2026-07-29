@@ -7,6 +7,7 @@ import {
   applySubscriptionPatch,
   computeNextRenewalInstant,
 } from "@/lib/domain/subscription";
+import { toISODate } from "@/lib/domain/dates";
 import type { SubscriptionRepository } from "../types";
 import { rowToPaymentMethod } from "./payment-method-repo";
 
@@ -46,8 +47,7 @@ export function rowToSubscription(row: SubRow): Subscription {
     nextRenewalAt: row.next_renewal_at ?? `${row.start_date}T09:00:00.000Z`,
     freeTrialEndAt: row.free_trial_end_at,
     isTrial: row.is_trial,
-    isPaused: row.is_paused,
-    isCancelled: row.is_cancelled,
+    cancelledAt: row.cancelled_at,
     unsubscribeUrl: row.unsubscribe_url,
     iconType: (row.icon_type as IconType) ?? "monogram",
     iconUrl: row.icon_url,
@@ -78,8 +78,7 @@ function subscriptionToColumns(sub: Subscription): UpdateRow {
     next_renewal_at: sub.nextRenewalAt,
     free_trial_end_at: sub.freeTrialEndAt,
     is_trial: sub.isTrial,
-    is_paused: sub.isPaused,
-    is_cancelled: sub.isCancelled,
+    cancelled_at: sub.cancelledAt,
     unsubscribe_url: sub.unsubscribeUrl,
     icon_type: sub.iconType,
     icon_url: sub.iconUrl,
@@ -144,8 +143,7 @@ export function createSupabaseSubscriptionRepository(
         next_renewal_at: nextRenewalAt,
         free_trial_end_at: input.freeTrialEndAt ?? null,
         is_trial: input.isTrial,
-        is_paused: false,
-        is_cancelled: false,
+        cancelled_at: null,
         unsubscribe_url: input.unsubscribeUrl ? input.unsubscribeUrl : null,
         icon_type: "monogram",
         color: input.color ?? null,
@@ -193,20 +191,11 @@ export function createSupabaseSubscriptionRepository(
       return (data?.length ?? 0) > 0;
     },
 
-    async setPaused(userId, id, paused) {
-      const { data, error } = await table()
-        .update({ is_paused: paused })
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select(WITH_METHOD)
-        .maybeSingle();
-      if (error) throw error;
-      return data ? rowToSubscription(data as unknown as SubRow) : null;
-    },
-
     async setCancelled(userId, id, cancelled) {
+      // Stamp the cutoff when stopping (bounds the charge series — past charges
+      // stay, future ones drop); clear it when restoring.
       const { data, error } = await table()
-        .update({ is_cancelled: cancelled })
+        .update({ cancelled_at: cancelled ? toISODate(new Date()) : null })
         .eq("id", id)
         .eq("user_id", userId)
         .select(WITH_METHOD)

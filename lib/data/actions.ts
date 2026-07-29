@@ -48,13 +48,11 @@ export async function deleteSubscription(id: string): Promise<void> {
   revalidatePath("/subscriptions");
 }
 
-export async function setSubscriptionPaused(id: string, paused: boolean): Promise<void> {
-  const userId = await getEffectiveUserId();
-  const repo = await getSubscriptionRepository();
-  await repo.setPaused(userId, id, paused);
-  revalidatePath("/subscriptions");
-}
-
+/**
+ * Stop (`cancelled = true`) or restore (`cancelled = false`) a subscription.
+ * Stopping stamps `cancelledAt = today`, which bounds the charge series so past
+ * charges stay on record and future ones drop. Restoring clears `cancelledAt`.
+ */
 export async function setSubscriptionCancelled(id: string, cancelled: boolean): Promise<void> {
   const userId = await getEffectiveUserId();
   const repo = await getSubscriptionRepository();
@@ -96,4 +94,24 @@ export async function deletePaymentMethod(id: string): Promise<void> {
   const repo = await getPaymentMethodRepository();
   await repo.remove(userId, id);
   revalidatePath("/subscriptions");
+}
+
+/**
+ * Read-only tally of how many subscriptions reference each payment method — the
+ * "used by N subscriptions" hint on the settings card. Goes through the
+ * subscription repo (not a direct DB count) so it works in mock mode too.
+ * Deleting a method is ON DELETE SET NULL, so this counts links, not a hard
+ * dependency — it only informs the user before they unlink.
+ */
+export async function getPaymentMethodUsageCounts(): Promise<Record<string, number>> {
+  const userId = await getEffectiveUserId();
+  const repo = await getSubscriptionRepository();
+  const subs = await repo.list(userId);
+  const counts: Record<string, number> = {};
+  for (const s of subs) {
+    if (s.paymentMethodId) {
+      counts[s.paymentMethodId] = (counts[s.paymentMethodId] ?? 0) + 1;
+    }
+  }
+  return counts;
 }
