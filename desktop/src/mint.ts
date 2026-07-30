@@ -61,7 +61,17 @@ export function requestMint(win: BrowserWindow, expectedOrigin: string): Promise
     const id = randomUUID();
     const timer = setTimeout(() => {
       PENDING.delete(id);
-      resolve({ ok: false, reason: "mint timed out" });
+      // A timeout means NOTHING answered — which almost always means the preload
+      // died before registering its listener, not that the network was slow (a
+      // failed fetch still replies, with a reason). Say so: the bare "mint timed
+      // out" sent four releases' worth of debugging at the mint/token code while
+      // the real fault was a preload crash. See preload.ts's header comment.
+      resolve({
+        ok: false,
+        reason:
+          "mint timed out — nothing answered the mint IPC. The preload most likely " +
+          "failed to load; look for 'PRELOAD FAILED' above.",
+      });
     }, MINT_TIMEOUT_MS);
 
     PENDING.set(id, (r) => {

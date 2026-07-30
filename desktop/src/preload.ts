@@ -84,9 +84,18 @@ ipcRenderer.on("duitsini:mint", async (_event, requestId: string) => {
 // ─── 2. PAGE-FACING SURFACE ─────────────────────────────────────────────────
 // Each exposure is independently guarded: one failing must not cascade.
 
-function expose(key: string, value: unknown): void {
+/**
+ * Expose a global, isolating any failure to that one global.
+ *
+ * The value is passed as a THUNK, not a value — that is the whole point. The
+ * original outage was `exposeInMainWorld("...", app.getVersion())`, where the
+ * argument is evaluated at the CALL SITE, before this function runs; a
+ * try/catch inside here would never have seen it. Building the value inside the
+ * try is what actually contains the failure.
+ */
+function expose(key: string, build: () => unknown): void {
   try {
-    contextBridge.exposeInMainWorld(key, value);
+    contextBridge.exposeInMainWorld(key, build());
   } catch (e) {
     // Never rethrow — a failed nicety must not abort the preload.
     console.error(`[duitsini] preload: could not expose ${key}: ${(e as Error).message}`);
@@ -100,16 +109,17 @@ function expose(key: string, value: unknown): void {
  * shells) and contextBridge defines it non-configurable/non-writable, so page
  * script cannot spoof or remove it. Do not strip it — the card depends on it.
  */
-expose("isDuitSiniDesktop", true);
+expose("isDuitSiniDesktop", () => true);
 
 /**
  * `window.duitsiniDesktopVersion` — the installed version, for the "vX.Y.Z"
  * footer badge. Handed in by the main process via `webPreferences.
  * additionalArguments` because `app.getVersion()` is unreachable from here.
  */
-const VERSION_FLAG = "--duitsini-version=";
-const version = process.argv.find((a) => a.startsWith(VERSION_FLAG))?.slice(VERSION_FLAG.length);
-if (version) expose("duitsiniDesktopVersion", version);
+expose("duitsiniDesktopVersion", () => {
+  const FLAG = "--duitsini-version=";
+  return process.argv.find((a) => a.startsWith(FLAG))?.slice(FLAG.length) ?? null;
+});
 
 /**
  * `window.duitsiniUpdater` — powers the header "update available" badge. The
@@ -117,7 +127,7 @@ if (version) expose("duitsiniDesktopVersion", version);
  * calls `openPopup`/`restart` on click. No capability beyond what the tray
  * already exposes; it is only the *surface* that's new.
  */
-expose("duitsiniUpdater", {
+expose("duitsiniUpdater", () => ({
   getState: (): Promise<unknown> => ipcRenderer.invoke("duitsini:update-state:get"),
   openPopup: (): void => {
     ipcRenderer.send("duitsini:update-open-popup");
@@ -125,4 +135,4 @@ expose("duitsiniUpdater", {
   restart: (): void => {
     ipcRenderer.send("duitsini:update-install");
   },
-});
+}));
