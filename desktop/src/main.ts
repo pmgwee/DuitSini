@@ -8,12 +8,19 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
 import { Store } from "./store";
 import { TokenHolder } from "./mint";
-import { applyChromeIdentity, chromeUserAgent } from "./useragent";
+import {
+  DEEP_LINK_SCHEME,
+  completionUrl,
+  deepLinkFromArgv,
+  isOAuthAuthorize,
+  parseCallback,
+  toDesktopAuthorizeUrl,
+} from "./oauth";
 
 /**
  * DuitSini Desktop — a shell, not a port.
@@ -125,30 +132,33 @@ function createWindow(): void {
 
   win.once("ready-to-show", () => win?.show());
 
-  // Keep in-window navigation on known hosts; send anything else outward.
-  // Logged in dev because a wrongly-blocked hop looks like "sign-in silently
-  // failed", not like a navigation problem — see ALLOWED_HOSTS above.
   win.webContents.on("will-navigate", (event, url) => {
+    // Provider hand-off: Google will not serve its consent screen to an
+    // embedded webview, so this one navigation goes to the real browser with
+    // `redirect_to` pointed back at us. See oauth.ts for why this needs no
+    // cookie surgery.
+    if (isOAuthAuthorize(url)) {
+      event.preventDefault();
+      const external = toDesktopAuthorizeUrl(url);
+      if (isDev) console.log(`[duitsini] OAuth → system browser: ${external}`);
+      void shell.openExternal(external);
+      return;
+    }
+
+    // Keep everything else on known hosts; send the rest outward. Logged in dev
+    // because a wrongly-blocked hop looks like "sign-in silently failed" rather
+    // than like a navigation problem.
     if (isAllowed(url)) return;
     if (isDev) console.log(`[duitsini] blocked in-window nav → ${url} (opening externally)`);
     event.preventDefault();
     void shell.openExternal(url);
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    // Some OAuth flows open a popup rather than redirecting in place. Denying
-    // those would break sign-in the same way a blocked redirect does, so an
-    // allow-listed target gets a real popup window; everything else (outbound
-    // links the user clicked) goes to the system browser.
-    if (isAllowed(url)) {
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          width: 520,
-          height: 700,
-          autoHideMenuBar: true,
-          webPreferences: { contextIsolation: true, nodeIntegration: false },
-        },
-      };
+    // Same hand-off as will-navigate, for flows that open OAuth in a popup
+    // instead of redirecting in place.
+    if (isOAuthAuthorize(url)) {
+      void shell.openExternal(toDesktopAuthorizeUrl(url));
+      return { action: "deny" };
     }
     void shell.openExternal(url);
     return { action: "deny" };
@@ -262,33 +272,77 @@ async function startCollection(): Promise<void> {
   await scheduler.start();
 }
 
+/**
+ * Claim `duitsini://` with the OS so the browser can hand the auth code back.
+ *
+ * Unpackaged runs need the electron binary plus the script path, otherwise the
+ * OS would try to launch `electron.exe` with no app and the link would appear
+ * to do nothing.
+ */
+function registerProtocolClient(): void {
+  if (process.defaultApp) {
+    const script = process.argv[1];
+    if (script) {
+      app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [resolve(script)]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  }
+}
+
+/**
+ * Finish sign-in with the code the browser just handed us.
+ *
+ * We do not exchange it here — we hand it to the web app's own
+ * `/auth/callback`, which pairs it with the PKCE verifier already in this
+ * window's cookie jar and sets the session itself.
+ */
+function handleDeepLink(link: string): void {
+  const params = parseCallback(link);
+  if (!params) return;
+  if (isDev) console.log(`[duitsini] deep link received (code=${params.code ? "yes" : "no"})`);
+
+  if (!win) createWindow();
+  if (!win) return;
+  if (!win.isVisible()) win.show();
+  win.focus();
+  void win.loadURL(completionUrl(appOrigin, params));
+}
+
 // Single instance: a second launch focuses the running window instead of
 // starting a second collector against the same account.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  registerProtocolClient();
+
+  // Windows/Linux: a deep link launches (or re-activates) the app with the URL
+  // appended to argv, and the single-instance lock routes it to the running
+  // instance rather than starting a second collector.
+  app.on("second-instance", (_e, argv) => {
     if (win) {
       if (!win.isVisible()) win.show();
       win.focus();
     }
+    const link = deepLinkFromArgv(argv);
+    if (link) handleDeepLink(link);
   });
 
-  // Baseline identity for anything that loads before the per-contents override
-  // attaches. Set before any window exists.
-  app.userAgentFallback = chromeUserAgent();
-
-  // Applies to the main window AND to any OAuth popup, which is created by
-  // Chromium rather than by us and would otherwise keep the Electron identity.
-  app.on("web-contents-created", (_e, contents) => {
-    applyChromeIdentity(contents, (line) => {
-      if (isDev) console.log(`[duitsini] ${line}`);
-    });
+  // macOS delivers it as an event instead.
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
   });
 
   void app.whenReady().then(async () => {
     createWindow();
     createTray();
+
+    // Cold start: the OS launched us BECAUSE of the deep link, so it is in our
+    // own argv rather than arriving via second-instance.
+    const initial = deepLinkFromArgv(process.argv);
+    if (initial) handleDeepLink(initial);
+
     await startCollection();
 
     app.on("activate", () => {

@@ -149,23 +149,52 @@ Icons are generated, not committed as opaque blobs:
 node scripts/make-icons.mjs
 ```
 
+## Required one-time setup: the OAuth redirect
+
+Add this to **Supabase → Authentication → URL Configuration → Redirect URLs**:
+
+```
+duitsini://auth/callback
+```
+
+Without it, Google sign-in fails at the last hop with `redirect_to is not
+allowed`. It is dashboard configuration, not code — nothing in the web app
+changes.
+
+## Google sign-in
+
+Sign-in happens in the user's **real browser**, not in the app window. That is
+the RFC 8252 ("OAuth 2.0 for Native Apps") recommendation and what Notion,
+Spotify and Claude Desktop do. Google deliberately refuses to serve its consent
+screen to an embedded webview — an earlier attempt to spoof a Chrome identity
+was removed, because it fights an anti-abuse system that keeps tightening and it
+hides the real URL bar at exactly the moment the user types a password.
+
+The part that looks hard — "the browser has the session, the app doesn't" — is
+avoided by intercepting one step earlier:
+
+1. The user clicks **Continue with Google** in the app window, so the web app's
+   own Supabase client writes its PKCE **code-verifier cookie into this app's
+   cookie jar**.
+2. It navigates to `…supabase.co/auth/v1/authorize?…`. We cancel that, rewrite
+   **only** `redirect_to` → `duitsini://auth/callback`, and open it in the
+   system browser. `code_challenge` is left untouched — it must keep matching
+   the verifier from step 1.
+3. The user signs in to Google normally, in a real browser.
+4. Supabase redirects to `duitsini://auth/callback?code=…`; the OS hands it to
+   the app (registered via `app.setAsDefaultProtocolClient`).
+5. The app loads `<app>/auth/callback?code=…` in its window, and the web app's
+   **existing** route exchanges the code against that verifier and sets the
+   session.
+
+So the browser never holds a session, this app never parses or writes an auth
+cookie, and `app/auth/callback/route.ts` is used exactly as written. See
+`oauth.ts`.
+
 ## Known gaps
 
-- **Google OAuth** works by presenting a stock Chrome identity — see
-  `useragent.ts`. Two failures had to be fixed to get there, both worth knowing
-  before touching that file or the navigation allow-list:
-  1. The Supabase callback host was not allow-listed, so `will-navigate`
-     cancelled that hop and `shell.openExternal` finished sign-in in the user's
-     real browser while the window sat on the login page.
-  2. Rewriting only the UA *string* left `Sec-CH-UA` headers and
-     `navigator.userAgentData` still reporting Electron, which Google reads.
-     Only `Emulation.setUserAgentOverride` changes all three coherently.
-
-  If Google ever moves past this, the remaining fallback is `shell.openExternal`
-  plus a `duitsini://` protocol handler — that needs the redirect added to
-  Supabase's allow-list (dashboard config) and, unlike everything so far, a
-  change to how the web app sets `redirectTo`.
 - Codex / Kimi collectors are not implemented yet; the collector interface is
   shaped for them.
 - No auto-update feed is configured; `electron-updater` is wired but inert until
   a publish target exists.
+- Builds are unsigned.
