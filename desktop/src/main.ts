@@ -46,6 +46,8 @@ let tray: Tray | null = null;
 let scheduler: Scheduler | null = null;
 let quitting = false;
 let lastStatus: Status = { kind: "idle" };
+/** Tracks which update version we've already toasted, so we balloon once each. */
+let balloonShownFor: string | null = null;
 
 const store = new Store(Store.pathFor(app.getPath("userData")));
 const tokens = new TokenHolder(() => win, appOriginOf());
@@ -527,8 +529,29 @@ if (!app.requestSingleInstanceLock()) {
       await updater.init((line) => {
         if (isDev) console.log(`[duitsini] ${line}`);
       });
-      // Rebuild the tray the moment an update is detected so the badge appears.
-      updater.onState(() => buildTrayMenu());
+      // Rebuild the tray menu the moment an update is detected, AND fire a
+      // Windows toast so the update can't hide in the right-click menu (the tray
+      // icon itself doesn't visibly change). One toast per version; clicking it
+      // opens the update popup.
+      updater.onState((s) => {
+        buildTrayMenu();
+        if (
+          s.kind === "available" &&
+          balloonShownFor !== s.version &&
+          tray &&
+          !tray.isDestroyed()
+        ) {
+          balloonShownFor = s.version;
+          tray.displayBalloon({
+            iconType: "info",
+            title: "DuitSini update available",
+            content: `v${s.version} is ready — click to update.`,
+          });
+        }
+      });
+      tray?.on("balloon-click", () => {
+        if (updater.getState().kind === "available") openUpdatePopup();
+      });
       void updater.checkNow();
     }
   });
