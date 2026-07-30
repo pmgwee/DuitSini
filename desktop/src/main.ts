@@ -193,6 +193,12 @@ function createWindow(): void {
     win = null;
   });
 
+  // The scheduler's first tick usually races the initial window load and skips
+  // its push ("app not ready"). Once the page is up the session cookie is in the
+  // jar, so nudge one push on startup — covers the already-signed-in restart
+  // case (a fresh login is already covered by completeSignIn's pullNow).
+  win.webContents.once("did-finish-load", () => void scheduler?.pullNow());
+
   void win.loadURL(APP_URL);
 }
 
@@ -360,7 +366,10 @@ function completeSignIn(params: CallbackParams, via: string): void {
           });
         }
       } else if (u.pathname === "/subscriptions" || u.pathname === "/") {
-        console.log(`[duitsini] signed in → ${u.pathname}`);
+        console.log(`[duitsini] signed in → ${u.pathname}; pushing usage now`);
+        // Fresh session just landed — push immediately instead of waiting up to
+        // a full cadence cycle, so usage appears on the dashboard right away.
+        void scheduler?.pullNow();
       }
     } catch {
       /* a non-url commit — ignore */

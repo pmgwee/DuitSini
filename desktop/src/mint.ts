@@ -114,11 +114,21 @@ export class TokenHolder {
 
     this.inflight = (async () => {
       const win = this.getWindow();
-      if (!win) return null;
+      if (!win) {
+        console.log("[duitsini] mint: no window");
+        return null;
+      }
       const r = await requestMint(win, this.appOrigin);
-      if (!r.ok) return null;
+      if (!r.ok) {
+        // Surface the real reason — "app not ready" (window still loading), "not
+        // on the app origin", "signed-out" (401), or "mint timed out" all look
+        // identical from the scheduler's side without this.
+        console.log(`[duitsini] mint failed: ${r.reason}`);
+        return null;
+      }
       this.token = r.token;
       this.account = r.account;
+      console.log(`[duitsini] mint ok${r.account ? ` (${r.account})` : ""}`);
       return r.token;
     })();
 

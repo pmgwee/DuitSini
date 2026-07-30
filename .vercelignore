@@ -1,0 +1,5 @@
+# The Electron desktop shell (desktop/) is a separate pnpm root that builds
+# locally into a Windows/macOS/Linux app. It has no role in the web deploy, and
+# its source imports `electron` — which is not a dependency here and would break
+# Next.js's build-time type-check if it were uploaded. Keep it out of Vercel.
+desktop/

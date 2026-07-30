@@ -112,14 +112,21 @@ export class Scheduler {
       // see `localOwner` below.
       const provider = await detectProvider();
       const claudeIsOfficial = !provider || provider.official;
+      this.deps.log(
+        `provider: ${provider ? `${provider.gateway_host ?? "anthropic"} (${provider.source})` : "none"} official=${claudeIsOfficial} monitor=${!!provider?.monitorUrl} key=${!!provider?.authToken}`,
+      );
 
       const streams: UsageStream[] = [];
       const claude = await this.collectClaude(claudeIsOfficial);
       if (claude) streams.push(claude);
       const glm = await this.collectGlm(provider);
       if (glm) streams.push(glm);
+      this.deps.log(`collected: claude=${!!claude} glm=${!!glm}`);
 
-      if (streams.length === 0) return;
+      if (streams.length === 0) {
+        this.deps.log("no usage streams this cycle — nothing to push");
+        return;
+      }
       await this.push(streams);
       this.lastPushAt = Date.now();
       await this.deps.store.save();
@@ -166,6 +173,8 @@ export class Scheduler {
     };
 
     if (now < st.nextAt) {
+      const mins = Math.max(1, Math.ceil((st.nextAt - now) / 60_000));
+      this.deps.log(`[Claude] cooling down ${mins}m (${st.message || "rate limit"})`);
       return estimateStream(st.message || "cooling down after a rate limit");
     }
     // A cached authoritative reading is still the better answer.
@@ -297,6 +306,7 @@ export class Scheduler {
   private async push(streams: UsageStream[]): Promise<void> {
     const token = await this.deps.getToken();
     if (!token) {
+      this.deps.log("push skipped: no bridge token (not signed in yet)");
       this.deps.onStatus({ kind: "error", reason: "Sign in to DuitSini to share usage." });
       return;
     }
@@ -321,6 +331,8 @@ export class Scheduler {
     if (!r.ok) {
       const detail = await r.text().catch(() => "");
       this.deps.log(`push failed (${r.status}) ${detail.slice(0, 160)}`);
+    } else {
+      this.deps.log(`push ok (${streams.length} stream${streams.length === 1 ? "" : "s"}: ${streams.map((s) => s.source).join(",")})`);
     }
   }
 }
