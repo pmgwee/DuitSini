@@ -1,0 +1,12 @@
+# Update feed used ONLY by an unpackaged run started with DUITSINI_UPDATER_DEV=1
+# (electron-updater's forceDevUpdateConfig). Mirrors what electron-builder bakes
+# into resources/app-update.yml for real installs, so a local run exercises the
+# same GitHub feed the shipped app reads.
+#
+# Verify the updater without cutting a release:
+#   DUITSINI_UPDATER_DEV=1 pnpm dev
+# Temporarily lower "version" in package.json to simulate being out of date.
+owner: pmgwee
+repo: DuitSini
+provider: github
+updaterCacheDirName: duitsini-desktop-updater

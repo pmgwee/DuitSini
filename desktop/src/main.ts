@@ -4,6 +4,7 @@ import {
   dialog,
   Menu,
   nativeImage,
+  Notification,
   session,
   shell,
   Tray,
@@ -49,8 +50,80 @@ let tray: Tray | null = null;
 let scheduler: Scheduler | null = null;
 let quitting = false;
 let lastStatus: Status = { kind: "idle" };
-/** Tracks which update version we've already toasted, so we balloon once each. */
+/** Tracks which update version we've already toasted, so we notify once each. */
 let balloonShownFor: string | null = null;
+
+/**
+ * How often a RUNNING app re-checks for updates.
+ *
+ * A startup-only check is useless for this app: the window closes to the tray
+ * rather than quitting, so a typical install runs for days. A release published
+ * after launch was therefore never discovered — the update badge and the toast
+ * had nothing to fire on, which looked exactly like "the badge is broken".
+ */
+const UPDATE_CHECK_MS = 30 * 60_000;
+/** Floor between automatic checks, so window-show can't hammer the feed. */
+const UPDATE_CHECK_MIN_GAP_MS = 5 * 60_000;
+let lastUpdateCheckAt = 0;
+
+/**
+ * Every update check goes through here so each one is throttled and journaled.
+ * `manual` (the tray item) bypasses the gap — the user asked explicitly.
+ */
+/** Packaged builds, plus an explicit dev opt-in for verifying the feed locally. */
+function updaterEnabled(): boolean {
+  return app.isPackaged || process.env.DUITSINI_UPDATER_DEV === "1";
+}
+
+async function checkForUpdates(trigger: string): Promise<void> {
+  if (!updaterEnabled()) return; // electron-updater needs a packaged build
+  // Not yet wired: the window can be shown before init() resolves, and stamping
+  // the throttle clock for a call that does nothing would suppress the real
+  // startup check for the next 5 minutes.
+  if (!updater.isReady()) return;
+  const now = Date.now();
+  // `startup` and `manual` always run — the gap exists to stop `window-show`
+  // and the periodic timer from piling up, not to skip the first real check.
+  const throttled = trigger !== "manual" && trigger !== "startup";
+  if (throttled && now - lastUpdateCheckAt < UPDATE_CHECK_MIN_GAP_MS) return;
+  lastUpdateCheckAt = now;
+  usageTracker.event("updater_check", { trigger, current: app.getVersion() });
+  await updater.checkNow();
+}
+
+/**
+ * Tell the user a new version exists.
+ *
+ * `tray.displayBalloon` is the legacy Windows path and is frequently swallowed
+ * on Windows 10/11. Electron's `Notification` maps to a real toast when the app
+ * has a Start-menu shortcut (the NSIS installer creates one) and an AppUserModelID
+ * is set (see `setAppUserModelId` below), so prefer it and keep the balloon as a
+ * fallback rather than the only route.
+ */
+function notifyUpdateAvailable(version: string): void {
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({
+        title: "DuitSini update available",
+        body: `v${version} is ready — click to update.`,
+      });
+      n.on("click", () => openUpdatePopup());
+      n.show();
+      usageTracker.event("updater_notify", { version, via: "notification" });
+      return;
+    }
+  } catch (e) {
+    usageTracker.event("updater_notify_error", { version, message: (e as Error).message });
+  }
+  if (tray && !tray.isDestroyed()) {
+    tray.displayBalloon({
+      iconType: "info",
+      title: "DuitSini update available",
+      content: `v${version} is ready — click to update.`,
+    });
+    usageTracker.event("updater_notify", { version, via: "balloon" });
+  }
+}
 
 const store = new Store(Store.pathFor(app.getPath("userData")));
 const tokens = new TokenHolder(() => win, appOriginOf());
@@ -218,6 +291,11 @@ function createWindow(): void {
 
   win.once("ready-to-show", () => win?.show());
 
+  // Coming back to the window is the moment the user is most likely to act on
+  // an update, and for a tray app it may be days after launch. Throttled inside
+  // checkForUpdates, so re-showing repeatedly costs nothing.
+  win.on("show", () => void checkForUpdates("window-show"));
+
   win.webContents.on("will-navigate", (event, url) => {
     // Provider hand-off: Google will not serve its consent screen to an
     // embedded webview, so this one navigation goes to the real browser with
@@ -364,7 +442,7 @@ function updateMenuItem(): MenuItemConstructorOptions {
   if (s.kind === "checking") {
     return { label: "Checking for updates…", enabled: false };
   }
-  return { label: "Check for updates", click: () => void updater.checkNow() };
+  return { label: "Check for updates", click: () => void checkForUpdates("manual") };
 }
 
 /**
@@ -554,6 +632,11 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(async () => {
+    // Windows toasts are attributed by AppUserModelID. Without one matching the
+    // installer's appId, `new Notification()` can be dropped silently — which is
+    // precisely the "no toast appeared" symptom. Must match electron-builder.yml.
+    if (process.platform === "win32") app.setAppUserModelId("com.duitsini.desktop");
+
     // Bind the loopback listener first so callbackTarget() is resolved before
     // the window loads and before any sign-in can happen.
     loopback = await startLoopback((params) => completeSignIn(params, "loopback"));
@@ -583,37 +666,56 @@ if (!app.requestSingleInstanceLock()) {
       else win?.show();
     });
 
-    if (app.isPackaged) {
-      // electron-updater can only run from a packaged build (it reads
-      // app-update.yml baked in at build time). The user stays in control:
-      // nothing downloads until they click "Update to vX" in the popup.
-      await updater.init((line) => {
-        if (isDev) console.log(`[duitsini] ${line}`);
-      });
+    console.log(
+      `[duitsini] updater gate: packaged=${app.isPackaged} devFlag=${process.env.DUITSINI_UPDATER_DEV ?? "unset"} enabled=${updaterEnabled()}`,
+    );
+    if (app.isPackaged || process.env.DUITSINI_UPDATER_DEV === "1") {
+      // Normally packaged-only (electron-updater reads the baked-in
+      // app-update.yml), but DUITSINI_UPDATER_DEV=1 points it at
+      // dev-app-update.yml so the check can be verified without cutting a
+      // release. The user stays in control either way: nothing downloads until
+      // they click "Update to vX" in the popup.
+      // NOT gated on isDev. A packaged build is the only place the updater ever
+      // runs, so gating its log there left the feature with zero diagnostics —
+      // which is why "no badge appeared" was impossible to tell apart from "no
+      // update was found". Also journaled, so the user can read it from the tray
+      // ("Open usage log") without launching from a terminal.
+      // Guarded because `init()` is AWAITED inside app.whenReady(): a throw in
+      // there becomes an unhandled rejection that silently abandons everything
+      // below — the startup check, the periodic timer, the toast wiring. That is
+      // precisely how auto-update stayed dead from v1.0.0 to v1.1.6 with no
+      // visible error. A failed init must degrade to "no updates", never to
+      // "half the startup sequence didn't run".
+      try {
+        await updater.init((line) => {
+          console.log(`[duitsini] ${line}`);
+          usageTracker.event("updater", { line });
+        });
+      } catch (e) {
+        const message = (e as Error).message;
+        console.error(`[duitsini] [updater] init FAILED: ${message}`);
+        usageTracker.event("updater_init_failed", { message });
+      }
       // Rebuild the tray menu the moment an update is detected, AND fire a
       // Windows toast so the update can't hide in the right-click menu (the tray
       // icon itself doesn't visibly change). One toast per version; clicking it
       // opens the update popup.
       updater.onState((s) => {
         buildTrayMenu();
-        if (
-          s.kind === "available" &&
-          balloonShownFor !== s.version &&
-          tray &&
-          !tray.isDestroyed()
-        ) {
+        if (s.kind === "available" && balloonShownFor !== s.version) {
           balloonShownFor = s.version;
-          tray.displayBalloon({
-            iconType: "info",
-            title: "DuitSini update available",
-            content: `v${s.version} is ready — click to update.`,
-          });
+          notifyUpdateAvailable(s.version);
         }
       });
       tray?.on("balloon-click", () => {
         if (updater.getState().kind === "available") openUpdatePopup();
       });
-      void updater.checkNow();
+
+      void checkForUpdates("startup");
+      // The check that actually matters: this app lives in the tray for days at
+      // a time, so without a repeating check a release published after launch is
+      // never seen. `window-show` covers the user coming back to the app.
+      setInterval(() => void checkForUpdates("periodic"), UPDATE_CHECK_MS);
     }
   });
 }

@@ -54,6 +54,17 @@ export function getState(): UpdateState {
   return state;
 }
 
+/**
+ * Has `init()` actually wired an updater?
+ *
+ * Callers must check this before counting a check as "spent": the window can be
+ * shown (and fire its check trigger) before init resolves, and a no-op call that
+ * still stamped the throttle clock would suppress the real startup check.
+ */
+export function isReady(): boolean {
+  return autoUpdater !== null;
+}
+
 export function attachPopup(win: BrowserWindow | null): void {
   popup = win;
 }
@@ -76,8 +87,30 @@ function emitDownloaded(version: string): void {
 export async function init(log: (line: string) => void): Promise<void> {
   if (autoUpdater) return; // already wired
   try {
-    const mod = await import("electron-updater");
-    autoUpdater = mod.autoUpdater;
+    /**
+     * `electron-updater` is CommonJS and exposes `autoUpdater` as a LAZY GETTER.
+     * Node's cjs-module-lexer cannot see getters, so the ESM namespace from
+     * `await import()` has no `autoUpdater` key at all — `mod.autoUpdater` is
+     * `undefined`, while `mod.default.autoUpdater` is the real object. Verified
+     * by enumeration on Electron 43:
+     *   mod.autoUpdater         -> undefined
+     *   mod.default.autoUpdater -> object
+     *
+     * Reading the named export is what broke auto-update from v1.0.0 to v1.1.6:
+     * the next line threw, `init()` rejected as an unhandled rejection, and the
+     * startup check never ran — so no update was ever detected, and the badge,
+     * toast and tray item had nothing to show. Take `.default` first, keep the
+     * named export as a fallback in case a future release flips the shape.
+     */
+    const mod = (await import("electron-updater")) as unknown as {
+      default?: { autoUpdater?: import("electron-updater").AppUpdater };
+      autoUpdater?: import("electron-updater").AppUpdater;
+    };
+    autoUpdater = mod.default?.autoUpdater ?? mod.autoUpdater ?? null;
+    if (!autoUpdater) {
+      log("[updater] electron-updater loaded but exposes no autoUpdater — updates disabled");
+      return;
+    }
   } catch (e) {
     log(`[updater] electron-updater unavailable: ${(e as Error).message}`);
     return;
@@ -85,6 +118,22 @@ export async function init(log: (line: string) => void): Promise<void> {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+
+  /**
+   * Let an UNPACKAGED run exercise the real update check (DUITSINI_UPDATER_DEV=1).
+   *
+   * Without this the updater could only ever be observed in a shipped build, so
+   * "does the badge/toast actually fire?" was untestable before release — which
+   * is how a startup-only check survived from v1.1.1 to v1.1.6 unnoticed. With
+   * it, `dev-app-update.yml` supplies the feed and the whole chain (fetch →
+   * compare → update-available → state → toast) can be verified locally.
+   *
+   * Download/install remain user-driven, so this only makes the CHECK reachable.
+   */
+  if (!app.isPackaged) {
+    autoUpdater.forceDevUpdateConfig = true;
+    log("[updater] dev mode: forcing dev-app-update.yml feed");
+  }
 
   autoUpdater.on("checking-for-update", () => {
     setState({ kind: "checking" });
@@ -129,6 +178,8 @@ export async function init(log: (line: string) => void): Promise<void> {
     setState({ kind: "error", message: err?.message ?? "unknown error" });
     log(`[updater] error: ${err?.message ?? "unknown"}`);
   });
+
+  log(`[updater] initialised (current v${app.getVersion()})`);
 }
 
 /** Manual / startup check. No-op if autoUpdater never loaded (dev). */
