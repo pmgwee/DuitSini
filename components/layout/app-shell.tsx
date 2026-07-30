@@ -18,6 +18,7 @@ import { UserMenu, type AuthUser } from "@/components/layout/user-menu";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
 import { DesktopVersionBadge } from "@/components/layout/desktop-version-badge";
+import { UpdateHeaderBadge } from "@/components/layout/update-header-badge";
 import { useMusicPlayer } from "@/features/dashboard/music/player-context";
 import { MiniPlayer } from "@/features/dashboard/music/mini-player";
 import { RouteProgress, startRouteProgress } from "@/components/layout/route-progress";
@@ -97,6 +98,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
             {activeNav?.label ?? "DuitSini"}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            <UpdateHeaderBadge />
             <ThemeToggle />
             <AddSubscriptionButton size="sm" label="Add" />
             {user ? <UserMenu user={user} /> : null}

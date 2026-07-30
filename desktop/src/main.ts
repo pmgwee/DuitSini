@@ -555,6 +555,11 @@ ipcMain.on("duitsini:update-info", (event) => {
 });
 ipcMain.on("duitsini:update-start", () => void updater.startDownload());
 ipcMain.on("duitsini:update-install", () => updater.installAndRestart());
+// In-app header update badge: the renderer polls the live updater state and, on
+// click, opens the same popup the tray uses. Polling (not a broadcast) keeps the
+// wiring robust to renderer reloads/navigation.
+ipcMain.handle("duitsini:update-state:get", () => updater.getState());
+ipcMain.on("duitsini:update-open-popup", () => openUpdatePopup());
 
 // Tray app: closing every window must not quit on Windows/Linux either.
 app.on("window-all-closed", () => {

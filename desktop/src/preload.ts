@@ -27,6 +27,22 @@ contextBridge.exposeInMainWorld("isDuitSiniDesktop", true);
 // the boolean above.
 contextBridge.exposeInMainWorld("duitsiniDesktopVersion", app.getVersion());
 
+/**
+ * In-app update bridge — powers the header "update available" badge. The page
+ * polls `getState` (a request/response IPC, robust to renderer reloads) and
+ * calls `openPopup`/`restart` on click. No capability beyond what the tray
+ * already exposes; it is only the *surface* that's new.
+ */
+contextBridge.exposeInMainWorld("duitsiniUpdater", {
+  getState: (): Promise<unknown> => ipcRenderer.invoke("duitsini:update-state:get"),
+  openPopup: (): void => {
+    ipcRenderer.send("duitsini:update-open-popup");
+  },
+  restart: (): void => {
+    ipcRenderer.send("duitsini:update-install");
+  },
+});
+
 const TOKEN_RE = /cub_[0-9a-f]{48}/;
 
 ipcRenderer.on("duitsini:mint", async (_event, requestId: string) => {
