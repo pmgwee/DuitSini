@@ -151,11 +151,20 @@ node scripts/make-icons.mjs
 
 ## Known gaps
 
-- **Google OAuth** relies on presenting a clean Chrome user-agent
-  (`chromeUserAgent()` in `main.ts`). If Google tightens beyond UA sniffing, the
-  fallback is `shell.openExternal` + a `duitsini://` protocol handler, which
-  needs that redirect added to Supabase's allow-list (dashboard config, not
-  code).
+- **Google OAuth** works by presenting a stock Chrome identity — see
+  `useragent.ts`. Two failures had to be fixed to get there, both worth knowing
+  before touching that file or the navigation allow-list:
+  1. The Supabase callback host was not allow-listed, so `will-navigate`
+     cancelled that hop and `shell.openExternal` finished sign-in in the user's
+     real browser while the window sat on the login page.
+  2. Rewriting only the UA *string* left `Sec-CH-UA` headers and
+     `navigator.userAgentData` still reporting Electron, which Google reads.
+     Only `Emulation.setUserAgentOverride` changes all three coherently.
+
+  If Google ever moves past this, the remaining fallback is `shell.openExternal`
+  plus a `duitsini://` protocol handler — that needs the redirect added to
+  Supabase's allow-list (dashboard config) and, unlike everything so far, a
+  change to how the web app sets `redirectTo`.
 - Codex / Kimi collectors are not implemented yet; the collector interface is
   shaped for them.
 - No auto-update feed is configured; `electron-updater` is wired but inert until
