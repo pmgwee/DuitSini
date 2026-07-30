@@ -87,8 +87,10 @@ export default async function DownloadPage() {
           babysit.
         </p>
 
-        {/* Download card */}
-        <div className="glass card-elevated mt-10 w-full max-w-md rounded-3xl border border-white/10 p-6 text-left backdrop-blur-xl">
+        {/* Download card — dark glass over the video (matches the landing page's
+            bg-black/70 pattern). The light-mode `glass` class would render a near-
+            white card that clashes with the cinematic video; dark glass integrates. */}
+        <div className="mt-10 w-full max-w-md rounded-3xl border border-white/15 bg-black/70 p-6 text-left shadow-2xl backdrop-blur-xl">
           {/* Windows */}
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
