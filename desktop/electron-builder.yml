@@ -1,0 +1,60 @@
+appId: com.duitsini.desktop
+productName: DuitSini
+copyright: Copyright © DuitSini
+
+# Installer-owned claim on the fallback deep-link scheme. Runtime registration
+# (main.ts) still happens for dev; declaring it here makes the NSIS/DMG installer
+# own the registry entry in packaged builds, which survives the Win8+ UserChoice
+# layer better than a runtime write and won't be shadowed by a stale dev entry.
+protocols:
+  - name: "DuitSini Auth"
+    schemes:
+      - duitsini
+
+directories:
+  output: release
+  buildResources: assets
+
+# The shell is tiny by design — it carries no copy of the web app, so there is
+# nothing here that goes stale between Vercel deploys.
+files:
+  - dist/**/*
+  - package.json
+  - "!**/*.map"
+
+# Tray/window icons must be readable at runtime from outside the asar.
+extraResources:
+  - from: assets
+    to: assets
+    filter:
+      - "**/*.png"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  icon: assets/icon.png
+  category: public.app-category.finance
+  # Unsigned for now: signing needs a paid Developer ID. Gatekeeper will warn on
+  # first launch — the README documents the right-click → Open workaround.
+  identity: null
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  icon: assets/icon.png
+  category: Office

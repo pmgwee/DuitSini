@@ -37,3 +37,4 @@ yarn-error.log*
 
 # autopilot (local-only plans + logs; see .claude/skills/README.md)
 /handoff/
+.playwright-mcp/

@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    // node16 (not the deprecated node10) with no "type" field in package.json
+    // emits CommonJS — which is what the Electron main process loads.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": ["ES2023", "DOM"],
+    "outDir": "dist",
+    // Rooted at the repo so the desktop app can compile the web app's existing
+    // `lib/bridge/sharer/backoff.ts` directly instead of copying its ladders.
+    // That module is the single source of truth for backoff math; duplicating it
+    // here would drift the moment either side is tuned. Emitted layout is
+    // therefore dist/desktop/src/* and dist/lib/*, hence `main` in package.json.
+    // Nothing under lib/ is written — it is read-only input to this build.
+    "rootDir": "..",
+    "strict": true,
+    // Deliberately OFF. `../lib/bridge/sharer/backoff.ts` is compiled in as the
+    // single source of truth for the backoff ladders, and it is authored under
+    // the root tsconfig, which does not set this flag (its `ladderAt` indexes a
+    // readonly tuple). The web app is not ours to edit here, so the flag yields
+    // rather than the shared module — code in src/ guards indexed access
+    // explicitly instead.
+    "noUncheckedIndexedAccess": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts", "../lib/bridge/sharer/backoff.ts"],
+  "exclude": ["node_modules", "dist"]
+}

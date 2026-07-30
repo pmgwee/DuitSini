@@ -1,0 +1,12 @@
+# Makes `desktop/` its own pnpm root.
+#
+# The repo root has a pnpm-workspace.yaml, so without this file `pnpm install`
+# run from here resolves upward and installs nothing for the desktop app. Owning
+# a root here keeps the desktop dependency tree completely separate from the web
+# app's — installing or upgrading Electron can never perturb the Next.js build.
+allowBuilds:
+  electron: true
+  # Squirrel.Windows packer — unused: the Windows target is NSIS (see
+  # electron-builder.yml), so its postinstall never needs to run.
+  electron-winstaller: false
+  esbuild: true
