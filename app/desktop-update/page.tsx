@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
@@ -48,7 +48,20 @@ const GITHUB_REPO = "DuitSini";
 
 type Phase = "idle" | "downloading" | "downloaded";
 
+/**
+ * useSearchParams() must be wrapped in <Suspense> for Next.js static generation
+ * (otherwise the build fails with "should be wrapped in a suspense boundary").
+ * The page default-export just provides that boundary.
+ */
 export default function DesktopUpdatePage() {
+  return (
+    <Suspense fallback={null}>
+      <DesktopUpdateContent />
+    </Suspense>
+  );
+}
+
+function DesktopUpdateContent() {
   const params = useSearchParams();
   const fromVersion = params.get("from") ?? "?";
   const toVersion = params.get("to") ?? "?";
