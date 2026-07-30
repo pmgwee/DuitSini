@@ -4,11 +4,12 @@ import {
   dialog,
   Menu,
   nativeImage,
+  session,
   shell,
   Tray,
   type MenuItemConstructorOptions,
 } from "electron";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
@@ -84,6 +85,40 @@ const usageTracker = createUsageTracker(
 let loopback: LoopbackHandle | null = null;
 function callbackTarget(): string {
   return loopback ? `${loopback.origin}/auth/callback` : DEEP_LINK_CALLBACK;
+}
+
+/**
+ * Drop the persisted web cache when the desktop's own version changed since the
+ * last launch (i.e. right after an update). The desktop loads the DEPLOYED web
+ * app, and Electron reuses the previous deploy's cached shell across the shared
+ * userData — so without this, an updated desktop renders the OLD web app until
+ * the cache happens to expire. Cookies/localStorage are preserved (no re-login).
+ */
+async function clearWebCacheIfVersionChanged(): Promise<void> {
+  const verFile = join(app.getPath("userData"), "last-launch-version");
+  let lastVer = "";
+  try {
+    lastVer = readFileSync(verFile, "utf8").trim();
+  } catch {
+    /* first launch, or file missing — nothing to clear */
+  }
+  const curVer = app.getVersion();
+  if (lastVer && lastVer !== curVer) {
+    try {
+      await session.defaultSession.clearCache();
+      await session.defaultSession.clearStorageData({
+        storages: ["cachestorage", "serviceworkers"],
+      });
+      console.log(`[duitsini] version ${lastVer} → ${curVer}: cleared web cache for a fresh deploy load`);
+    } catch (e) {
+      console.log(`[duitsini] cache clear failed: ${(e as Error).message}`);
+    }
+  }
+  try {
+    writeFileSync(verFile, curVer, "utf8");
+  } catch {
+    /* non-fatal */
+  }
 }
 
 /**
@@ -261,6 +296,10 @@ function buildTrayMenu(): void {
     { label: "Open DuitSini", click: () => (win ? (win.show(), win.focus()) : createWindow()) },
     { label: "Refresh usage now", click: () => void scheduler?.pullNow() },
     { label: "Open usage log", click: () => void shell.openPath(usageTracker.file) },
+    {
+      label: "Reload (bypass cache)",
+      click: () => win?.webContents.reloadIgnoringCache(),
+    },
     { type: "separator" },
     {
       label: "Start at login",
@@ -505,6 +544,12 @@ if (!app.requestSingleInstanceLock()) {
     console.log(
       `[duitsini] loopback ${loopback ? loopback.origin : "FAILED — OAuth falls back to duitsini://"}`,
     );
+
+    // If the desktop was just updated, the window's persisted web cache still
+    // holds the PREVIOUS deploy's shell and would render stale UI (deployed
+    // changes "not reflected"). Clear it — cookies/localStorage stay, so the
+    // user keeps their session; only the HTTP/service-worker caches are dropped.
+    await clearWebCacheIfVersionChanged();
 
     createWindow();
     createTray();
