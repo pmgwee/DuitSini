@@ -1,4 +1,4 @@
-import { ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 
 /**
  * Preload — runs in an ISOLATED world with `contextIsolation: true`.
@@ -13,7 +13,15 @@ import { ipcRenderer } from "electron";
  * document. Issuing it from here satisfies both naturally — the browser sets
  * `Sec-Fetch-Site: same-origin` itself and attaches cookies — with no header
  * spoofing and no change to the route.
+ *
+ * ONE deliberate exception: `window.isDuitSiniDesktop`. It is a single read-only
+ * boolean so the "Share your Claude usage" card can render the auto-tracking
+ * desktop copy instead of the .bat/Terminal script steps. It is NOT a capability
+ * (no IPC, no filesystem, no shells) and contextBridge defines it
+ * non-configurable/non-writable, so page script cannot spoof or remove it. Do
+ * not strip it — the card depends on it; do not add anything callable here.
  */
+contextBridge.exposeInMainWorld("isDuitSiniDesktop", true);
 
 const TOKEN_RE = /cub_[0-9a-f]{48}/;
 

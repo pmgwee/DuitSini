@@ -441,6 +441,11 @@ function completeSignIn(params: CallbackParams, via: string): void {
         }
       } else if (u.pathname === "/subscriptions" || u.pathname === "/") {
         console.log(`[duitsini] signed in → ${u.pathname}; pushing usage now`);
+        // A new Google account just landed. The bridge token is cached in memory
+        // and bonded to the *previous* account — drop it so the next push re-mints
+        // for this account. Without this, switching accounts keeps pushing to the
+        // old account's dashboard row (this is the only invalidation path).
+        tokens.invalidate();
         // Fresh session just landed — push immediately instead of waiting up to
         // a full cadence cycle, so usage appears on the dashboard right away.
         void scheduler?.pullNow();

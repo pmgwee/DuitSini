@@ -32,10 +32,20 @@ export function ConnectClaudeCard() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [sources, setSources] = useState<ConnectedSource[]>([]);
   const [os, setOs] = useState<OS>("windows");
+  // True only when rendered inside the DuitSini desktop app (the Electron shell
+  // exposes `window.isDuitSiniDesktop` via contextBridge). Stays false in any
+  // plain browser, so the legacy .bat/Terminal steps keep rendering there.
+  const [isDesktop, setIsDesktop] = useState(false);
 
-  // Default the tab to the visitor's OS (they can still switch, e.g. to help a
-  // friend on the other platform).
   useEffect(() => {
+    // Detect the desktop shell. Initial state must be false: this component is
+    // prerendered on the server where `window` is undefined.
+    if ((window as unknown as { isDuitSiniDesktop?: boolean }).isDuitSiniDesktop === true) {
+      setIsDesktop(true);
+      return;
+    }
+    // Default the tab to the visitor's OS (they can still switch, e.g. to help a
+    // friend on the other platform).
     const ua = navigator.userAgent;
     const platform = (navigator as unknown as { platform?: string }).platform ?? "";
     if (/Mac|iPhone|iPad|iPod/i.test(platform) || /Mac OS X/i.test(ua)) setOs("mac");
@@ -88,7 +98,7 @@ export function ConnectClaudeCard() {
       {connected === null ? (
         <ConnectCardSkeleton />
       ) : connected ? (
-        <ConnectedView sources={sources} />
+        <ConnectedView sources={sources} isDesktop={isDesktop} />
       ) : (
         <>
           <p className="mb-4 text-sm text-muted-foreground">
@@ -97,19 +107,26 @@ export function ConnectClaudeCard() {
             Pro/Max account.
           </p>
 
-          {/* OS switch */}
-          <div className="mb-4 inline-flex items-center gap-1 rounded-xl border border-border/60 bg-surface/50 p-1 text-sm">
-            <OsTab active={os === "windows"} onClick={() => setOs("windows")} icon={<WindowsGlyph />}>
-              Windows
-            </OsTab>
-            <OsTab active={os === "mac"} onClick={() => setOs("mac")} icon={<Apple className="size-4" />}>
-              macOS
-            </OsTab>
-          </div>
+          {isDesktop ? (
+            <DesktopPanel os={os} />
+          ) : (
+            <>
+              {/* OS switch */}
+              <div className="mb-4 inline-flex items-center gap-1 rounded-xl border border-border/60 bg-surface/50 p-1 text-sm">
+                <OsTab active={os === "windows"} onClick={() => setOs("windows")} icon={<WindowsGlyph />}>
+                  Windows
+                </OsTab>
+                <OsTab active={os === "mac"} onClick={() => setOs("mac")} icon={<Apple className="size-4" />}>
+                  macOS
+                </OsTab>
+              </div>
 
-          {os === "windows" ? <WindowsPanel /> : <MacPanel />}
+              {os === "windows" ? <WindowsPanel /> : <MacPanel />}
+            </>
+          )}
 
-          <details className="mt-3 rounded-lg border border-border/40 bg-surface/30 px-3 py-2 text-[11px] text-muted-foreground/80">
+          {!isDesktop && (
+            <details className="mt-3 rounded-lg border border-border/40 bg-surface/30 px-3 py-2 text-[11px] text-muted-foreground/80">
             <summary className="cursor-pointer select-none font-medium text-muted-foreground">
               Want both Claude Pro and GLM live at once?
             </summary>
@@ -145,7 +162,8 @@ export function ConnectClaudeCard() {
               <code className="font-mono text-[10px]">{'{ "pushSeconds": 300 }'}</code> (60–3600 seconds;
               default 60) to change how often it reports.
             </p>
-          </details>
+            </details>
+          )}
 
           <p className="mt-3 text-[11px] text-muted-foreground/70">
             Only your usage percentages are sent — never your password or login.
@@ -185,7 +203,7 @@ function ConnectCardSkeleton() {
 /* Connected view — showcase the sources the bridge is broadcasting    */
 /* ------------------------------------------------------------------ */
 
-function ConnectedView({ sources }: { sources: ConnectedSource[] }) {
+function ConnectedView({ sources, isDesktop }: { sources: ConnectedSource[]; isDesktop: boolean }) {
   return (
     <div>
       {sources.length > 0 ? (
@@ -203,20 +221,27 @@ function ConnectedView({ sources }: { sources: ConnectedSource[] }) {
         </p>
       )}
 
-      <p className="mt-4 text-xs text-muted-foreground">
-        Keep the sharer window open to stay live.{" "}
-        <a
-          href="/api/bridge/download"
-          className="font-medium text-primary underline-offset-2 hover:underline"
-        >
-          Re-download bridge
-        </a>{" "}
-        · to stop, close the window.
-      </p>
+      {isDesktop ? (
+        <p className="mt-4 text-xs text-muted-foreground">
+          The desktop app is tracking this in the background — keep it running (it can hide to the
+          tray and start at login).
+        </p>
+      ) : (
+        <p className="mt-4 text-xs text-muted-foreground">
+          Keep the sharer window open to stay live.{" "}
+          <a
+            href="/api/bridge/download"
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            Re-download bridge
+          </a>{" "}
+          · to stop, close the window.
+        </p>
+      )}
 
       <p className="mt-2 text-[11px] text-muted-foreground/70">
-        If your usage ever stops updating, just sign in to Claude Code again on this computer — the
-        sharer picks it up automatically.
+        If your usage ever stops updating, just sign in to Claude Code again on this computer —
+        {isDesktop ? " the desktop app picks it up automatically." : " the sharer picks it up automatically."}
       </p>
     </div>
   );
@@ -379,6 +404,68 @@ function MacPanel() {
         No Node yet? If it says <span className="font-mono">command not found: node</span>, install
         the LTS from nodejs.org, then paste the command again.
       </p>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Desktop app panel — shown only when `window.isDuitSiniDesktop`      */
+/* (the shell tracks automatically; the .bat/Terminal script is not    */
+/* needed). One real step: sign Claude Code in once.                    */
+/* ------------------------------------------------------------------ */
+
+function DesktopPanel({ os }: { os: OS }) {
+  return (
+    <>
+      <p className="mb-4 text-sm text-muted-foreground">
+        You&apos;re in the <b className="text-foreground">DuitSini desktop app</b> — usage tracks
+        here automatically. No script to download, nothing to keep open.
+      </p>
+
+      <ol className="space-y-2.5 text-sm text-muted-foreground">
+        <Step n={1}>
+          To see your Claude Pro/Max usage, sign Claude Code in once with your subscription account.
+          Open a terminal and run{" "}
+          <code className="font-mono text-[11px]">{os === "mac" ? "claude" : "cmd /c claude"}</code>,
+          then choose <b className="text-foreground">Claude.ai subscription</b> and sign in.
+        </Step>
+        <Step n={2}>
+          That&apos;s it — your usage appears above, live, within a few seconds. The card updates on
+          its own once tracking starts.
+        </Step>
+      </ol>
+
+      <details className="mt-3 rounded-lg border border-border/40 bg-surface/30 px-3 py-2 text-[11px] text-muted-foreground/80">
+        <summary className="cursor-pointer select-none font-medium text-muted-foreground">
+          Routing Claude Code to GLM via cc-switch? Keep the two logins separate.
+        </summary>
+        <p className="mt-1.5">
+          Claude usage is account-level. If your Claude Code points at a GLM gateway through
+          cc-switch, sign your Claude Pro/Max account in once into a dedicated folder so both track
+          side by side:
+        </p>
+        <ul className="mt-1.5 list-disc space-y-0.5 pl-4">
+          <li>
+            Windows:{" "}
+            <code className="font-mono text-[10px]">
+              $env:CLAUDE_CONFIG_DIR=&quot;$env:USERPROFILE\.claude-pro&quot;; cmd /c claude
+            </code>{" "}
+            → choose <b className="text-foreground">Claude.ai subscription</b>.
+          </li>
+          <li>
+            Mac:{" "}
+            <code className="font-mono text-[10px]">CLAUDE_CONFIG_DIR=~/.claude-pro claude</code>.
+          </li>
+        </ul>
+        <p className="mt-1.5">
+          The desktop app finds it automatically (plus{" "}
+          <code className="font-mono text-[10px]">~/.claude-sub</code>,{" "}
+          <code className="font-mono text-[10px]">CLAUDE_SUB_CONFIG_DIR</code>, the{" "}
+          <b className="text-foreground">macOS Keychain</b>, and your normal{" "}
+          <code className="font-mono text-[10px]">~/.claude</code>). GLM itself needs no extra step —
+          it&apos;s read from cc-switch.
+        </p>
+      </details>
     </>
   );
 }
