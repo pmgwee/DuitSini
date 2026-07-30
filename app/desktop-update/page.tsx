@@ -106,7 +106,9 @@ function DesktopUpdateContent() {
 
   return (
     <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-background p-6">
-      <div className="glass card-elevated w-full max-w-md rounded-3xl border border-border/60 p-7">
+      {/* Solid surface (not glass) — the popup is small, so a translucent card
+          would wash out against the body's gradient background. Opaque = crisp. */}
+      <div className="card-elevated w-full max-w-md rounded-3xl border border-border bg-surface p-7 shadow-2xl">
         <div className="flex items-center gap-3">
           <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25">
             <RefreshCw className="size-5" />
