@@ -1,0 +1,63 @@
+import { ipcRenderer } from "electron";
+
+/**
+ * Preload — runs in an ISOLATED world with `contextIsolation: true`.
+ *
+ * It deliberately exposes NOTHING to the page. The web app is unmodified and has
+ * no idea it is inside a shell, which is the whole point: nothing here can be
+ * reached (or spoofed) by page script.
+ *
+ * Its one job is minting. `/api/bridge/mac-command` is guarded by a
+ * `Sec-Fetch-Site` CSRF check and authenticated by the Supabase session cookie,
+ * so the request has to be a genuine same-origin fetch from the signed-in
+ * document. Issuing it from here satisfies both naturally — the browser sets
+ * `Sec-Fetch-Site: same-origin` itself and attaches cookies — with no header
+ * spoofing and no change to the route.
+ */
+
+const TOKEN_RE = /cub_[0-9a-f]{48}/;
+
+ipcRenderer.on("duitsini:mint", async (_event, requestId: string) => {
+  try {
+    const r = await fetch("/api/bridge/mac-command", {
+      credentials: "include",
+      cache: "no-store",
+    });
+
+    if (r.status === 401) {
+      ipcRenderer.send("duitsini:mint-result", requestId, {
+        ok: false,
+        reason: "signed-out",
+      });
+      return;
+    }
+    if (!r.ok) {
+      ipcRenderer.send("duitsini:mint-result", requestId, {
+        ok: false,
+        reason: `mint failed (${r.status})`,
+      });
+      return;
+    }
+
+    const body = (await r.json()) as { command?: string; account?: string | null };
+    const token = TOKEN_RE.exec(body.command ?? "")?.[0];
+    if (!token) {
+      ipcRenderer.send("duitsini:mint-result", requestId, {
+        ok: false,
+        reason: "no token in mint response",
+      });
+      return;
+    }
+
+    ipcRenderer.send("duitsini:mint-result", requestId, {
+      ok: true,
+      token,
+      account: body.account ?? null,
+    });
+  } catch (e) {
+    ipcRenderer.send("duitsini:mint-result", requestId, {
+      ok: false,
+      reason: (e as Error).message,
+    });
+  }
+});

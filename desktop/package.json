@@ -1,0 +1,29 @@
+{
+  "name": "duitsini-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DuitSini Desktop — Electron shell over the live web app, with local AI-usage collectors.",
+  "main": "dist/desktop/src/main.js",
+  "packageManager": "pnpm@11.5.3",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "pnpm run build && electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dist": "pnpm run build && electron-builder",
+    "dist:win": "pnpm run build && electron-builder --win",
+    "dist:mac": "pnpm run build && electron-builder --mac",
+    "dist:linux": "pnpm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^6.0.3"
+  }
+}

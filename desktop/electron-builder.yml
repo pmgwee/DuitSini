@@ -1,0 +1,51 @@
+appId: com.duitsini.desktop
+productName: DuitSini
+copyright: Copyright © DuitSini
+
+directories:
+  output: release
+  buildResources: assets
+
+# The shell is tiny by design — it carries no copy of the web app, so there is
+# nothing here that goes stale between Vercel deploys.
+files:
+  - dist/**/*
+  - package.json
+  - "!**/*.map"
+
+# Tray/window icons must be readable at runtime from outside the asar.
+extraResources:
+  - from: assets
+    to: assets
+    filter:
+      - "**/*.png"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  icon: assets/icon.png
+  category: public.app-category.finance
+  # Unsigned for now: signing needs a paid Developer ID. Gatekeeper will warn on
+  # first launch — the README documents the right-click → Open workaround.
+  identity: null
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  icon: assets/icon.png
+  category: Office
