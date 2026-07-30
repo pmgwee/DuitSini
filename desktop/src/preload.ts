@@ -1,47 +1,38 @@
-import { app, contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 
 /**
  * Preload — runs in an ISOLATED world with `contextIsolation: true`.
  *
- * It deliberately exposes NOTHING to the page. The web app is unmodified and has
- * no idea it is inside a shell, which is the whole point: nothing here can be
- * reached (or spoofed) by page script.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THIS FILE RUNS IN THE RENDERER PROCESS. Main-process-only modules — `app`,
+ * `BrowserWindow`, `dialog`, `session`, `Tray`, … — are NOT available here;
+ * `require("electron").app` is `undefined`, so touching it throws a TypeError.
  *
- * Its one job is minting. `/api/bridge/mac-command` is guarded by a
+ * A throw anywhere in this file aborts the ENTIRE preload: every statement below
+ * the throw is skipped, including the mint listener. The app then looks alive
+ * (the window loads fine) while usage silently never pushes — the main process
+ * only ever sees "mint timed out", and Electron does not print preload errors to
+ * stdout. That exact bug shipped in v1.1.1 and broke usage tracking, the version
+ * badge and the update badge in one line (`app.getVersion()`).
+ *
+ * Two rules keep it from happening again:
+ *   1. Need something only the main process knows? Get it via `additionalArguments`
+ *      (see `--duitsini-version` below) or IPC — never by importing a main module.
+ *   2. The mint listener is registered FIRST, and every cosmetic exposure is
+ *      individually guarded, so a broken nicety can never take usage down again.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * The bridge's one real job is minting. `/api/bridge/mac-command` is guarded by a
  * `Sec-Fetch-Site` CSRF check and authenticated by the Supabase session cookie,
  * so the request has to be a genuine same-origin fetch from the signed-in
  * document. Issuing it from here satisfies both naturally — the browser sets
  * `Sec-Fetch-Site: same-origin` itself and attaches cookies — with no header
  * spoofing and no change to the route.
- *
- * ONE deliberate exception: `window.isDuitSiniDesktop`. It is a single read-only
- * boolean so the "Share your Claude usage" card can render the auto-tracking
- * desktop copy instead of the .bat/Terminal script steps. It is NOT a capability
- * (no IPC, no filesystem, no shells) and contextBridge defines it
- * non-configurable/non-writable, so page script cannot spoof or remove it. Do
- * not strip it — the card depends on it; do not add anything callable here.
  */
-contextBridge.exposeInMainWorld("isDuitSiniDesktop", true);
-// The installed desktop version (package.json version), so the in-app footer
-// can show "vX.Y.Z" beside the legal links. Same non-spoofable guarantee as
-// the boolean above.
-contextBridge.exposeInMainWorld("duitsiniDesktopVersion", app.getVersion());
 
-/**
- * In-app update bridge — powers the header "update available" badge. The page
- * polls `getState` (a request/response IPC, robust to renderer reloads) and
- * calls `openPopup`/`restart` on click. No capability beyond what the tray
- * already exposes; it is only the *surface* that's new.
- */
-contextBridge.exposeInMainWorld("duitsiniUpdater", {
-  getState: (): Promise<unknown> => ipcRenderer.invoke("duitsini:update-state:get"),
-  openPopup: (): void => {
-    ipcRenderer.send("duitsini:update-open-popup");
-  },
-  restart: (): void => {
-    ipcRenderer.send("duitsini:update-install");
-  },
-});
+// ─── 1. CRITICAL PATH FIRST ─────────────────────────────────────────────────
+// Usage tracking depends on this listener existing. Nothing that can throw is
+// allowed to run before it.
 
 const TOKEN_RE = /cub_[0-9a-f]{48}/;
 
@@ -88,4 +79,50 @@ ipcRenderer.on("duitsini:mint", async (_event, requestId: string) => {
       reason: (e as Error).message,
     });
   }
+});
+
+// ─── 2. PAGE-FACING SURFACE ─────────────────────────────────────────────────
+// Each exposure is independently guarded: one failing must not cascade.
+
+function expose(key: string, value: unknown): void {
+  try {
+    contextBridge.exposeInMainWorld(key, value);
+  } catch (e) {
+    // Never rethrow — a failed nicety must not abort the preload.
+    console.error(`[duitsini] preload: could not expose ${key}: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * `window.isDuitSiniDesktop` — a single read-only boolean so the "Share your
+ * Claude usage" card can render the auto-tracking desktop copy instead of the
+ * .bat/Terminal script steps. It is NOT a capability (no IPC, no filesystem, no
+ * shells) and contextBridge defines it non-configurable/non-writable, so page
+ * script cannot spoof or remove it. Do not strip it — the card depends on it.
+ */
+expose("isDuitSiniDesktop", true);
+
+/**
+ * `window.duitsiniDesktopVersion` — the installed version, for the "vX.Y.Z"
+ * footer badge. Handed in by the main process via `webPreferences.
+ * additionalArguments` because `app.getVersion()` is unreachable from here.
+ */
+const VERSION_FLAG = "--duitsini-version=";
+const version = process.argv.find((a) => a.startsWith(VERSION_FLAG))?.slice(VERSION_FLAG.length);
+if (version) expose("duitsiniDesktopVersion", version);
+
+/**
+ * `window.duitsiniUpdater` — powers the header "update available" badge. The
+ * page polls `getState` (a request/response IPC, robust to renderer reloads) and
+ * calls `openPopup`/`restart` on click. No capability beyond what the tray
+ * already exposes; it is only the *surface* that's new.
+ */
+expose("duitsiniUpdater", {
+  getState: (): Promise<unknown> => ipcRenderer.invoke("duitsini:update-state:get"),
+  openPopup: (): void => {
+    ipcRenderer.send("duitsini:update-open-popup");
+  },
+  restart: (): void => {
+    ipcRenderer.send("duitsini:update-install");
+  },
 });

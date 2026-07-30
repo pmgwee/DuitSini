@@ -193,12 +193,27 @@ function createWindow(): void {
     title: "DuitSini",
     webPreferences: {
       preload: join(__dirname, "preload.js"),
+      // The preload runs in the RENDERER process, where `electron.app` does not
+      // exist — reading it there throws and aborts the whole preload (see the
+      // header comment in preload.ts). So the version is handed over as an argv
+      // flag instead: available synchronously, and impossible to get wrong.
+      additionalArguments: [`--duitsini-version=${app.getVersion()}`],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false, // preload needs fetch + ipcRenderer; no Node is exposed to the page
       webSecurity: true,
       spellcheck: false,
     },
+  });
+
+  // A preload that throws takes the mint listener down with it and the only
+  // symptom is "mint timed out" every cycle — Electron does NOT surface preload
+  // errors on stdout. Log it loudly; this class of bug cost hours once already.
+  win.webContents.on("preload-error", (_event, preloadPath, error) => {
+    console.error(
+      `[duitsini] PRELOAD FAILED (${preloadPath}): ${error.message}\n` +
+        "[duitsini] usage push and the update badge are dead until this is fixed.",
+    );
   });
 
   win.once("ready-to-show", () => win?.show());
