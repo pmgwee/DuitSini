@@ -64,7 +64,15 @@ let balloonShownFor: string | null = null;
 const UPDATE_CHECK_MS = 30 * 60_000;
 /** Floor between automatic checks, so window-show can't hammer the feed. */
 const UPDATE_CHECK_MIN_GAP_MS = 5 * 60_000;
+/**
+ * Ceiling on a single check, matching cc-switch's 30s. electron-updater has no
+ * timeout of its own, so a stalled feed request would otherwise leave the tray
+ * stuck on "Checking for updates…" indefinitely with no way back.
+ */
+const UPDATE_CHECK_TIMEOUT_MS = 30_000;
 let lastUpdateCheckAt = 0;
+/** True in-flight guard. The time gap alone can't stop two bypassing triggers. */
+let checkInFlight = false;
 
 /**
  * Every update check goes through here so each one is throttled and journaled.
@@ -86,9 +94,26 @@ async function checkForUpdates(trigger: string): Promise<void> {
   // and the periodic timer from piling up, not to skip the first real check.
   const throttled = trigger !== "manual" && trigger !== "startup";
   if (throttled && now - lastUpdateCheckAt < UPDATE_CHECK_MIN_GAP_MS) return;
+  // `startup` and `manual` skip the gap, so two of them can land together —
+  // hence a real in-flight flag rather than relying on the clock alone.
+  if (checkInFlight) return;
+  checkInFlight = true;
   lastUpdateCheckAt = now;
   usageTracker.event("updater_check", { trigger, current: app.getVersion() });
-  await updater.checkNow();
+  try {
+    await Promise.race([
+      updater.checkNow(),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error("update check timed out")), UPDATE_CHECK_TIMEOUT_MS),
+      ),
+    ]);
+  } catch (e) {
+    const message = (e as Error).message;
+    console.error(`[duitsini] [updater] check failed: ${message}`);
+    usageTracker.event("updater_check_failed", { trigger, message });
+  } finally {
+    checkInFlight = false;
+  }
 }
 
 /**
@@ -403,7 +428,7 @@ function buildTrayMenu(): void {
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     },
     { type: "separator" },
-    updateMenuItem(),
+    ...updateMenuItems(),
     { type: "separator" },
     {
       label: "Quit",
@@ -422,27 +447,37 @@ function buildTrayMenu(): void {
  * an update is available, a quiet "Check for updates" otherwise. Downloaded but
  * not-yet-restarted shows "Restart to update".
  */
-function updateMenuItem(): MenuItemConstructorOptions {
+function updateMenuItems(): MenuItemConstructorOptions[] {
   const s = updater.getState();
   if (s.kind === "available") {
-    return {
-      label: `🟢 Update available — v${s.version}`,
-      click: () => openUpdatePopup(),
-    };
+    const skipped = store.dismissedUpdateVersion() === s.version;
+    return [
+      { label: `🟢 Update available — v${s.version}`, click: () => openUpdatePopup() },
+      // Declining an update must be expressible, or the only way to stop being
+      // asked is to take it. Skipping silences the TOAST for this version only;
+      // the item above stays, and a newer version notifies normally again.
+      skipped
+        ? { label: `Skipped v${s.version} — notify again`, click: () => setSkippedVersion(null) }
+        : { label: `Skip v${s.version}`, click: () => setSkippedVersion(s.version) },
+    ];
   }
   if (s.kind === "downloaded") {
-    return {
-      label: `↻ Restart to update — v${s.version}`,
-      click: () => updater.installAndRestart(),
-    };
+    return [{ label: `↻ Restart to update — v${s.version}`, click: () => updater.installAndRestart() }];
   }
   if (s.kind === "downloading") {
-    return { label: `⬇ Updating… ${s.percent}%`, enabled: false };
+    return [{ label: `⬇ Updating… ${s.percent}%`, enabled: false }];
   }
   if (s.kind === "checking") {
-    return { label: "Checking for updates…", enabled: false };
+    return [{ label: "Checking for updates…", enabled: false }];
   }
-  return { label: "Check for updates", click: () => void checkForUpdates("manual") };
+  return [{ label: "Check for updates", click: () => void checkForUpdates("manual") }];
+}
+
+function setSkippedVersion(version: string | null): void {
+  store.setDismissedUpdateVersion(version);
+  void store.save();
+  usageTracker.event("updater_skip", { version });
+  buildTrayMenu();
 }
 
 /**
@@ -702,10 +737,17 @@ if (!app.requestSingleInstanceLock()) {
       // opens the update popup.
       updater.onState((s) => {
         buildTrayMenu();
-        if (s.kind === "available" && balloonShownFor !== s.version) {
-          balloonShownFor = s.version;
-          notifyUpdateAvailable(s.version);
+        if (s.kind !== "available") return;
+        if (balloonShownFor === s.version) return; // at most one toast per run
+        // A version the user explicitly skipped never toasts again — the tray
+        // item and header badge still show it, so the update is not hidden, just
+        // no longer interruptive. (cc-switch's dismissedVersion, persisted.)
+        if (store.dismissedUpdateVersion() === s.version) {
+          usageTracker.event("updater_toast_skipped", { version: s.version });
+          return;
         }
+        balloonShownFor = s.version;
+        notifyUpdateAvailable(s.version);
       });
       tray?.on("balloon-click", () => {
         if (updater.getState().kind === "available") openUpdatePopup();

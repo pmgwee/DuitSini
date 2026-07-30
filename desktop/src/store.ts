@@ -35,6 +35,17 @@ export interface PersistedState {
    * which is how a login gets flagged in the first place.
    */
   refresh?: Record<string, RefreshState>;
+  /**
+   * A version the user chose to skip. While this equals the available version,
+   * the toast stays quiet — the tray item and in-app badge still show it, so the
+   * update is never hidden, just no longer interruptive.
+   *
+   * Borrowed from cc-switch, which persists `ccswitch:update:dismissedVersion`
+   * for the same reason. Ours must be persisted rather than in-memory: the toast
+   * guard used to be a plain variable, so someone who declined an update got
+   * toasted again on every single launch.
+   */
+  dismissedUpdateVersion?: string;
 }
 
 const EMPTY: PersistedState = { sources: {} };
@@ -76,6 +87,16 @@ export class Store {
 
   setRefreshState(s: Record<string, RefreshState>): void {
     this.data.refresh = s;
+  }
+
+  /** Version the user chose to skip; the toast stays quiet for exactly this one. */
+  dismissedUpdateVersion(): string | null {
+    return this.data.dismissedUpdateVersion ?? null;
+  }
+
+  setDismissedUpdateVersion(version: string | null): void {
+    if (version) this.data.dismissedUpdateVersion = version;
+    else delete this.data.dismissedUpdateVersion;
   }
 
   /**
