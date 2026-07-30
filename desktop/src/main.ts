@@ -13,6 +13,7 @@ import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
 import { Store } from "./store";
 import { TokenHolder } from "./mint";
+import { applyChromeIdentity, chromeUserAgent } from "./useragent";
 
 /**
  * DuitSini Desktop — a shell, not a port.
@@ -102,23 +103,6 @@ function isAllowed(url: string): boolean {
   }
 }
 
-/**
- * Google refuses OAuth from anything it recognises as an embedded webview
- * (`disallowed_useragent`). Electron IS Chromium, so presenting a clean Chrome
- * UA — dropping the `Electron/x` and app tokens Google keys on — is what lets
- * the normal sign-in flow work in-window.
- *
- * If Google ever tightens this beyond UA sniffing, the fallback is to open the
- * auth URL via `shell.openExternal` and catch the redirect on a custom
- * protocol; that requires a `duitsini://` entry in Supabase's redirect
- * allow-list (dashboard config, not code).
- */
-function chromeUserAgent(): string {
-  return app.userAgentFallback
-    .replace(/\sElectron\/[\d.]+/, "")
-    .replace(new RegExp(`\\s${app.getName()}\\/[\\d.]+`, "i"), "");
-}
-
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -139,7 +123,6 @@ function createWindow(): void {
     },
   });
 
-  win.webContents.setUserAgent(chromeUserAgent());
   win.once("ready-to-show", () => win?.show());
 
   // Keep in-window navigation on known hosts; send anything else outward.
@@ -289,6 +272,18 @@ if (!app.requestSingleInstanceLock()) {
       if (!win.isVisible()) win.show();
       win.focus();
     }
+  });
+
+  // Baseline identity for anything that loads before the per-contents override
+  // attaches. Set before any window exists.
+  app.userAgentFallback = chromeUserAgent();
+
+  // Applies to the main window AND to any OAuth popup, which is created by
+  // Chromium rather than by us and would otherwise keep the Electron identity.
+  app.on("web-contents-created", (_e, contents) => {
+    applyChromeIdentity(contents, (line) => {
+      if (isDev) console.log(`[duitsini] ${line}`);
+    });
   });
 
   void app.whenReady().then(async () => {
