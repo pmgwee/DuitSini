@@ -3,9 +3,53 @@
 An Electron **shell** around the deployed DuitSini web app, plus the local
 collectors that make AI-usage tracking work without the downloadable sharer.
 
-Its whole reason to exist: today a member must download a ZIP, run a `.bat` (or
-paste a command into Terminal), and **leave that window running** for the AI
-Usage page to show anything. This app replaces that with "open the app".
+Its whole reason to exist: the old flow asked a member to download a ZIP, run a
+`.bat` (or paste a command into Terminal), and **leave that window running** for
+the AI Usage page to show anything. This app replaces all of that with "open the
+app" — sign in once and your Claude / GLM usage is tracked live, with no
+Terminal, no ZIP, no script to babysit.
+
+---
+
+## 🪟 For Windows users — install & run
+
+### 1. Download
+
+Grab the latest **`DuitSini-Setup-x.y.z.exe`** from the
+[GitHub Releases page](https://github.com/pmgwee/subscription-agent/releases).
+(Windows only for now — a macOS `.dmg` is planned.)
+
+### 2. Install
+
+Double-click the downloaded `.exe`. Because the build is **unsigned** (a code-signing
+certificate costs money and isn't needed for function), Windows SmartScreen may
+show *"Windows protected your PC"*. That is expected — click **More info → Run
+anyway**. This is a one-time prompt; subsequent launches are normal.
+
+### 3. Sign in
+
+Open **DuitSini** from your Start menu. Click **Continue with Google** — your
+**real browser** (Chrome / Edge) opens for the Google sign-in, then hands you
+back to the app automatically. You never type your password into the app itself.
+
+> One-time Supabase setup (already done for the production project — only needed
+> for self-hosting): the loopback redirect `http://127.0.0.1:43128/auth/callback`
+> must be in **Supabase → Authentication → URL Configuration → Redirect URLs**.
+
+### 4. That's it — usage tracks automatically
+
+As long as the app is running (it hides to the **system tray** when you close the
+window, and can **start at login** — toggle both from the tray menu), your AI
+Usage page updates live — on this PC, on your phone, on an iPad, anywhere you
+open DuitSini. Closing the window does **not** stop tracking; only **Quit** from
+the tray menu does.
+
+**Prerequisite:** [Claude Code](https://claude.com/claude-code) must be signed
+in on this PC (the desktop app reads the same local login Claude Code uses — it
+never sees your password). If you route Claude Code through GLM via cc-switch,
+GLM usage is tracked automatically too.
+
+---
 
 ## What this is NOT
 

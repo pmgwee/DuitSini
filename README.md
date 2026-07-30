@@ -46,10 +46,10 @@ which is literally a subscription, which is why the surface is called Bills.
 
 ### 🤖 AI usage tracking — `/ai-usage`
 Share your real Claude plan usage to the platform — no API key wrangling:
-- **Windows** — download a ZIP, double-click `START-HERE (Windows).bat`.
-- **macOS** — copy one Terminal command (`curl → node`). Uses the Homebrew/nvm pattern so it isn't blocked by Gatekeeper.
+- **🖥️ DuitSini Desktop (recommended, Windows)** — a one-time install that signs in with Google and tracks your Claude / GLM usage live, with no Terminal, no ZIP, no script to babysit. Hides to the tray and can start at login. See [`desktop/README.md`](desktop/README.md#-for-windows-users--install--run) for the download & install steps.
+- **Fallback (script)** — if you can't install the desktop app: download a ZIP and double-click `START-HERE (Windows).bat` (Windows), or copy one Terminal command (`curl → node`, macOS).
 - Broadcasts **Claude Pro** _and_ **GLM Coding** usage side by side (read from a dedicated Claude login and your cc-switch setup respectively). Only usage percentages are ever sent — never your password or login.
-- Every sharer command is personal — tied to the Google account that generated it, and the page tells you whose account it's feeding, on startup.
+- Every sharer command / desktop install is personal — tied to the Google account that generated it, and the page tells you whose account it's feeding, on startup.
 - Also on this surface: a YouTube Music player that docks inline here and floats elsewhere (surviving navigation), plus a flip clock.
 
 ### 📈 Stocks analysis tracking — `/stocks`
@@ -168,12 +168,20 @@ See [CLAUDE.md](CLAUDE.md) for the full architectural guide.
 
 ## Broadcasting your AI usage (Supabase mode)
 
+**🖥️ Recommended — DuitSini Desktop (Windows).** Install the desktop app once
+([download](https://github.com/pmgwee/subscription-agent/releases)), sign in with
+Google, and your usage tracks live automatically — no Terminal, no script to keep
+open. It hides to the system tray (collection continues) and can start at login.
+Full steps in [`desktop/README.md`](desktop/README.md#-for-windows-users--install--run).
+
+**Fallback — the usage-sharer script**, if you can't install the desktop app:
+
 1. Sign in (Google) and open **AI Usage** → **Share your Claude usage**.
 2. **Windows:** click *Download my usage sharer*, unzip, run `START-HERE (Windows).bat`.
    **macOS:** switch the card to *macOS*, copy the one-line command, paste it into Terminal.
 3. Keep the window open — your usage updates live on the page.
 
-Want **both Claude Pro and GLM** live at once? Sign Claude Code into a dedicated config folder once (`CLAUDE_CONFIG_DIR=~/.claude-pro claude`, choose the Claude.ai subscription) — the sharer finds it automatically alongside your cc-switch GLM setup. See the in-app "Want both Claude Pro and GLM live at once?" guide.
+Want **both Claude Pro and GLM** live at once? Sign Claude Code into a dedicated config folder once (`CLAUDE_CONFIG_DIR=~/.claude-pro claude`, choose the Claude.ai subscription) — the desktop app / sharer finds it automatically alongside your cc-switch GLM setup. See the in-app "Want both Claude Pro and GLM live at once?" guide.
 
 Only usage percentages are sent — never credentials.
 
