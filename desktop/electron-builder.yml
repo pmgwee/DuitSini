@@ -2,6 +2,15 @@ appId: com.duitsini.desktop
 productName: DuitSini
 copyright: Copyright © DuitSini
 
+# Update feed for electron-updater. autoUpdater reads latest.yml from the
+# "latest" release on this repo and compares semver against package.json.
+publish:
+  provider: github
+  owner: pmgwee
+  repo: DuitSini
+  # When set, electron-builder publishes on `--publish always`. We publish
+  # manually (gh release create) so this is just the feed autoUpdater reads.
+
 # Installer-owned claim on the fallback deep-link scheme. Runtime registration
 # (main.ts) still happens for dev; declaring it here makes the NSIS/DMG installer
 # own the registry entry in packaged builds, which survives the Win8+ UserChoice
@@ -41,6 +50,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  # Stable, versioned name so latest.yml + the /download page can link it.
+  artifactName: "DuitSini-Setup-${version}.exe"
 
 mac:
   target:

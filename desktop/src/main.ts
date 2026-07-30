@@ -16,6 +16,8 @@ import { Store } from "./store";
 import { TokenHolder } from "./mint";
 import { startLoopback, type LoopbackHandle } from "./loopback";
 import { createUsageTracker } from "./tracker";
+import * as updater from "./updater";
+import { ipcMain } from "electron";
 import {
   DEEP_LINK_CALLBACK,
   DEEP_LINK_SCHEME,
@@ -265,6 +267,8 @@ function buildTrayMenu(): void {
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     },
     { type: "separator" },
+    updateMenuItem(),
+    { type: "separator" },
     {
       label: "Quit",
       click: () => {
@@ -275,6 +279,63 @@ function buildTrayMenu(): void {
   ];
   tray.setContextMenu(Menu.buildFromTemplate(items));
   tray.setToolTip(`DuitSini — ${statusLine()}`);
+}
+
+/**
+ * Tray item reflects the updater state: a green badge + click-to-open-popup when
+ * an update is available, a quiet "Check for updates" otherwise. Downloaded but
+ * not-yet-restarted shows "Restart to update".
+ */
+function updateMenuItem(): MenuItemConstructorOptions {
+  const s = updater.getState();
+  if (s.kind === "available") {
+    return {
+      label: `🟢 Update available — v${s.version}`,
+      click: () => openUpdatePopup(),
+    };
+  }
+  if (s.kind === "downloaded") {
+    return {
+      label: `↻ Restart to update — v${s.version}`,
+      click: () => updater.installAndRestart(),
+    };
+  }
+  if (s.kind === "downloading") {
+    return { label: `⬇ Updating… ${s.percent}%`, enabled: false };
+  }
+  if (s.kind === "checking") {
+    return { label: "Checking for updates…", enabled: false };
+  }
+  return { label: "Check for updates", click: () => void updater.checkNow() };
+}
+
+/**
+ * The update popup — a small window loading <APP_URL>/desktop-update with its
+ * OWN preload (preload-update.ts) that exposes only the update bridge. The main
+ * window's preload is untouched.
+ */
+function openUpdatePopup(): void {
+  const s = updater.getState();
+  if (s.kind !== "available") return;
+  const updateWin = new BrowserWindow({
+    width: 520,
+    height: 640,
+    resizable: false,
+    minimizable: false,
+    title: "Update DuitSini",
+    backgroundColor: "#0b0b0f",
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: join(__dirname, "preload-update.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  updater.attachPopup(updateWin);
+  updateWin.on("closed", () => updater.attachPopup(null));
+  const url = `${APP_URL}/desktop-update?from=${updater.currentVersion()}&to=${encodeURIComponent(s.version)}`;
+  void updateWin.loadURL(url);
 }
 
 function createTray(): void {
@@ -455,16 +516,40 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     if (app.isPackaged) {
-      try {
-        const { autoUpdater } = await import("electron-updater");
-        autoUpdater.autoDownload = true;
-        void autoUpdater.checkForUpdatesAndNotify();
-      } catch {
-        // No update feed configured yet — not fatal.
-      }
+      // electron-updater can only run from a packaged build (it reads
+      // app-update.yml baked in at build time). The user stays in control:
+      // nothing downloads until they click "Update to vX" in the popup.
+      await updater.init((line) => {
+        if (isDev) console.log(`[duitsini] ${line}`);
+      });
+      // Rebuild the tray the moment an update is detected so the badge appears.
+      updater.onState(() => buildTrayMenu());
+      void updater.checkNow();
     }
   });
 }
+
+/**
+ * IPC handlers for the update popup bridge (preload-update.ts).
+ * Registered once at module load; the popup calls them via contextBridge.
+ */
+ipcMain.on("duitsini:update-info", (event) => {
+  const s = updater.getState();
+  const info =
+    s.kind === "available" || s.kind === "downloaded"
+      ? {
+          currentVersion: updater.currentVersion(),
+          newVersion: s.version,
+          releaseUrl:
+            "releaseUrl" in s && s.releaseUrl
+              ? s.releaseUrl
+              : "https://github.com/pmgwee/DuitSini/releases/latest",
+        }
+      : null;
+  event.returnValue = info;
+});
+ipcMain.on("duitsini:update-start", () => void updater.startDownload());
+ipcMain.on("duitsini:update-install", () => updater.installAndRestart());
 
 // Tray app: closing every window must not quit on Windows/Linux either.
 app.on("window-all-closed", () => {

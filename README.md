@@ -2,6 +2,22 @@
 
 **Your day-to-day financing platform — three money surfaces in one place: what you're *committed* to paying, what your *AI tools* are burning, and what the *market* is doing. All in Ringgit.**
 
+## Get the desktop app
+
+🖥️ **[⬇ Download DuitSini Desktop for Windows](https://github.com/pmgwee/DuitSini/releases/latest)**
+
+It's the best way to use DuitSini — and the only setup that **tracks your AI usage automatically**. Install once, sign in with Google, and it runs quietly in the background:
+
+- **No Terminal, no ZIP, no script to babysit.** Your Claude Pro and GLM Coding usage broadcasts itself to your dashboard, live.
+- **Lives in the system tray** and can start at login, so usage keeps tracking even with the window closed.
+- Every web deploy shows up on the next launch — nothing to reinstall.
+
+> **On a Mac?** The desktop build is Windows-first, so use DuitSini in your browser at **[duitsini.vercel.app](https://duitsini.vercel.app)**. Every feature works there — you just track AI usage via the one-line [sharer script](#cant-install-the-app-use-the-sharer-script) instead of the auto-tracking desktop app.
+
+Build / packaging details for contributors are in [`desktop/README.md`](desktop/README.md).
+
+---
+
 Built Malaysian-first: every figure is shown in **Ringgit (MYR)**, never USD you have to convert in your head.
 
 Built with Next.js 15 (App Router), React 19, Tailwind v4, and Supabase.
@@ -23,7 +39,7 @@ Everything else — reports, reminders, settings — exists to serve those three
 ## Why people keep it open
 
 - 🇲🇾 **MYR-native, always.** No mental USD→RM math for Netflix, Spotify, Claude, ChatGPT — every figure converts and rounds once, correctly.
-- 🛰️ **Live AI usage, broadcast from your own machine.** Nobody else does this: a 2-minute setup turns your Claude Pro / GLM Coding plan usage into a live gauge — no API key ever leaves your computer.
+- 🛰️ **Live AI usage, broadcast from your own machine.** Nobody else does this: the desktop app (or a one-line script) turns your Claude Pro / GLM Coding plan usage into a live gauge — no API key ever leaves your computer.
 - 📈 **Market vision without the doomscroll.** A reconstructed portfolio, theme map, and daily commentary read — parsed, cached, and attributed, so you get the signal without living on X.
 - 🖥️ **Built for the spare monitor.** Leave it open on a third screen while gaming, vibe-coding, or running a side hustle — everything that costs or moves your money, always in view.
 - 📄 **Monthly/yearly statements, delivered, not dug for.** Auto-generated PDF statements land in your Telegram — no logging back in to check what you spent.
@@ -45,9 +61,9 @@ which is literally a subscription, which is why the surface is called Bills.
   - _Recurring_ — the **normalized** monthly cost (any billing cycle smoothed to /mo).
 
 ### 🤖 AI usage tracking — `/ai-usage`
-Share your real Claude plan usage to the platform — no API key wrangling:
-- **🖥️ DuitSini Desktop (recommended, Windows)** — a one-time install that signs in with Google and tracks your Claude / GLM usage live, with no Terminal, no ZIP, no script to babysit. Hides to the tray and can start at login. See [`desktop/README.md`](desktop/README.md#-for-windows-users--install--run) for the download & install steps.
-- **Fallback (script)** — if you can't install the desktop app: download a ZIP and double-click `START-HERE (Windows).bat` (Windows), or copy one Terminal command (`curl → node`, macOS).
+How much of your Claude / GLM plan have you burned — **live**, right now.
+- **In the desktop app it tracks itself** — just sign in; nothing else to run. (Don't have it yet? [Get the desktop app](#get-the-desktop-app).)
+- **On the web / macOS?** Run the one-time [usage-sharer script](#cant-install-the-app-use-the-sharer-script) — a `.bat` on Windows or one Terminal line on macOS.
 - Broadcasts **Claude Pro** _and_ **GLM Coding** usage side by side (read from a dedicated Claude login and your cc-switch setup respectively). Only usage percentages are ever sent — never your password or login.
 - Every sharer command / desktop install is personal — tied to the Google account that generated it, and the page tells you whose account it's feeding, on startup.
 - Also on this surface: a YouTube Music player that docks inline here and floats elsewhere (surviving navigation), plus a flip clock.
@@ -166,15 +182,12 @@ See [CLAUDE.md](CLAUDE.md) for the full architectural guide.
 
 ---
 
-## Broadcasting your AI usage (Supabase mode)
+## Can't install the app? Use the sharer script
 
-**🖥️ Recommended — DuitSini Desktop (Windows).** Install the desktop app once
-([download](https://github.com/pmgwee/subscription-agent/releases)), sign in with
-Google, and your usage tracks live automatically — no Terminal, no script to keep
-open. It hides to the system tray (collection continues) and can start at login.
-Full steps in [`desktop/README.md`](desktop/README.md#-for-windows-users--install--run).
+> **Prefer the desktop app — it does this automatically, with no script and no Terminal.**
+> See [Get the desktop app](#get-the-desktop-app) at the top.
 
-**Fallback — the usage-sharer script**, if you can't install the desktop app:
+This is the fallback for the **web app** (or **macOS**, where the desktop build isn't installed): a tiny one-time script that broadcasts your live Claude / GLM usage to your dashboard, exactly like the desktop app would.
 
 1. Sign in (Google) and open **AI Usage** → **Share your Claude usage**.
 2. **Windows:** click *Download my usage sharer*, unzip, run `START-HERE (Windows).bat`.

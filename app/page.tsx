@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, CalendarDays, Sparkles, TrendingUp } from "lucide-react";
+import { Activity, CalendarDays, Download, Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroVideo } from "@/components/hero-video";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -87,6 +87,17 @@ export default async function Home() {
           .
         </p>
 
+        {/* Desktop app download — prominent primary CTA. /download is public, so
+            this is a plain Link (not hrefFor) regardless of auth state. */}
+        <div className="mt-7">
+          <Button asChild size="lg" className="gap-2">
+            <Link href="/download">
+              <Download className="size-4" />
+              Download Free
+            </Link>
+          </Button>
+        </div>
+
         {/* Three core surfaces, each deep-linking straight into the app (or through
             sign-in with `next` preserved, so the click still lands where intended). */}
         <div className="mt-9 flex flex-col gap-3 sm:flex-row">
@@ -120,6 +131,9 @@ export default async function Home() {
         <span>© {new Date().getFullYear()} DuitSini</span>
         <Link href="/privacy" className="transition-colors hover:text-white hover:underline">
           Privacy
+        </Link>
+        <Link href="/download" className="transition-colors hover:text-white hover:underline">
+          Download
         </Link>
         <Link href="/terms" className="transition-colors hover:text-white hover:underline">
           Terms
