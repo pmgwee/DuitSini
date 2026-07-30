@@ -25,10 +25,26 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+
+/**
+ * Any file with "preload" anywhere in its name, at any depth under src/.
+ * Deliberately loose: a guard that only matched `preload*.ts` at the top level
+ * would silently skip a future `bridge-preload.ts` or `windows/preload.ts` —
+ * i.e. it would go quiet exactly when someone adds a new preload, which is when
+ * it matters most.
+ */
+function findPreloads(dir, out = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) findPreloads(full, out);
+    else if (/preload/i.test(entry.name) && /\.(ts|js|mjs|cjs)$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
 
 /**
  * Modules `require("electron")` actually defines in a preload, verified by
@@ -100,14 +116,15 @@ function checkNames(file, clause, raw) {
   }
 }
 
-const preloads = readdirSync(SRC).filter((f) => /^preload.*\.(ts|js|mjs)$/.test(f));
+const preloads = findPreloads(SRC);
 if (preloads.length === 0) {
-  console.error("check-preload: no preload files found in src/ — has the layout changed?");
+  console.error("check-preload: no preload files found under src/ — has the layout changed?");
   process.exit(1);
 }
 
-for (const file of preloads) {
-  const source = readFileSync(join(SRC, file), "utf8");
+for (const full of preloads) {
+  const file = relative(SRC, full).replace(/\\/g, "/");
+  const source = readFileSync(full, "utf8");
   for (const m of source.matchAll(IMPORT_RE)) checkNames(file, m[1], m[0]);
   for (const m of source.matchAll(REQUIRE_RE)) checkNames(file, m[1], m[0]);
 }
@@ -122,4 +139,5 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-console.log(`check-preload: ok (${preloads.join(", ")})`);
+const names = preloads.map((p) => relative(SRC, p).replace(/\\/g, "/"));
+console.log(`check-preload: ok (${names.join(", ")})`);
