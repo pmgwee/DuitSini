@@ -29,9 +29,12 @@ async function getLatestRelease(): Promise<Release | null> {
   try {
     const r = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
       headers: { Accept: "application/vnd.github+json" },
-      // Cache for an hour — the release changes rarely, and this keeps us far
-      // under the unauthenticated rate limit.
-      next: { revalidate: 3600 },
+      // 5 minutes, not an hour. Releases are rare, but the page is WRONG for the
+      // whole window right after one — it kept advertising v1.1.6 (with that
+      // build's byte size) while v1.1.8 was live, which is exactly when people
+      // are being sent here. At 300s this is at most 12 requests/hour against
+      // GitHub's 60/hour unauthenticated limit, shared across all visitors.
+      next: { revalidate: 300 },
     });
     if (!r.ok) return null;
     return (await r.json()) as Release;
