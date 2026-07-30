@@ -32,43 +32,71 @@ let quitting = false;
 let lastStatus: Status = { kind: "idle" };
 
 const store = new Store(Store.pathFor(app.getPath("userData")));
-const tokens = new TokenHolder(() => win);
+const tokens = new TokenHolder(() => win, appOriginOf());
 
-const appOrigin = (() => {
+function appOriginOf(): string {
   try {
     return new URL(APP_URL).origin;
   } catch {
     return "https://duitsini.vercel.app";
   }
-})();
+}
+
+const appOrigin = appOriginOf();
 
 /**
- * Origins the shell may navigate to in-window. Everything else is handed to the
- * system browser.
+ * Hosts the shell may navigate to in-window. Everything else goes to the system
+ * browser.
  *
- * Google's sign-in domains are included because Supabase Auth redirects through
- * them; excluding them would break login inside the shell.
+ * Getting this set RIGHT matters more than it looks. Google sign-in is a
+ * multi-hop redirect chain — app → accounts.google.com → the SUPABASE project's
+ * /auth/v1/callback → back to the app. If any hop is missing here, that
+ * navigation is cancelled and handed to the system browser, so the user
+ * completes sign-in in Chrome while the Electron window sits on the login page
+ * with no session. (That is exactly what happened when the Supabase host was
+ * only allow-listed from an env var the main process never loads.)
+ *
+ * Matching is by host, with an explicit suffix list, so any Supabase project ref
+ * works without configuration.
  */
-const NAV_ALLOWED = [
-  appOrigin,
-  "https://accounts.google.com",
-  "https://accounts.youtube.com",
-  "https://oauth2.googleapis.com",
-  "https://www.youtube.com",
+const ALLOWED_HOSTS = new Set<string>([
+  "accounts.google.com",
+  "oauth2.googleapis.com",
+  "accounts.youtube.com",
+  "www.youtube.com",
+  "youtube.com",
+]);
+
+const ALLOWED_HOST_SUFFIXES = [
+  ".supabase.co", // Supabase Auth callback (any project ref)
+  ".supabase.in",
+  ".google.com", // Google's sign-in / consent hops
+  ".googleusercontent.com",
 ];
 
-/** Supabase project origin (auth callback) is allowed too when configured. */
-if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+/** Extra origins for local dev or a custom domain, comma-separated. */
+for (const extra of (process.env.DUITSINI_EXTRA_ORIGINS || "").split(",")) {
+  const trimmed = extra.trim();
+  if (!trimmed) continue;
   try {
-    NAV_ALLOWED.push(new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin);
+    ALLOWED_HOSTS.add(new URL(trimmed).host);
   } catch {
-    /* ignore a malformed env value */
+    /* ignore a malformed entry */
   }
+}
+
+try {
+  ALLOWED_HOSTS.add(new URL(APP_URL).host);
+} catch {
+  /* appOrigin fallback already applied above */
 }
 
 function isAllowed(url: string): boolean {
   try {
-    return NAV_ALLOWED.includes(new URL(url).origin);
+    const { host, protocol } = new URL(url);
+    if (protocol !== "https:" && protocol !== "http:") return false;
+    if (ALLOWED_HOSTS.has(host)) return true;
+    return ALLOWED_HOST_SUFFIXES.some((s) => host.endsWith(s));
   } catch {
     return false;
   }
@@ -114,14 +142,31 @@ function createWindow(): void {
   win.webContents.setUserAgent(chromeUserAgent());
   win.once("ready-to-show", () => win?.show());
 
-  // Keep in-window navigation on known origins; send anything else outward.
+  // Keep in-window navigation on known hosts; send anything else outward.
+  // Logged in dev because a wrongly-blocked hop looks like "sign-in silently
+  // failed", not like a navigation problem — see ALLOWED_HOSTS above.
   win.webContents.on("will-navigate", (event, url) => {
-    if (!isAllowed(url)) {
-      event.preventDefault();
-      void shell.openExternal(url);
-    }
+    if (isAllowed(url)) return;
+    if (isDev) console.log(`[duitsini] blocked in-window nav → ${url} (opening externally)`);
+    event.preventDefault();
+    void shell.openExternal(url);
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
+    // Some OAuth flows open a popup rather than redirecting in place. Denying
+    // those would break sign-in the same way a blocked redirect does, so an
+    // allow-listed target gets a real popup window; everything else (outbound
+    // links the user clicked) goes to the system browser.
+    if (isAllowed(url)) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 700,
+          autoHideMenuBar: true,
+          webPreferences: { contextIsolation: true, nodeIntegration: false },
+        },
+      };
+    }
     void shell.openExternal(url);
     return { action: "deny" };
   });

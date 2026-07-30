@@ -31,12 +31,31 @@ function bindListener(): void {
   });
 }
 
-/** Ask the loaded page to mint a token on our behalf. */
-export function requestMint(win: BrowserWindow): Promise<MintResult> {
+/**
+ * Ask the loaded page to mint a token on our behalf.
+ *
+ * `expectedOrigin` is a hard gate, not a formality. The navigation allow-list
+ * necessarily admits every `*.supabase.co` project (we cannot know the ref
+ * ahead of time), and the preload mints from a RELATIVE url — so if the window
+ * happened to be sitting on a foreign origin we would be asking that origin for
+ * a bridge token. Minting only ever happens while the app itself is loaded.
+ */
+export function requestMint(win: BrowserWindow, expectedOrigin: string): Promise<MintResult> {
   bindListener();
   return new Promise((resolve) => {
     if (win.isDestroyed() || win.webContents.isLoading()) {
       resolve({ ok: false, reason: "app not ready" });
+      return;
+    }
+    let currentOrigin: string;
+    try {
+      currentOrigin = new URL(win.webContents.getURL()).origin;
+    } catch {
+      resolve({ ok: false, reason: "no page loaded" });
+      return;
+    }
+    if (currentOrigin !== expectedOrigin) {
+      resolve({ ok: false, reason: "not on the app origin" });
       return;
     }
     const id = randomUUID();
@@ -66,7 +85,10 @@ export class TokenHolder {
   private account: string | null = null;
   private inflight: Promise<string | null> | null = null;
 
-  constructor(private readonly getWindow: () => BrowserWindow | null) {}
+  constructor(
+    private readonly getWindow: () => BrowserWindow | null,
+    private readonly appOrigin: string,
+  ) {}
 
   get accountEmail(): string | null {
     return this.account;
@@ -93,7 +115,7 @@ export class TokenHolder {
     this.inflight = (async () => {
       const win = this.getWindow();
       if (!win) return null;
-      const r = await requestMint(win);
+      const r = await requestMint(win, this.appOrigin);
       if (!r.ok) return null;
       this.token = r.token;
       this.account = r.account;
