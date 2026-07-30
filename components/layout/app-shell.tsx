@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { UserMenu, type AuthUser } from "@/components/layout/user-menu";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { AddSubscriptionButton } from "@/features/subscriptions/subscription-dialogs";
+import { DesktopVersionBadge } from "@/components/layout/desktop-version-badge";
 import { useMusicPlayer } from "@/features/dashboard/music/player-context";
 import { MiniPlayer } from "@/features/dashboard/music/mini-player";
 import { RouteProgress, startRouteProgress } from "@/components/layout/route-progress";
@@ -85,6 +86,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: AuthU
           >
             Terms
           </Link>
+          <DesktopVersionBadge />
         </div>
       </aside>
 

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { app, contextBridge, ipcRenderer } from "electron";
 
 /**
  * Preload — runs in an ISOLATED world with `contextIsolation: true`.
@@ -22,6 +22,10 @@ import { contextBridge, ipcRenderer } from "electron";
  * not strip it — the card depends on it; do not add anything callable here.
  */
 contextBridge.exposeInMainWorld("isDuitSiniDesktop", true);
+// The installed desktop version (package.json version), so the in-app footer
+// can show "vX.Y.Z" beside the legal links. Same non-spoofable guarantee as
+// the boolean above.
+contextBridge.exposeInMainWorld("duitsiniDesktopVersion", app.getVersion());
 
 const TOKEN_RE = /cub_[0-9a-f]{48}/;
 
