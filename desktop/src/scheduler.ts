@@ -130,9 +130,14 @@ export class Scheduler {
         this.deps.log("no usage streams this cycle — nothing to push");
         return;
       }
-      await this.push(streams);
-      this.lastPushAt = Date.now();
-      await this.deps.store.save();
+      const pushed = await this.push(streams);
+      // Only advance the cadence on a real attempt. A token-less skip (e.g. the
+      // page still loading at boot) must leave lastPushAt alone, or the post-load
+      // retry gets gated out by MIN_GAP_MS and usage never lands.
+      if (pushed) {
+        this.lastPushAt = Date.now();
+        await this.deps.store.save();
+      }
     } catch (e) {
       this.deps.log(`tick failed: ${(e as Error).message}`);
     } finally {
@@ -310,13 +315,19 @@ export class Scheduler {
    * One POST carrying every stream, in the exact shape the existing sharer
    * sends. The server cannot distinguish this app from the downloadable script —
    * that is deliberate, and it is why no web-app change was needed.
+   *
+   * Returns true if a POST was actually attempted (a token was available), false
+   * if it was skipped. The caller only advances the cadence clock on a real
+   * attempt — a token-less skip (page still loading at boot, or signed out) must
+   * NOT count as a push, otherwise the post-load retry is gated out by MIN_GAP_MS
+   * and usage never lands.
    */
-  private async push(streams: UsageStream[]): Promise<void> {
+  private async push(streams: UsageStream[]): Promise<boolean> {
     const token = await this.deps.getToken();
     if (!token) {
       this.deps.log("push skipped: no bridge token (not signed in yet)");
       this.deps.onStatus({ kind: "error", reason: "Sign in to DuitSini to share usage." });
-      return;
+      return false;
     }
 
     const primary = streams.find((s) => s.source === "claude_pro" || s.source === "claude") ?? streams[0]!;
@@ -342,5 +353,6 @@ export class Scheduler {
     } else {
       this.deps.log(`push ok (${streams.length} stream${streams.length === 1 ? "" : "s"}: ${streams.map((s) => s.source).join(",")})`);
     }
+    return true;
   }
 }

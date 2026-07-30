@@ -41,7 +41,9 @@ import {
  */
 
 const isDev = !app.isPackaged;
-console.log(`[duitsini] boot defaultApp=${process.defaultApp} platform=${process.platform} packaged=${app.isPackaged}`);
+console.log(
+  `[duitsini] boot version=${app.getVersion()} defaultApp=${process.defaultApp} platform=${process.platform} packaged=${app.isPackaged}`,
+);
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let scheduler: Scheduler | null = null;
