@@ -2,6 +2,15 @@ appId: com.duitsini.desktop
 productName: DuitSini
 copyright: Copyright © DuitSini
 
+# Installer-owned claim on the fallback deep-link scheme. Runtime registration
+# (main.ts) still happens for dev; declaring it here makes the NSIS/DMG installer
+# own the registry entry in packaged builds, which survives the Win8+ UserChoice
+# layer better than a runtime write and won't be shadowed by a stale dev entry.
+protocols:
+  - name: "DuitSini Auth"
+    schemes:
+      - duitsini
+
 directories:
   output: release
   buildResources: assets

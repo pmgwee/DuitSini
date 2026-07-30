@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   Menu,
   nativeImage,
   shell,
@@ -8,18 +9,21 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
 import { Store } from "./store";
 import { TokenHolder } from "./mint";
+import { startLoopback, type LoopbackHandle } from "./loopback";
 import {
+  DEEP_LINK_CALLBACK,
   DEEP_LINK_SCHEME,
   completionUrl,
   deepLinkFromArgv,
   isOAuthAuthorize,
   parseCallback,
   toDesktopAuthorizeUrl,
+  type CallbackParams,
 } from "./oauth";
 
 /**
@@ -33,6 +37,7 @@ import {
  */
 
 const isDev = !app.isPackaged;
+console.log(`[duitsini] boot defaultApp=${process.defaultApp} platform=${process.platform} packaged=${app.isPackaged}`);
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let scheduler: Scheduler | null = null;
@@ -51,6 +56,20 @@ function appOriginOf(): string {
 }
 
 const appOrigin = appOriginOf();
+
+/**
+ * Where the provider hands the one-time code back to this app.
+ *
+ * Primary: the loopback HTTP listener — a fetchable http://127.0.0.1:{port} URL
+ * the system browser navigates to directly, which sidesteps the custom-scheme
+ * external-protocol dispatch that Chrome throttles for server-redirect triggers.
+ * Fallback: the `duitsini://` deep link (kept registered below) for the rare
+ * case the listener cannot bind.
+ */
+let loopback: LoopbackHandle | null = null;
+function callbackTarget(): string {
+  return loopback ? `${loopback.origin}/auth/callback` : DEEP_LINK_CALLBACK;
+}
 
 /**
  * Hosts the shell may navigate to in-window. Everything else goes to the system
@@ -139,7 +158,7 @@ function createWindow(): void {
     // cookie surgery.
     if (isOAuthAuthorize(url)) {
       event.preventDefault();
-      const external = toDesktopAuthorizeUrl(url);
+      const external = toDesktopAuthorizeUrl(url, callbackTarget());
       if (isDev) console.log(`[duitsini] OAuth → system browser: ${external}`);
       void shell.openExternal(external);
       return;
@@ -157,7 +176,7 @@ function createWindow(): void {
     // Same hand-off as will-navigate, for flows that open OAuth in a popup
     // instead of redirecting in place.
     if (isOAuthAuthorize(url)) {
-      void shell.openExternal(toDesktopAuthorizeUrl(url));
+      void shell.openExternal(toDesktopAuthorizeUrl(url, callbackTarget()));
       return { action: "deny" };
     }
     void shell.openExternal(url);
@@ -273,40 +292,93 @@ async function startCollection(): Promise<void> {
 }
 
 /**
- * Claim `duitsini://` with the OS so the browser can hand the auth code back.
+ * Claim `duitsini://` with the OS — the FALLBACK transport (loopback is
+ * primary). Kept registered and hardened so the deep link still works if the
+ * loopback listener cannot bind, and so packaged builds get an installer-grade
+ * claim when paired with electron-builder `protocols`.
  *
- * Unpackaged runs need the electron binary plus the script path, otherwise the
- * OS would try to launch `electron.exe` with no app and the link would appear
- * to do nothing.
+ * Remove-then-set clears stale entries from a moved folder, a changed cwd, or a
+ * shadowing packaged install (Win8+ UserChoice layer). In dev, `app.getAppPath()`
+ * is the stable absolute app dir — `resolve(process.argv[1])` would record the
+ * fragile cwd (`.`). The trailing `--` is the CVE-2018-1000006 argv-injection
+ * mitigation (GitHub Desktop's pattern): it makes the appended `%1` positional
+ * so a hostile URL cannot inject Chromium switches.
  */
 function registerProtocolClient(): void {
+  app.removeAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  let ok: boolean;
   if (process.defaultApp) {
-    const script = process.argv[1];
-    if (script) {
-      app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [resolve(script)]);
-    }
+    ok = app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [
+      app.getAppPath(),
+      "--",
+    ]);
   } else {
-    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+    ok = app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
   }
+  console.log(
+    `[duitsini] protocol register (${process.defaultApp ? "dev" : "packaged"}) ` +
+      `ok=${ok} isRegistered=${app.isDefaultProtocolClient(DEEP_LINK_SCHEME)} ` +
+      `execPath=${process.execPath}${process.defaultApp ? ` appPath=${app.getAppPath()}` : ""}`,
+  );
 }
 
 /**
  * Finish sign-in with the code the browser just handed us.
  *
- * We do not exchange it here — we hand it to the web app's own
+ * The code is NOT exchanged here — we hand it to the web app's own
  * `/auth/callback`, which pairs it with the PKCE verifier already in this
- * window's cookie jar and sets the session itself.
+ * window's cookie jar and sets the session itself. Shared by both transports:
+ * the loopback HTTP listener (primary) and the `duitsini://` deep link (fallback).
  */
-function handleDeepLink(link: string): void {
-  const params = parseCallback(link);
-  if (!params) return;
-  if (isDev) console.log(`[duitsini] deep link received (code=${params.code ? "yes" : "no"})`);
-
+function completeSignIn(params: CallbackParams, via: string): void {
+  console.log(
+    `[duitsini] ${via} received (code=${params.code ? "yes" : "no"}${params.error ? " error=yes" : ""})`,
+  );
   if (!win) createWindow();
   if (!win) return;
-  if (!win.isVisible()) win.show();
+  // Pull focus back: the user just spent the round-trip in the system browser
+  // and may have a tray-hidden or backgrounded window.
+  app.focus({ steal: true });
+  if (win.isMinimized()) win.restore();
+  win.show();
   win.focus();
+
+  // The web app's /auth/callback route redirects to /login?error=callback when
+  // exchangeCodeForSession fails (rejected/expired code). That would otherwise
+  // look identical to "stuck on login", so surface it once as a clear message.
+  win.webContents.once("did-navigate", (_event, url) => {
+    try {
+      const u = new URL(url);
+      if (u.pathname === "/login" && u.searchParams.get("error") === "callback") {
+        console.log("[duitsini] session exchange FAILED → /login?error=callback");
+        if (win && !win.isDestroyed()) {
+          void dialog.showMessageBox(win, {
+            type: "warning",
+            title: "DuitSini",
+            message: "Sign-in could not be completed.",
+            detail: "The one-time code was rejected by the server. Please click Continue with Google again.",
+          });
+        }
+      } else if (u.pathname === "/subscriptions" || u.pathname === "/") {
+        console.log(`[duitsini] signed in → ${u.pathname}`);
+      }
+    } catch {
+      /* a non-url commit — ignore */
+    }
+  });
+
   void win.loadURL(completionUrl(appOrigin, params));
+}
+
+/** `duitsini://` deep-link fallback path. */
+function handleDeepLink(link: string): void {
+  if (isDev) console.log(`[duitsini] deep link raw: ${link}`);
+  const params = parseCallback(link);
+  if (!params) {
+    console.log("[duitsini] deep link unparseable or missing code/error");
+    return;
+  }
+  completeSignIn(params, "deep link");
 }
 
 // Single instance: a second launch focuses the running window instead of
@@ -320,27 +392,37 @@ if (!app.requestSingleInstanceLock()) {
   // appended to argv, and the single-instance lock routes it to the running
   // instance rather than starting a second collector.
   app.on("second-instance", (_e, argv) => {
+    const link = deepLinkFromArgv(argv);
+    console.log(`[duitsini] second-instance deep link: ${link ? "yes" : "no"}`);
     if (win) {
       if (!win.isVisible()) win.show();
       win.focus();
     }
-    const link = deepLinkFromArgv(argv);
     if (link) handleDeepLink(link);
   });
 
   // macOS delivers it as an event instead.
   app.on("open-url", (event, url) => {
     event.preventDefault();
+    console.log(`[duitsini] open-url: ${url}`);
     handleDeepLink(url);
   });
 
   void app.whenReady().then(async () => {
+    // Bind the loopback listener first so callbackTarget() is resolved before
+    // the window loads and before any sign-in can happen.
+    loopback = await startLoopback((params) => completeSignIn(params, "loopback"));
+    console.log(
+      `[duitsini] loopback ${loopback ? loopback.origin : "FAILED — OAuth falls back to duitsini://"}`,
+    );
+
     createWindow();
     createTray();
 
     // Cold start: the OS launched us BECAUSE of the deep link, so it is in our
     // own argv rather than arriving via second-instance.
     const initial = deepLinkFromArgv(process.argv);
+    console.log(`[duitsini] cold-start deep link: ${initial ? "yes" : "no"}`);
     if (initial) handleDeepLink(initial);
 
     await startCollection();
@@ -370,5 +452,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   quitting = true;
   scheduler?.stop();
+  loopback?.close();
   void store.save();
 });

@@ -60,9 +60,13 @@ export function isOAuthAuthorize(url: string): boolean {
  * web app built it. That matters: the challenge must keep matching the verifier
  * already sitting in our cookie jar, so it must not be regenerated here.
  */
-export function toDesktopAuthorizeUrl(url: string): string {
+export function toDesktopAuthorizeUrl(url: string, callbackTarget: string): string {
   const u = new URL(url);
-  u.searchParams.set("redirect_to", DEEP_LINK_CALLBACK);
+  // Overwrites the web client's own redirect_to (an https URL on the app
+  // origin). Everything else — provider, scopes, `code_challenge` — is left
+  // untouched so the challenge still matches the verifier already in this
+  // window's cookie jar.
+  u.searchParams.set("redirect_to", callbackTarget);
   return u.toString();
 }
 
@@ -71,6 +75,16 @@ export interface CallbackParams {
   error?: string;
   /** Post-login path the web app should land on. */
   next?: string;
+}
+
+/** Pull the OAuth result params off any parsed URL. Null when there is none. */
+export function extractCallbackParams(u: URL): CallbackParams | null {
+  const code = u.searchParams.get("code") ?? undefined;
+  const error =
+    u.searchParams.get("error_description") ?? u.searchParams.get("error") ?? undefined;
+  const next = u.searchParams.get("next") ?? undefined;
+  if (!code && !error) return null;
+  return { code, error, next };
 }
 
 /** Parse `duitsini://auth/callback?...`. Returns null for anything else. */
@@ -88,12 +102,7 @@ export function parseCallback(deepLink: string): CallbackParams | null {
   // shape is checked loosely rather than by exact path match.
   const combined = `${u.host}${u.pathname}`;
   if (!combined.includes("auth")) return null;
-
-  const code = u.searchParams.get("code") ?? undefined;
-  const error =
-    u.searchParams.get("error_description") ?? u.searchParams.get("error") ?? undefined;
-  const next = u.searchParams.get("next") ?? undefined;
-  return { code, error, next };
+  return extractCallbackParams(u);
 }
 
 /**

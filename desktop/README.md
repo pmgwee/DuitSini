@@ -151,15 +151,23 @@ node scripts/make-icons.mjs
 
 ## Required one-time setup: the OAuth redirect
 
-Add this to **Supabase → Authentication → URL Configuration → Redirect URLs**:
+Add these to **Supabase → Authentication → URL Configuration → Redirect URLs**:
 
 ```
+http://127.0.0.1:43128/auth/callback
+http://127.0.0.1:*/auth/callback
 duitsini://auth/callback
 ```
 
-Without it, Google sign-in fails at the last hop with `redirect_to is not
-allowed`. It is dashboard configuration, not code — nothing in the web app
-changes.
+The first is the **primary** loopback transport (see below); the second is a
+glob that covers the rare case the fixed port is taken and the listener falls
+back to an ephemeral one; the third is the `duitsini://` deep link kept as a
+last-resort fallback. Without the matching entry, sign-in fails at the last hop
+with `redirect_to is not allowed`. This is dashboard configuration, not code —
+nothing in the web app changes.
+
+The fixed port is `43128` by default and can be overridden with
+`DUITSINI_LOOPBACK_PORT`.
 
 ## Google sign-in
 
@@ -177,19 +185,59 @@ avoided by intercepting one step earlier:
    own Supabase client writes its PKCE **code-verifier cookie into this app's
    cookie jar**.
 2. It navigates to `…supabase.co/auth/v1/authorize?…`. We cancel that, rewrite
-   **only** `redirect_to` → `duitsini://auth/callback`, and open it in the
-   system browser. `code_challenge` is left untouched — it must keep matching
-   the verifier from step 1.
+   **only** `redirect_to`, and open it in the system browser. `code_challenge`
+   is left untouched — it must keep matching the verifier from step 1.
 3. The user signs in to Google normally, in a real browser.
-4. Supabase redirects to `duitsini://auth/callback?code=…`; the OS hands it to
-   the app (registered via `app.setAsDefaultProtocolClient`).
-5. The app loads `<app>/auth/callback?code=…` in its window, and the web app's
-   **existing** route exchanges the code against that verifier and sets the
-   session.
+4. Supabase redirects to the rewritten `redirect_to` with `?code=…`. The app
+   captures it and loads `<app>/auth/callback?code=…` in its window.
+5. The web app's **existing** route exchanges the code against that verifier and
+   sets the session.
 
 So the browser never holds a session, this app never parses or writes an auth
-cookie, and `app/auth/callback/route.ts` is used exactly as written. See
-`oauth.ts`.
+cookie, and `app/auth/callback/route.ts` is used exactly as written.
+
+### Why the code comes back over loopback HTTP, not the `duitsini://` deep link
+
+Both are wired up. **Loopback is primary.** At startup the app binds a tiny
+`http://127.0.0.1:43128` listener; step 2 rewrites `redirect_to` to
+`http://127.0.0.1:43128/auth/callback`, so Supabase's terminal 302 targets a
+*fetchable* URL. The browser just navigates to it (no external-protocol dialog,
+no OS handler needed), the listener grabs `?code=`, shows a "you can close this
+tab" page, and hands the code to the same completion path the deep link uses.
+
+The custom-scheme `duitsini://` hand-off was the previous design, and it is
+fragile in exactly the way that bit us: a server-issued 302 to a non-fetchable
+scheme is routed through the browser's external-protocol dispatcher, which on
+Windows Chrome is throttled for *server-redirect* triggers (not user clicks) and
+demands a perfectly-registered, `URL Protocol`-marked handler. When it fails it
+fails silently — the browser tab sits "loading" on Google's consent-summary page
+forever and the app never receives the code. A loopback URL is a normal
+navigation, so it never enters that path. Loopback is RFC 8252 §8.3's Best
+Current Practice for native apps for exactly this reason.
+
+`duitsini://` stays registered (hardened: remove-then-set, `app.getAppPath()`,
+the `--` argv-injection guard, and the boolean return is now checked and logged)
+as a fallback for the case the listener cannot bind.
+
+### If sign-in still doesn't complete
+
+The dev console now logs every hop, so the first missing line localizes the
+break: `boot` → `protocol register … ok=true` → `loopback http://127.0.0.1:43128`
+→ (click Continue with Google) → `OAuth → system browser: …` → `loopback
+received (code=yes)` → `signed in → /subscriptions`.
+
+- No `loopback received` line → Supabase did not redirect to the listener. Check
+  the Redirect URLs entries above are exact and on the right project, and that
+  the `redirect_to` in the logged system-browser URL is `http://127.0.0.1:43128/…`.
+- `loopback received` then a **"Sign-in could not be completed"** dialog → the
+  code reached the app but the server rejected the exchange (expired/replayed
+  code, or the verifier cookie was cleared). Click Continue with Google again.
+- To split custom-scheme registration from a Chrome throttle (only relevant if
+  you fell back to `duitsini://`): with the app running, paste
+  `duitsini://auth/callback?code=test` into Win+R. If it foregrounds the app,
+  registration is fine and the problem is Chrome throttling the 302; if nothing
+  happens, registration is the issue — see the `protocol register` boot log and
+  `HKCU\Software\Classes\duitsini` in `regedit`.
 
 ## Known gaps
 
