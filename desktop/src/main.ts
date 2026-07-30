@@ -15,6 +15,7 @@ import { Scheduler, type Status } from "./scheduler";
 import { Store } from "./store";
 import { TokenHolder } from "./mint";
 import { startLoopback, type LoopbackHandle } from "./loopback";
+import { createUsageTracker } from "./tracker";
 import {
   DEEP_LINK_CALLBACK,
   DEEP_LINK_SCHEME,
@@ -56,6 +57,16 @@ function appOriginOf(): string {
 }
 
 const appOrigin = appOriginOf();
+
+/**
+ * Forensic usage journal. Captures every usage/refresh event (real token
+ * expiry, call count, 429/401 headers, refresh outcome) so a future stoppage is
+ * diagnosable from data. The decisive failures also mirror to the console.
+ */
+const usageTracker = createUsageTracker(
+  join(app.getPath("userData"), "usage-tracker.jsonl"),
+  (line) => console.log(line),
+);
 
 /**
  * Where the provider hands the one-time code back to this app.
@@ -245,6 +256,7 @@ function buildTrayMenu(): void {
     { type: "separator" },
     { label: "Open DuitSini", click: () => (win ? (win.show(), win.focus()) : createWindow()) },
     { label: "Refresh usage now", click: () => void scheduler?.pullNow() },
+    { label: "Open usage log", click: () => void shell.openPath(usageTracker.file) },
     { type: "separator" },
     {
       label: "Start at login",
@@ -284,6 +296,7 @@ async function startCollection(): Promise<void> {
     store,
     getToken: () => tokens.get(),
     ingestUrl: () => `${appOrigin}/api/claude-usage/ingest`,
+    tracker: usageTracker,
     onStatus: (s) => {
       lastStatus = s;
       buildTrayMenu();

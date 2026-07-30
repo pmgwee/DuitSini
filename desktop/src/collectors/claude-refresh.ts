@@ -7,6 +7,7 @@ import {
 } from "../../../lib/bridge/sharer/backoff";
 import { UA } from "../config";
 import { retryMsFrom, safeFetch } from "../net";
+import type { UsageTracker } from "../tracker";
 import { codedError } from "../types";
 
 /**
@@ -68,7 +69,10 @@ export class RefreshManager {
   private state = new Map<string, RefreshState>();
   private lastAttemptAt = 0;
 
-  constructor(private readonly log: (line: string) => void = () => {}) {}
+  constructor(
+    private readonly log: (line: string) => void = () => {},
+    private readonly tracker?: UsageTracker,
+  ) {}
 
   importState(s: Record<string, RefreshState> | undefined): void {
     if (!s) return;
@@ -129,6 +133,13 @@ export class RefreshManager {
 
     this.lastAttemptAt = now;
     st.lastAttemptAt = now;
+    this.tracker?.event("refresh_start", {
+      source: path,
+      force,
+      expiresAt: exp || null,
+      minsToExpiry: exp ? Math.round((exp - now) / 60_000) : null,
+      streak: st.streak ?? 0,
+    });
 
     try {
       const token = await this.refreshOrAdopt(creds, path, exp);
@@ -138,6 +149,12 @@ export class RefreshManager {
       return token;
     } catch (e) {
       this.arm(st, e as { code?: number | string; retryMs?: number; message?: string });
+      this.tracker?.event("refresh_hold", {
+        source: path,
+        blockedUntil: st.blockedUntil || null,
+        streak: st.streak ?? 0,
+        reason: (e as { code?: number | string }).code ?? "error",
+      });
       return o.accessToken;
     }
   }
@@ -189,6 +206,7 @@ export class RefreshManager {
         Date.now() < fo.expiresAt - EXPIRY_BUFFER_MS
       ) {
         this.log("[Claude] adopted a fresher sign-in from disk (another process refreshed it).");
+        this.tracker?.event("refresh_adopt", { source: path, expiresAt: fo.expiresAt });
         return fo.accessToken;
       }
       // Refresh the FRESH file object so the write-back preserves whatever else
@@ -232,6 +250,7 @@ export class RefreshManager {
         const reset = resp.headers.get("anthropic-ratelimit-unified-reset");
         const ageMin =
           typeof o?.expiresAt === "number" ? Math.round((Date.now() - o.expiresAt) / 60_000) : null;
+        this.tracker?.event("refresh_429", { source: path, endpoint: url, retryAfter: ra, reset, tokenAgeMin: ageMin });
         throw codedError(
           `Token refresh rate-limited (429)${ra ? ` retry-after=${ra}s` : ""}` +
             `${ageMin === null ? "" : ` tokenAge=${ageMin}m`}`,
@@ -243,10 +262,13 @@ export class RefreshManager {
         // 4xx: this refresh token is finished — revoked, or a rotation response
         // was lost in transit. Retrying can never fix it; only a fresh login
         // can, and blind retries are exactly what gets a login flagged.
-        throw codedError(
-          `Could not refresh the sign-in (${resp.status}).`,
-          resp.status < 500 ? "reauth" : "5xx",
-        );
+        const cls = resp.status < 500 ? "reauth" : "5xx";
+        this.tracker?.event(cls === "reauth" ? "refresh_reauth" : "refresh_5xx", {
+          source: path,
+          endpoint: url,
+          status: resp.status,
+        });
+        throw codedError(`Could not refresh the sign-in (${resp.status}).`, cls);
       }
 
       const j = (await resp.json()) as {
@@ -261,9 +283,17 @@ export class RefreshManager {
       // spelling the file uses both survive.
       o.accessToken = j.access_token;
       if (j.refresh_token) o.refreshToken = j.refresh_token;
-      o.expiresAt = Date.now() + (j.expires_in || 3600) * 1000;
+      const newExpiresAt = Date.now() + (j.expires_in || 3600) * 1000;
+      o.expiresAt = newExpiresAt;
       await writeFile(path, JSON.stringify(creds, null, 2), { encoding: "utf8", mode: 0o600 });
 
+      this.tracker?.event("refresh_ok", {
+        source: path,
+        endpoint: url,
+        expiresIn: j.expires_in || 3600,
+        newExpiresAt,
+        rotatedRefreshToken: !!j.refresh_token,
+      });
       this.log(
         `[Claude] refreshed the sign-in (valid ~${Math.max(
           1,

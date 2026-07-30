@@ -8,6 +8,7 @@ import {
 } from "../config";
 import { retryMsFrom, safeFetch } from "../net";
 import type { RefreshManager } from "./claude-refresh";
+import type { UsageTracker } from "../tracker";
 import { codedError, type Snapshot, type UsageLimit, type UsageWindow } from "../types";
 
 /**
@@ -162,10 +163,23 @@ export class AllRejectedError extends Error {
   }
 }
 
-async function fetchUsage(token: string, onCall: () => void): Promise<Record<string, unknown>> {
-  // Count the ATTEMPT, not the success: the account-keyed rolling window counts
-  // every request, including the ones that come back 401/403/429.
-  onCall();
+async function fetchUsage(
+  token: string,
+  /** Counts the ATTEMPT (the account-keyed window counts every request, including 401/429) and returns the new daily count. */
+  onCall: () => number,
+  ctx: { source: string; expiresAt?: number },
+  tracker?: UsageTracker,
+): Promise<Record<string, unknown>> {
+  const now = Date.now();
+  const callsToday = onCall();
+  tracker?.event("usage_call", {
+    source: ctx.source,
+    expiresAt: ctx.expiresAt ?? null,
+    minsToExpiry: typeof ctx.expiresAt === "number" ? Math.round((ctx.expiresAt - now) / 60_000) : null,
+    alreadyExpired: typeof ctx.expiresAt === "number" ? now > ctx.expiresAt : null,
+    callsToday,
+  });
+
   const r = await safeFetch(USAGE_ENDPOINT, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -175,27 +189,45 @@ async function fetchUsage(token: string, onCall: () => void): Promise<Record<str
     },
   });
 
-  if (r.status === 401) throw codedError("Sign-in rejected by the server.", 401);
+  const retryAfter = r.headers.get("retry-after");
+  const reset =
+    r.headers.get("anthropic-ratelimit-unified-reset") || r.headers.get("x-ratelimit-reset");
+  const minsToExpiry =
+    typeof ctx.expiresAt === "number" ? Math.round((ctx.expiresAt - now) / 60_000) : null;
+
+  if (r.status === 401) {
+    tracker?.event("usage_401", { source: ctx.source, callsToday, minsToExpiry, retryAfter, reset });
+    throw codedError("Sign-in rejected by the server.", 401);
+  }
   if (r.status === 403) {
+    tracker?.event("usage_403", { source: ctx.source, callsToday, retryAfter, reset });
     throw codedError("Usage is only available on a Claude Pro or Max plan.", 403);
   }
   if (r.status === 429) {
-    const ra = r.headers.get("retry-after");
-    const reset =
-      r.headers.get("anthropic-ratelimit-unified-reset") || r.headers.get("x-ratelimit-reset");
     let detail = "";
     try {
-      detail = (await r.text()).slice(0, 160);
+      detail = (await r.text()).slice(0, 200);
     } catch {
       /* body may be empty */
     }
+    tracker?.event("usage_429", { source: ctx.source, callsToday, retryAfter, reset, body: detail });
     throw codedError(
-      `Anthropic usage rate-limited (429)${ra ? ` retry-after=${ra}s` : ""}${detail ? ` body=${detail}` : ""}`,
+      `Anthropic usage rate-limited (429)${retryAfter ? ` retry-after=${retryAfter}s` : ""}${detail ? ` body=${detail.slice(0, 160)}` : ""}`,
       429,
-      retryMsFrom(ra, reset),
+      retryMsFrom(retryAfter, reset),
     );
   }
-  if (!r.ok) throw new Error(`Usage check failed (${r.status}).`);
+  if (!r.ok) {
+    let detail = "";
+    try {
+      detail = (await r.text()).slice(0, 200);
+    } catch {
+      /* body may be empty */
+    }
+    tracker?.event("usage_error", { source: ctx.source, status: r.status, callsToday, body: detail });
+    throw new Error(`Usage check failed (${r.status}).`);
+  }
+  tracker?.event("usage_ok", { source: ctx.source, callsToday, minsToExpiry });
   return (await r.json()) as Record<string, unknown>;
 }
 
@@ -222,8 +254,9 @@ export interface ProResult {
  * file. Omit it for pure cc-switch behaviour (read-only, zero refresh calls).
  */
 export async function fetchProSnapshot(
-  onCall: () => void,
+  onCall: () => number,
   refresher?: RefreshManager,
+  tracker?: UsageTracker,
 ): Promise<ProResult> {
   let sawCreds = false;
   const rejected: string[] = [];
@@ -249,7 +282,12 @@ export async function fetchProSnapshot(
     });
 
     try {
-      return { snapshot: snapshotFrom(await fetchUsage(token, onCall)), sourceLabel: src.label };
+      return {
+        snapshot: snapshotFrom(
+          await fetchUsage(token, onCall, { source: src.label, expiresAt: oauth.expiresAt }, tracker),
+        ),
+        sourceLabel: src.label,
+      };
     } catch (e) {
       const code = (e as { code?: number | string }).code;
       if (code !== 401 && code !== 403) throw e;
@@ -263,7 +301,14 @@ export async function fetchProSnapshot(
         if (forced && forced !== token) {
           try {
             return {
-              snapshot: snapshotFrom(await fetchUsage(forced, onCall)),
+              snapshot: snapshotFrom(
+                await fetchUsage(
+                  forced,
+                  onCall,
+                  { source: src.label, expiresAt: oauth.expiresAt },
+                  tracker,
+                ),
+              ),
               sourceLabel: src.label,
             };
           } catch (retryErr) {

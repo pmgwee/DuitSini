@@ -22,6 +22,7 @@ import {
 } from "./collectors/glm";
 import type { Store } from "./store";
 import { safeFetch } from "./net";
+import type { UsageTracker } from "./tracker";
 import type { Snapshot, UsageStream } from "./types";
 
 /**
@@ -52,6 +53,8 @@ export interface SchedulerDeps {
   ingestUrl: () => string;
   onStatus: (s: Status) => void;
   log: (line: string) => void;
+  /** Durable forensic journal for usage/refresh events. */
+  tracker: UsageTracker;
 }
 
 const jitter = (n: number) => Math.floor(Math.random() * n);
@@ -69,7 +72,7 @@ export class Scheduler {
   private running = false;
 
   constructor(private readonly deps: SchedulerDeps) {
-    this.refresher = new RefreshManager(deps.log);
+    this.refresher = new RefreshManager(deps.log, deps.tracker);
   }
 
   async start(pushSeconds?: number): Promise<void> {
@@ -183,10 +186,15 @@ export class Scheduler {
     }
 
     try {
-      const { snapshot, sourceLabel } = await fetchProSnapshot(() => {
-        const n = this.deps.store.noteUsageCall();
-        this.deps.log(`usage call #${n} today`);
-      }, this.refresher);
+      const { snapshot, sourceLabel } = await fetchProSnapshot(
+        () => {
+          const n = this.deps.store.noteUsageCall();
+          this.deps.log(`usage call #${n} today`);
+          return n;
+        },
+        this.refresher,
+        this.deps.tracker,
+      );
       this.deps.store.setRefreshState(this.refresher.exportState());
       this.lastApiSnapshot = snapshot;
       this.lastApiAt = Date.now();
