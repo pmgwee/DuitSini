@@ -5,13 +5,31 @@ import {
   REFRESH_COOLDOWNS_MS,
   REAUTH_BLOCK_MS,
   TOKEN_5XX_BLOCK_MS,
+  CODEX_USAGE_429_QUIET_MS,
   proUsage429Hold,
+  codexUsage429Hold,
   glmRetryHold,
   glmBackoffHold,
   refresh429Hold,
   reauthHold,
   token5xxHold,
 } from "./backoff";
+
+describe("codexUsage429Hold", () => {
+  it("uses a conservative [5,15,30,60] minute ladder", () => {
+    expect([...CODEX_USAGE_429_QUIET_MS]).toEqual([300_000, 900_000, 1_800_000, 3_600_000]);
+    expect(codexUsage429Hold(1, undefined, 0)).toBe(300_000);
+    expect(codexUsage429Hold(2, undefined, 0)).toBe(900_000);
+    expect(codexUsage429Hold(3, undefined, 0)).toBe(1_800_000);
+    expect(codexUsage429Hold(4, undefined, 0)).toBe(3_600_000);
+    expect(codexUsage429Hold(20, undefined, 0)).toBe(3_600_000);
+  });
+
+  it("honors a longer retry-after and adds injected jitter", () => {
+    expect(codexUsage429Hold(1, 1_200_000, 0)).toBe(1_200_000);
+    expect(codexUsage429Hold(1, undefined, 15_000)).toBe(315_000);
+  });
+});
 
 describe("v7 backoff constants (verbatim)", () => {
   it("pins the usage-429 quiet ladder [15,30,60]min (pro source)", () => {

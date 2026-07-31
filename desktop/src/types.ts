@@ -36,6 +36,8 @@ export interface UsageStream {
   seven_day?: UsageWindow | null;
   limits?: UsageLimit[] | null;
   provider?: ProviderInfo | null;
+  cached?: boolean;
+  observed_at?: string | null;
 }
 
 /** What a collector returns for one cycle. */

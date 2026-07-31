@@ -9,7 +9,7 @@ import { join } from "node:path";
 export const APP_URL = process.env.DUITSINI_APP_URL || "https://duitsini.vercel.app";
 
 /** Reported to the server so the live route sizes its freshness window to us. */
-export const CLIENT_VERSION = "desktop-1";
+export const CLIENT_VERSION = "desktop-2";
 
 export const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 
@@ -37,6 +37,9 @@ export const LOCAL_ESTIMATE_MS = 60_000;
 
 /** How long an authoritative API snapshot stays usable before we re-fetch. */
 export const API_CACHE_MS = 300_000;
+
+/** Brief resilience window for Codex when a single query fails or is throttled. */
+export const CODEX_STALE_CACHE_MS = 600_000;
 
 export const CC_SWITCH_DIR = join(homedir(), ".cc-switch");
 export const CC_SWITCH_DB = join(CC_SWITCH_DIR, "cc-switch.db");

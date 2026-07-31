@@ -28,6 +28,11 @@
     "resolveJsonModule": true,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts", "../lib/bridge/sharer/backoff.ts"],
+  "include": [
+    "src/**/*.ts",
+    "../lib/bridge/sharer/backoff.ts",
+    "../lib/claude-usage/codex.ts",
+    "../lib/claude-usage/protocol.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

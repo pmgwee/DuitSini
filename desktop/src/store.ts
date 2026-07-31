@@ -21,6 +21,8 @@ export interface SourceState {
   backoff?: number;
   /** Human-readable reason, surfaced in the tray/UI. */
   message?: string;
+  /** Non-secret auth identity; a changed login may safely end an auth hold. */
+  credentialFingerprint?: string;
 }
 
 export interface PersistedState {

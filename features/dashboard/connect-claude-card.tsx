@@ -5,6 +5,7 @@ import { Apple, Check, CheckCircle2, Copy, Download, Share2, Terminal } from "lu
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { AgentProviderIcon } from "./agent-provider-icon";
 
 type OS = "windows" | "mac";
 
@@ -14,6 +15,7 @@ type ConnectedSource = { source: string; label: string };
 type LiveResponse = {
   error?: string;
   streams?: { source?: string; label?: string }[] | null;
+  sharer_version?: string | null;
 };
 
 /**
@@ -31,6 +33,7 @@ type LiveResponse = {
 export function ConnectClaudeCard() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [sources, setSources] = useState<ConnectedSource[]>([]);
+  const [sharerVersion, setSharerVersion] = useState<string | null>(null);
   const [os, setOs] = useState<OS>("windows");
   // True only when rendered inside the DuitSini desktop app (the Electron shell
   // exposes `window.isDuitSiniDesktop` via contextBridge). Stays false in any
@@ -60,6 +63,7 @@ export function ConnectClaudeCard() {
         if (!active) return;
         const isConn = r.ok && !d.error;
         setConnected(isConn);
+        setSharerVersion(typeof d.sharer_version === "string" ? d.sharer_version : null);
         if (isConn && Array.isArray(d.streams)) {
           setSources(
             d.streams
@@ -86,7 +90,7 @@ export function ConnectClaudeCard() {
     <div className="rounded-2xl border border-border/60 bg-surface/40 p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Share2 className="size-4 text-primary" /> Share your Claude usage
+          <Share2 className="size-4 text-primary" /> Share your agent usage
         </div>
         {connected ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
@@ -98,13 +102,12 @@ export function ConnectClaudeCard() {
       {connected === null ? (
         <ConnectCardSkeleton />
       ) : connected ? (
-        <ConnectedView sources={sources} isDesktop={isDesktop} />
+        <ConnectedView sources={sources} isDesktop={isDesktop} sharerVersion={sharerVersion} />
       ) : (
         <>
           <p className="mb-4 text-sm text-muted-foreground">
-            See your own Claude usage here, live — no coding needed. Pick your computer, follow the
-            short steps, and keep the window open. You need Claude Code signed in with your own Claude
-            Pro/Max account.
+            See Claude, GLM, and ChatGPT Codex usage here, live — no coding needed. The same sharer
+            auto-detects every existing local sign-in; Codex needs no separate download, key, or setup.
           </p>
 
           {isDesktop ? (
@@ -128,7 +131,7 @@ export function ConnectClaudeCard() {
           {!isDesktop && (
             <details className="mt-3 rounded-lg border border-border/40 bg-surface/30 px-3 py-2 text-[11px] text-muted-foreground/80">
             <summary className="cursor-pointer select-none font-medium text-muted-foreground">
-              Want both Claude Pro and GLM live at once?
+              Want Claude Pro, GLM, and Codex live at once?
             </summary>
             <p className="mt-1.5">
               Claude usage is account-level, so any Claude Code login with your Pro/Max account shows the
@@ -154,13 +157,14 @@ export function ConnectClaudeCard() {
               <b className="text-foreground">macOS Keychain</b>, and your normal{" "}
               <code className="font-mono text-[10px]">~/.claude</code> — if one sign-in is rejected it
               tries the next and logs which one it&apos;s using). GLM is read from your cc-switch setup,
-              untouched. Both then show live side by side.
+              while Codex is read automatically from your existing Codex CLI sign-in. All available
+              agents then show live side by side.
             </p>
             <p className="mt-1.5">
               Update speed: create <code className="font-mono text-[10px]">sharer-config.json</code> next
               to the sharer script containing{" "}
-              <code className="font-mono text-[10px]">{'{ "pushSeconds": 300 }'}</code> (60–3600 seconds;
-              default 60) to change how often it reports.
+              <code className="font-mono text-[10px]">{'{ "pushSeconds": 300 }'}</code> (120–3600 seconds;
+              default 300) to change the shared query interval for every agent.
             </p>
             </details>
           )}
@@ -203,9 +207,37 @@ function ConnectCardSkeleton() {
 /* Connected view — showcase the sources the bridge is broadcasting    */
 /* ------------------------------------------------------------------ */
 
-function ConnectedView({ sources, isDesktop }: { sources: ConnectedSource[]; isDesktop: boolean }) {
+function ConnectedView({
+  sources,
+  isDesktop,
+  sharerVersion,
+}: {
+  sources: ConnectedSource[];
+  isDesktop: boolean;
+  sharerVersion: string | null;
+}) {
+  const scriptVersion = sharerVersion ? Number.parseInt(sharerVersion, 10) : null;
+  const needsV8 =
+    !isDesktop &&
+    !sharerVersion?.startsWith("desktop-") &&
+    (scriptVersion === null || !Number.isFinite(scriptVersion) || scriptVersion < 8);
   return (
     <div>
+      {needsV8 ? (
+        <div className="mb-4 flex flex-col gap-2 rounded-xl border border-primary/25 bg-primary/8 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-medium text-foreground">Update once to add ChatGPT Codex</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Replace the old sharer with v8. It reuses the same setup and automatically finds Codex.
+            </p>
+          </div>
+          <Button asChild size="sm" className="shrink-0">
+            <a href="/api/bridge/download">
+              <Download className="size-3.5" /> Update sharer
+            </a>
+          </Button>
+        </div>
+      ) : null}
       {sources.length > 0 ? (
         <>
           <p className="mb-2.5 text-xs text-muted-foreground">Usage sources tracking now:</p>
@@ -233,14 +265,14 @@ function ConnectedView({ sources, isDesktop }: { sources: ConnectedSource[]; isD
             href="/api/bridge/download"
             className="font-medium text-primary underline-offset-2 hover:underline"
           >
-            Re-download bridge
+            Re-download sharer
           </a>{" "}
           · to stop, close the window.
         </p>
       )}
 
       <p className="mt-2 text-[11px] text-muted-foreground/70">
-        If your usage ever stops updating, just sign in to Claude Code again on this computer —
+        If one source ever needs a fresh sign-in, sign in to that CLI again on this computer —
         {isDesktop ? " the desktop app picks it up automatically." : " the sharer picks it up automatically."}
       </p>
     </div>
@@ -251,7 +283,7 @@ function ConnectedView({ sources, isDesktop }: { sources: ConnectedSource[]; isD
 function SourceCard({ source, label }: { source: string; label: string }) {
   return (
     <div className="flex items-center gap-2.5 rounded-xl border border-border/60 bg-surface/50 px-3 py-2">
-      <SourceGlyph source={source} />
+      <AgentProviderIcon source={source} size="lg" />
       <div className="min-w-0">
         <div className="text-sm font-medium leading-tight">{label}</div>
         <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-success">
@@ -263,32 +295,6 @@ function SourceCard({ source, label }: { source: string; label: string }) {
         </div>
       </div>
     </div>
-  );
-}
-
-/** Brand-ish mark per source. Falls back to a generic Claude burst. */
-function SourceGlyph({ source }: { source: string }) {
-  if (source === "glm") {
-    return (
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-[13px] font-bold text-sky-500">
-        Z
-      </span>
-    );
-  }
-  // claude_pro / claude / unknown → Anthropic-orange burst.
-  return (
-    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#cc785c]/15 text-[#cc785c]">
-      <ClaudeBurst className="size-5" />
-    </span>
-  );
-}
-
-/** Stylized burst approximating the Claude/Anthropic mark. */
-function ClaudeBurst({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
-      <path d="M12 2c.6 3.3 1.7 4.4 5 5-3.3.6-4.4 1.7-5 5-.6-3.3-1.7-4.4-5-5 3.3-.6 4.4-1.7 5-5Zm6.6 8.8c.3 1.7.9 2.3 2.6 2.6-1.7.3-2.3.9-2.6 2.6-.3-1.7-.9-2.3-2.6-2.6 1.7-.3 2.3-.9 2.6-2.6ZM4.8 13c.3 1.7.9 2.3 2.6 2.6-1.7.3-2.3.9-2.6 2.6-.3-1.7-.9-2.3-2.6-2.6 1.7-.3 2.3-.9 2.6-2.6Z" />
-    </svg>
   );
 }
 
@@ -314,7 +320,7 @@ function WindowsPanel() {
           Double-click <b className="text-foreground">START-HERE (Windows)</b>. Keep the window that
           opens open.
         </Step>
-        <Step n={4}>Done! Your usage appears above, live. Close the window anytime to stop.</Step>
+        <Step n={4}>Done! Every detected agent appears above, live. Close the window anytime to stop.</Step>
       </ol>
     </>
   );
@@ -397,7 +403,7 @@ function MacPanel() {
         <Step n={3}>
           Paste the command, press <b className="text-foreground">Enter</b>. Keep that window open.
         </Step>
-        <Step n={4}>Done! Your usage appears above, live. Close the window anytime to stop.</Step>
+        <Step n={4}>Done! Every detected agent appears above, live. Close the window anytime to stop.</Step>
       </ol>
 
       <p className="mt-3 text-[11px] text-muted-foreground/70">
@@ -418,8 +424,9 @@ function DesktopPanel({ os }: { os: OS }) {
   return (
     <>
       <p className="mb-4 text-sm text-muted-foreground">
-        You&apos;re in the <b className="text-foreground">DuitSini desktop app</b> — usage tracks
-        here automatically. No script to download, nothing to keep open.
+        You&apos;re in the <b className="text-foreground">DuitSini desktop app</b> — Claude, GLM,
+        and ChatGPT Codex are detected automatically from their existing local sign-ins. No script,
+        extra key, or second setup is needed.
       </p>
 
       <ol className="space-y-2.5 text-sm text-muted-foreground">
@@ -430,8 +437,8 @@ function DesktopPanel({ os }: { os: OS }) {
           then choose <b className="text-foreground">Claude.ai subscription</b> and sign in.
         </Step>
         <Step n={2}>
-          That&apos;s it — your usage appears above, live, within a few seconds. The card updates on
-          its own once tracking starts.
+          Already signed in to Codex CLI? There is nothing else to do — its 7-day subscription
+          usage appears alongside the other agents on the same update interval.
         </Step>
       </ol>
 

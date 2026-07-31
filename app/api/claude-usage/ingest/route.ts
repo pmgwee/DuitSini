@@ -45,6 +45,8 @@ const streamSchema = z.object({
   seven_day: windowSchema.optional(),
   limits: z.array(limitSchema).max(40).nullable().optional(),
   provider: providerSchema.optional(),
+  cached: z.boolean().optional(),
+  observed_at: z.string().max(64).nullable().optional(),
 });
 
 const bodySchema = z.object({

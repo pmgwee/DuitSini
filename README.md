@@ -8,7 +8,7 @@
 
 It's the best way to use DuitSini — and the only setup that **tracks your AI usage automatically**. Install once, sign in with Google, and it runs quietly in the background:
 
-- **No Terminal, no ZIP, no script to babysit.** Your Claude Pro and GLM Coding usage broadcasts itself to your dashboard, live.
+- **No Terminal, no ZIP, no script to babysit.** Your Claude Pro, GLM Coding, and ChatGPT Codex usage broadcasts itself to your dashboard, live.
 - **Lives in the system tray** and can start at login, so usage keeps tracking even with the window closed.
 - Every web deploy shows up on the next launch — nothing to reinstall.
 
@@ -29,7 +29,7 @@ Built with Next.js 15 (App Router), React 19, Tailwind v4, and Supabase.
 | Pillar | Route | What it answers |
 |---|---|---|
 | 💳 **Bills tracking** | `/bills` | What's about to charge me, and what am I really spending per month? |
-| 🤖 **AI usage tracking** | `/ai-usage` | How much of my Claude / GLM plan have I burned — live, right now? |
+| 🤖 **AI usage tracking** | `/ai-usage` | How much of my Claude, GLM, or Codex plan have I burned — live, right now? |
 | 📈 **Stocks analysis tracking** | `/stocks` | What's the current read on the market, and which names are in play? |
 
 Everything else — reports, reminders, settings — exists to serve those three.
@@ -39,7 +39,7 @@ Everything else — reports, reminders, settings — exists to serve those three
 ## Why people keep it open
 
 - 🇲🇾 **MYR-native, always.** No mental USD→RM math for Netflix, Spotify, Claude, ChatGPT — every figure converts and rounds once, correctly.
-- 🛰️ **Live AI usage, broadcast from your own machine.** Nobody else does this: the desktop app (or a one-line script) turns your Claude Pro / GLM Coding plan usage into a live gauge — no API key ever leaves your computer.
+- 🛰️ **Live AI usage, broadcast from your own machine.** The desktop app (or one sharer script) turns Claude Pro, GLM Coding, and ChatGPT Codex plan usage into live gauges — no API key ever leaves your computer.
 - 📈 **Market vision without the doomscroll.** A reconstructed portfolio, theme map, and daily commentary read — parsed, cached, and attributed, so you get the signal without living on X.
 - 🖥️ **Built for the spare monitor.** Leave it open on a third screen while gaming, vibe-coding, or running a side hustle — everything that costs or moves your money, always in view.
 - 📄 **Monthly/yearly statements, delivered, not dug for.** Auto-generated PDF statements land in your Telegram — no logging back in to check what you spent.
@@ -61,10 +61,10 @@ which is literally a subscription, which is why the surface is called Bills.
   - _Recurring_ — the **normalized** monthly cost (any billing cycle smoothed to /mo).
 
 ### 🤖 AI usage tracking — `/ai-usage`
-How much of your Claude / GLM plan have you burned — **live**, right now.
+How much of your Claude, GLM, and ChatGPT Codex plans have you burned — **live**, right now.
 - **In the desktop app it tracks itself** — just sign in; nothing else to run. (Don't have it yet? [Get the desktop app](#get-the-desktop-app).)
 - **On the web / macOS?** Run the one-time [usage-sharer script](#cant-install-the-app-use-the-sharer-script) — a `.bat` on Windows or one Terminal line on macOS.
-- Broadcasts **Claude Pro** _and_ **GLM Coding** usage side by side (read from a dedicated Claude login and your cc-switch setup respectively). Only usage percentages are ever sent — never your password or login.
+- Broadcasts **Claude Pro**, **GLM Coding**, and **ChatGPT Codex** side by side. Codex reuses the normal Codex CLI ChatGPT sign-in and needs no extra key or second setup. Only usage percentages are ever sent — never your password or login.
 - Every sharer command / desktop install is personal — tied to the Google account that generated it, and the page tells you whose account it's feeding, on startup.
 - Also on this surface: a YouTube Music player that docks inline here and floats elsewhere (surviving navigation), plus a flip clock.
 
@@ -187,14 +187,14 @@ See [CLAUDE.md](CLAUDE.md) for the full architectural guide.
 > **Prefer the desktop app — it does this automatically, with no script and no Terminal.**
 > See [Get the desktop app](#get-the-desktop-app) at the top.
 
-This is the fallback for the **web app** (or **macOS**, where the desktop build isn't installed): a tiny one-time script that broadcasts your live Claude / GLM usage to your dashboard, exactly like the desktop app would.
+This is the fallback for the **web app** (or **macOS**, where the desktop build isn't installed): one script that broadcasts Claude, GLM, and ChatGPT Codex usage to your dashboard, exactly like the desktop app would.
 
-1. Sign in (Google) and open **AI Usage** → **Share your Claude usage**.
+1. Sign in (Google) and open **AI Usage** → **Share your agent usage**.
 2. **Windows:** click *Download my usage sharer*, unzip, run `START-HERE (Windows).bat`.
    **macOS:** switch the card to *macOS*, copy the one-line command, paste it into Terminal.
 3. Keep the window open — your usage updates live on the page.
 
-Want **both Claude Pro and GLM** live at once? Sign Claude Code into a dedicated config folder once (`CLAUDE_CONFIG_DIR=~/.claude-pro claude`, choose the Claude.ai subscription) — the desktop app / sharer finds it automatically alongside your cc-switch GLM setup. See the in-app "Want both Claude Pro and GLM live at once?" guide.
+Want **Claude Pro, GLM, and Codex** live at once? Sign Claude Code into a dedicated config folder once (`CLAUDE_CONFIG_DIR=~/.claude-pro claude`, choose the Claude.ai subscription) — the desktop app / sharer finds it alongside cc-switch GLM and your existing Codex CLI sign-in. Codex adds no extra setup.
 
 Only usage percentages are sent — never credentials.
 

@@ -15,6 +15,7 @@ import {
 import { useNow } from "./use-now";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { AgentProviderIcon } from "./agent-provider-icon";
 
 const SESSION_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -136,17 +137,28 @@ function LiveViewSkeleton() {
  * its top-level fields into one synthetic stream.
  */
 function normalizeStreams(data: LiveUsage): UsageStream[] {
-  if (Array.isArray(data.streams) && data.streams.length > 0) return data.streams;
-  return [
-    {
-      source: "claude",
-      label: "Claude",
-      five_hour: data.five_hour ?? null,
-      seven_day: data.seven_day ?? null,
-      limits: data.limits ?? null,
-      provider: data.provider ?? null,
-    },
-  ];
+  const streams =
+    Array.isArray(data.streams) && data.streams.length > 0
+      ? data.streams
+      : [
+          {
+            source: "claude",
+            label: "Claude",
+            five_hour: data.five_hour ?? null,
+            seven_day: data.seven_day ?? null,
+            limits: data.limits ?? null,
+            provider: data.provider ?? null,
+          },
+        ];
+  const order: Record<string, number> = { claude_pro: 0, claude: 0, glm: 1, codex: 2 };
+  return streams
+    .map((stream, index) => ({ stream, index }))
+    .sort(
+      (a, b) =>
+        (order[a.stream.source] ?? 99) - (order[b.stream.source] ?? 99) ||
+        a.index - b.index,
+    )
+    .map(({ stream }) => stream);
 }
 
 function hasWindow(w?: LiveUsageWindow | null): boolean {
@@ -217,7 +229,7 @@ function LiveView({
           aria-label="Pull latest usage from the bridge"
           title={
             cooldownS > 0
-              ? "Just refreshed — manual pulls are limited to protect your account from Anthropic's rate limit. Usage still updates automatically."
+              ? "Just refreshed — manual pulls are limited to protect your account quota endpoints. Usage still updates automatically."
               : undefined
           }
           className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
@@ -227,7 +239,7 @@ function LiveView({
         </button>
       </div>
       <p className="-mt-2 text-[11px] text-muted-foreground/60">
-        Live · updates automatically · unofficial endpoint (may change without notice).
+        Live · updates automatically · account quota data via local sign-ins (endpoints may change).
       </p>
     </div>
   );
@@ -239,8 +251,14 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
   return (
     <div className={cn(divided && "border-t border-border/40 pt-4 first:border-t-0 first:pt-0")}>
       <div className="mb-2.5 flex items-center gap-1.5">
+        <AgentProviderIcon source={stream.source} />
         <span className="text-xs font-medium text-foreground">{stream.label}</span>
         <ProviderBadge provider={stream.provider} />
+        {stream.cached ? (
+          <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+            Cached
+          </span>
+        ) : null}
       </div>
       {gauges.length === 0 ? (
         <p className="py-2 text-[11px] text-muted-foreground/70">No usage limits reported for this source.</p>

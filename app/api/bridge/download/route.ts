@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const WIN_BAT = `@echo off
-title Claude Usage Sharer
+title Agent Usage Sharer
 cd /d "%~dp0"
 where node >nul 2>nul
 if errorlevel 1 (
@@ -28,20 +28,21 @@ echo   The sharer stopped. You can close this window.
 pause >nul
 `;
 
-const README = `CLAUDE USAGE SHARER  -  simple setup (about 2 minutes)
+const README = `AGENT USAGE SHARER  -  simple setup (about 2 minutes)
 
 WHAT THIS DOES
-  It reads YOUR Claude usage from your own computer and shows it,
+  It reads YOUR AI subscription usage from your own computer and shows it,
   live, on the class dashboard. It only sends the percentages (like
   "53%") - never your password, your login, or anything else.
 
-  It can show MORE THAN ONE source at once - for example your Claude
-  Pro/Max subscription AND a GLM Coding plan - side by side. (Optional;
-  see "TWO SOURCES" below if you want that.)
+  It can show MORE THAN ONE source at once: Claude Pro/Max, GLM Coding,
+  and ChatGPT Codex appear side by side whenever their existing local
+  sign-ins are available.
 
 BEFORE YOU START
-  You just need Claude Code installed and signed in with your Claude
-  account - the same one you already use. That's it.
+  Keep using the local sign-ins you already have. Codex is found from
+  CODEX_HOME or ~/.codex/auth.json automatically - no second download,
+  API key, or extra Codex setup is required.
 
 --- WINDOWS (this ZIP) ---
   1. If this is still a .zip, unzip it first:
@@ -66,7 +67,7 @@ BEFORE YOU START
 
   To stop sharing: just close the window.
 
---- TWO SOURCES (optional): Claude Pro + GLM side by side ---
+--- MULTIPLE SOURCES: Claude Pro + GLM + Codex side by side ---
   Claude's usage is account-level, so you do NOT need Claude Desktop - any
   Claude Code login with your Pro/Max account shows the same numbers. To
   keep a Pro login separate from a GLM-routed CLI, sign in once into a
@@ -82,10 +83,11 @@ BEFORE YOU START
   That creates ~/.claude-pro/.credentials.json with a Pro token. The sharer
   finds it automatically (along with ~/.claude-sub, CLAUDE_SUB_CONFIG_DIR,
   and your normal ~/.claude). Your GLM usage is read from your cc-switch
-  setup, untouched. Both then appear live on the dashboard.
+  setup, untouched. Codex is read from the normal Codex CLI ChatGPT sign-in.
+  Every available source then appears live on the dashboard.
 
 IS THIS SAFE?
-  Yes. It only reads your Claude usage numbers and sends the percentages
+  Yes. It only reads your agent usage numbers and sends the percentages
   to the class dashboard. It never sends your password or login, and it
   can't change anything on your computer. Close the window to stop anytime.
 `;

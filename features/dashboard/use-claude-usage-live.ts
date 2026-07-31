@@ -39,6 +39,8 @@ export interface UsageStream {
   seven_day?: LiveUsageWindow | null;
   limits?: UsageLimit[] | null;
   provider?: UsageProvider | null;
+  cached?: boolean;
+  observed_at?: string | null;
 }
 
 export interface LiveUsage {
@@ -51,6 +53,7 @@ export interface LiveUsage {
   message?: string;
   cached?: boolean;
   refreshed_at?: string;
+  sharer_version?: string | null;
 }
 
 export type LiveStatus = "connecting" | "live" | "error";

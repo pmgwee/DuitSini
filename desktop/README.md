@@ -6,7 +6,7 @@ collectors that make AI-usage tracking work without the downloadable sharer.
 Its whole reason to exist: the old flow asked a member to download a ZIP, run a
 `.bat` (or paste a command into Terminal), and **leave that window running** for
 the AI Usage page to show anything. This app replaces all of that with "open the
-app" — sign in once and your Claude / GLM usage is tracked live, with no
+app" — sign in once and your Claude / GLM / ChatGPT Codex usage is tracked live, with no
 Terminal, no ZIP, no script to babysit.
 
 ---
@@ -47,7 +47,9 @@ the tray menu does.
 **Prerequisite:** [Claude Code](https://claude.com/claude-code) must be signed
 in on this PC (the desktop app reads the same local login Claude Code uses — it
 never sees your password). If you route Claude Code through GLM via cc-switch,
-GLM usage is tracked automatically too.
+GLM usage is tracked automatically too. If Codex CLI is already signed in with
+ChatGPT, its subscription quota is discovered from the same local credentials —
+no API key or second setup.
 
 ---
 
@@ -79,6 +81,7 @@ collectors/
   claude-refresh.ts gated on-demand refresh (v7 policy)
   claude-local.ts   zero-network estimate from ~/.claude/projects/*.jsonl
   glm.ts            cc-switch provider detect → gateway quota endpoint
+  codex.ts          Codex CLI auth walk → ChatGPT subscription quota
 ```
 
 The backoff ladders are **not** duplicated here — `tsconfig.json` compiles
@@ -285,8 +288,7 @@ received (code=yes)` → `signed in → /subscriptions`.
 
 ## Known gaps
 
-- Codex / Kimi collectors are not implemented yet; the collector interface is
-  shaped for them.
+- Kimi collection is not implemented yet.
 - No auto-update feed is configured; `electron-updater` is wired but inert until
   a publish target exists.
 - Builds are unsigned.

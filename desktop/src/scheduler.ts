@@ -1,11 +1,13 @@
 import {
   glmBackoffHold,
   glmRetryHold,
+  codexUsage429Hold,
   proUsage429Hold,
 } from "../../lib/bridge/sharer/backoff";
 import {
   API_CACHE_MS,
   CLIENT_VERSION,
+  CODEX_STALE_CACHE_MS,
   DEFAULT_PUSH_MS,
   LOCAL_ESTIMATE_MS,
   MIN_GAP_MS,
@@ -14,6 +16,12 @@ import {
 import { AllRejectedError, NoCredentialsError, fetchProSnapshot } from "./collectors/claude-oauth";
 import { RefreshManager } from "./collectors/claude-refresh";
 import { LocalUsageEstimator } from "./collectors/claude-local";
+import {
+  AllCodexCredentialsRejectedError,
+  NoCodexCredentialsError,
+  currentCodexCredentialFingerprint,
+  fetchCodexSnapshot,
+} from "./collectors/codex";
 import {
   detectProvider,
   fetchGlmUsage,
@@ -69,6 +77,8 @@ export class Scheduler {
   private lastApiSnapshot: Snapshot | null = null;
   private lastLocalAt = 0;
   private activeSourceLabel: string | null = null;
+  private lastCodexSnapshot: Snapshot | null = null;
+  private lastCodexAt = 0;
   private running = false;
 
   constructor(private readonly deps: SchedulerDeps) {
@@ -124,10 +134,15 @@ export class Scheduler {
       if (claude) streams.push(claude);
       const glm = await this.collectGlm(provider);
       if (glm) streams.push(glm);
-      this.deps.log(`collected: claude=${!!claude} glm=${!!glm}`);
+      const codex = await this.collectCodex();
+      if (codex) streams.push(codex);
+      this.deps.log(`collected: claude=${!!claude} glm=${!!glm} codex=${!!codex}`);
 
       if (streams.length === 0) {
         this.deps.log("no usage streams this cycle — nothing to push");
+        // A source may have armed a cooldown even when no fallback stream was
+        // available. Persist it so restarting cannot bypass the quiet period.
+        await this.deps.store.save();
         return;
       }
       const pushed = await this.push(streams);
@@ -308,6 +323,92 @@ export class Scheduler {
       }
       const est = this.local.estimate();
       return est.five_hour || est.seven_day ? asStream(est, " (estimate)") : null;
+    }
+  }
+
+  /**
+   * OpenAI Codex subscription stream. This is intentionally read-only: Codex
+   * CLI owns OAuth refresh and this collector re-reads its auth material every
+   * query, matching cc-switch's reliable long-running behavior.
+   */
+  private async collectCodex(): Promise<UsageStream | null> {
+    const state = this.deps.store.source("codex");
+    const now = Date.now();
+    const cachedStream = (): UsageStream | null => {
+      if (!this.lastCodexSnapshot || now - this.lastCodexAt >= CODEX_STALE_CACHE_MS) return null;
+      return {
+        source: "codex",
+        label: "Codex",
+        five_hour: this.lastCodexSnapshot.five_hour,
+        seven_day: this.lastCodexSnapshot.seven_day,
+        limits: this.lastCodexSnapshot.limits,
+        provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
+        cached: true,
+        observed_at: new Date(this.lastCodexAt).toISOString(),
+      };
+    };
+
+    if (now < state.nextAt) {
+      const fingerprint = await currentCodexCredentialFingerprint();
+      if (
+        fingerprint &&
+        state.credentialFingerprint &&
+        fingerprint !== state.credentialFingerprint
+      ) {
+        state.nextAt = 0;
+        state.streak = 0;
+        state.message = undefined;
+        this.deps.log("[Codex] fresh sign-in detected; resuming quota checks");
+      } else {
+        const mins = Math.max(1, Math.ceil((state.nextAt - now) / 60_000));
+        this.deps.log(`[Codex] cooling down ${mins}m (${state.message || "rate limit"})`);
+        return cachedStream();
+      }
+    }
+
+    if (this.lastCodexSnapshot && now - this.lastCodexAt < API_CACHE_MS) {
+      return cachedStream();
+    }
+
+    try {
+      const result = await fetchCodexSnapshot();
+      this.lastCodexSnapshot = result.snapshot;
+      this.lastCodexAt = Date.now();
+      state.nextAt = 0;
+      state.streak = 0;
+      state.message = undefined;
+      state.credentialFingerprint = result.fingerprint;
+      this.deps.log(`[Codex] quota ok via ${result.sourceLabel}`);
+      return {
+        source: "codex",
+        label: "Codex",
+        five_hour: result.snapshot.five_hour,
+        seven_day: result.snapshot.seven_day,
+        limits: result.snapshot.limits,
+        provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
+        cached: false,
+        observed_at: new Date(this.lastCodexAt).toISOString(),
+      };
+    } catch (error) {
+      const err = error as { code?: number | string; retryMs?: number; message: string };
+      state.credentialFingerprint =
+        (await currentCodexCredentialFingerprint()) ?? state.credentialFingerprint;
+
+      if (err.code === 429) {
+        state.streak += 1;
+        const hold = codexUsage429Hold(state.streak, err.retryMs, jitter(30_000));
+        state.nextAt = Date.now() + hold;
+        state.message = "cooling down after a rate limit";
+        this.deps.log(`[Codex] rate-limited; quiet for ${Math.round(hold / 60_000)}m`);
+        return cachedStream();
+      }
+      if (error instanceof AllCodexCredentialsRejectedError) {
+        state.nextAt = Date.now() + 10 * 60_000;
+        state.message = "Codex sign-in needs refreshing";
+      } else if (!(error instanceof NoCodexCredentialsError)) {
+        this.deps.log(`[Codex] ${err.message}`);
+      }
+      return cachedStream();
     }
   }
 

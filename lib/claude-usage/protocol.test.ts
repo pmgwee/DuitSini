@@ -51,6 +51,8 @@ describe("snapshot schema (mirrors ingest route v7)", () => {
       seven_day: null,
       limits: [{ key: "k", label: "lbl", group: "session", percent: 50, resets_at: null }],
       provider: { name: "Anthropic", gateway_host: null, official: true },
+      cached: true,
+      observed_at: "2026-07-31T12:00:00Z",
     };
     expect(streamSchema.safeParse(stream).success).toBe(true);
   });

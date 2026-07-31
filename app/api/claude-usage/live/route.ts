@@ -28,6 +28,8 @@ type StreamRow = {
   seven_day?: { utilization: number | null; resets_at: string | null } | null;
   limits?: Json | null;
   provider?: Json | null;
+  cached?: boolean;
+  observed_at?: string | null;
 };
 
 /**
@@ -93,6 +95,7 @@ export async function GET() {
     streams,
     refreshed_at: data.updated_at,
     cached: !fresh,
+    sharer_version: data.sharer_version,
   };
 
   if (!fresh) {

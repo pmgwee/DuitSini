@@ -125,7 +125,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 
-const SHARER_VERSION = "7";
+const SHARER_VERSION = "8";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
 // Which dashboard account this script broadcasts to. Baked in at download
@@ -138,6 +138,7 @@ const ACCOUNT_EMAIL = "__ACCOUNT_EMAIL__";
 const BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
 
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
+const CODEX_USAGE_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage";
 const TOKEN_ENDPOINTS = ["https://platform.claude.com/v1/oauth/token", "https://console.anthropic.com/v1/oauth/token"];
 const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CC_SWITCH_DB = join(homedir(), ".cc-switch", "cc-switch.db");
@@ -206,7 +207,11 @@ let lastTickAt = Date.now(), scheduledGap = 4000;
 // Per-source scheduling: a rate-limited source pauses ITSELF (nextAt in the
 // future) while every other source keeps flowing - one busy endpoint must
 // never blank the whole dashboard again.
-const sources = { pro: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, activeLabel: "", lastRejects: "", pausedFp: "" }, glm: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false } };
+const sources = {
+  pro: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, activeLabel: "", lastRejects: "", pausedFp: "" },
+  glm: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false },
+  codex: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, activeLabel: "", lastRejects: "", pausedFp: "", lastSnap: null, lastAt: 0 },
+};
 
 const stamp = () => new Date().toLocaleTimeString();
 function fmtClock(t) { return new Date(t).toLocaleTimeString(); }
@@ -327,6 +332,57 @@ async function credsFingerprint() {
     try {
       const o = oauthEntryOf(JSON.parse(await readFile(p, "utf8")));
       parts.push(o && o.accessToken ? String(o.accessToken).slice(-12) : "-");
+    } catch (e) { parts.push("-"); }
+  }
+  return parts.join("|");
+}
+
+// Codex CLI credentials. This is the same read-only discovery contract used by
+// cc-switch: CODEX_HOME first, then the normal ~/.codex/auth.json, with the
+// macOS Codex Auth keychain item as a fallback. No login or token refresh is
+// performed here; Codex CLI remains the sole owner of its credentials.
+function codexCredsCandidates() {
+  const out = [];
+  if (process.env.CODEX_HOME) out.push(join(process.env.CODEX_HOME, "auth.json"));
+  out.push(join(homedir(), ".codex", "auth.json"));
+  return out.filter(function (p, i) { return out.indexOf(p) === i; });
+}
+
+function codexAuthOf(creds) {
+  if (!creds || typeof creds !== "object" || creds.auth_mode !== "chatgpt") return null;
+  const tokens = creds.tokens;
+  if (!tokens || typeof tokens.access_token !== "string" || typeof tokens.account_id !== "string") return null;
+  if (!tokens.access_token || !tokens.account_id) return null;
+  return { accessToken: tokens.access_token, accountId: tokens.account_id };
+}
+
+function readCodexKeychainCreds() {
+  if (process.platform !== "darwin") return Promise.resolve(null);
+  return new Promise(function (resolve) {
+    execFile("security", ["find-generic-password", "-s", "Codex Auth", "-w"], { timeout: 4000 }, function (err, stdout) {
+      if (err) return resolve(null);
+      try { resolve(JSON.parse(String(stdout || "").trim())); } catch (e) { resolve(null); }
+    });
+  });
+}
+
+function codexCredSources() {
+  const out = codexCredsCandidates().map(function (p) {
+    return {
+      label: p,
+      read: async function () { try { return JSON.parse(await readFile(p, "utf8")); } catch (e) { return null; } },
+    };
+  });
+  out.push({ label: "macOS Keychain (Codex Auth)", read: readCodexKeychainCreds });
+  return out;
+}
+
+async function codexCredsFingerprint() {
+  const parts = [];
+  for (const p of codexCredsCandidates()) {
+    try {
+      const auth = codexAuthOf(JSON.parse(await readFile(p, "utf8")));
+      parts.push(auth ? auth.accountId + ":" + auth.accessToken.slice(-12) : "-");
     } catch (e) { parts.push("-"); }
   }
   return parts.join("|");
@@ -718,6 +774,110 @@ async function fetchProSnapshot() {
   ), { code: "cooldown", until: Date.now() + 60000 });
 }
 
+function codexResetAt(w) {
+  let ms = null;
+  if (typeof w.reset_at === "number" && Number.isFinite(w.reset_at)) ms = w.reset_at * 1000;
+  else if (typeof w.reset_after_seconds === "number" && Number.isFinite(w.reset_after_seconds)) ms = Date.now() + w.reset_after_seconds * 1000;
+  if (ms == null) return null;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function codexWindowOf(w) {
+  if (!w || typeof w !== "object" || typeof w.used_percent !== "number" || !Number.isFinite(w.used_percent)) return null;
+  if (typeof w.limit_window_seconds !== "number" || !Number.isFinite(w.limit_window_seconds) || w.limit_window_seconds <= 0) return null;
+  const pct = Math.min(100, Math.max(0, w.used_percent));
+  return { seconds: w.limit_window_seconds, window: { utilization: pct, resets_at: codexResetAt(w) } };
+}
+
+function codexLimitOf(parsed) {
+  let key = "window_" + parsed.seconds, label = parsed.seconds + "-second", group = "weekly";
+  if (parsed.seconds === 18000) { key = "session"; label = "Current session"; group = "session"; }
+  else if (parsed.seconds === 604800) { key = "weekly_all"; label = "Weekly"; }
+  else if (parsed.seconds === 2592000) { key = "monthly_all"; label = "30-day"; }
+  else if (parsed.seconds >= 86400 && parsed.seconds % 86400 === 0) label = (parsed.seconds / 86400) + "-day";
+  else if (parsed.seconds >= 3600 && parsed.seconds % 3600 === 0) label = (parsed.seconds / 3600) + "-hour";
+  return { key: key, label: label, group: group, percent: parsed.window.utilization, resets_at: parsed.window.resets_at, severity: null };
+}
+
+function codexSnapshotFromUsage(j) {
+  const rate = j && j.rate_limit;
+  if (!rate || typeof rate !== "object") return null;
+  const parsed = [codexWindowOf(rate.primary_window), codexWindowOf(rate.secondary_window)].filter(Boolean);
+  const unique = parsed.filter(function (w, i) { return parsed.findIndex(function (x) { return x.seconds === w.seconds; }) === i; });
+  if (!unique.length) return null;
+  const five = unique.find(function (w) { return w.seconds === 18000; });
+  const week = unique.find(function (w) { return w.seconds === 604800; });
+  return {
+    five_hour: five ? five.window : null,
+    seven_day: week ? week.window : null,
+    limits: unique.map(codexLimitOf),
+  };
+}
+
+async function fetchCodexSnapshot() {
+  let sawCreds = false;
+  const rejects = [];
+  for (const src of codexCredSources()) {
+    const auth = codexAuthOf(await src.read());
+    if (!auth) continue;
+    sawCreds = true;
+    const r = await safeFetch(CODEX_USAGE_ENDPOINT, {
+      headers: {
+        Authorization: "Bearer " + auth.accessToken,
+        "ChatGPT-Account-Id": auth.accountId,
+        "User-Agent": "codex-cli",
+        Accept: "application/json",
+      },
+    });
+    if (r.status === 401 || r.status === 403) {
+      rejects.push(src.label + " (" + r.status + ")");
+      continue;
+    }
+    if (r.status === 429) {
+      const ra = r.headers.get("retry-after");
+      const reset = r.headers.get("x-ratelimit-reset");
+      throw Object.assign(new Error("OpenAI Codex usage rate-limited (429)"), { code: 429, retryMs: retryMsFrom(ra, reset) });
+    }
+    if (!r.ok) throw new Error("OpenAI Codex usage check failed (" + r.status + ").");
+    const snap = codexSnapshotFromUsage(await r.json());
+    if (!snap) throw new Error("OpenAI Codex returned no recognizable usage windows.");
+    if (sources.codex.activeLabel !== src.label) {
+      sources.codex.activeLabel = src.label;
+      sources.codex.lastRejects = "";
+      console.log("  " + stamp() + "  [Codex] now using: " + src.label);
+    }
+    return snap;
+  }
+  if (!sawCreds) throw new Error("No ChatGPT Codex sign-in found");
+  const summary = rejects.join(", ");
+  if (summary && summary !== sources.codex.lastRejects) {
+    sources.codex.lastRejects = summary;
+    console.warn("  " + stamp() + "  [Codex] sign-in rejected on: " + summary);
+  }
+  throw Object.assign(new Error(
+    "The ChatGPT Codex sign-in was rejected. Sign in with Codex CLI again and the refreshed login will be detected automatically."
+  ), { code: "cooldown", until: Date.now() + 600000 });
+}
+
+function codexStream(snap, cached, observedAt) {
+  return {
+    source: "codex",
+    label: "Codex",
+    five_hour: snap.five_hour,
+    seven_day: snap.seven_day,
+    limits: snap.limits,
+    provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
+    cached: !!cached,
+    observed_at: new Date(observedAt).toISOString(),
+  };
+}
+
+function cachedCodexStream(now) {
+  if (!sources.codex.lastSnap || now - sources.codex.lastAt >= 600000) return null;
+  return codexStream(sources.codex.lastSnap, true, sources.codex.lastAt);
+}
+
 // Fetch GLM Coding Plan usage from a z.ai/bigmodel gateway using the provider's
 // own key (Authorization with NO Bearer prefix). unit=3/number=5 is the 5-hour
 // window; unit=6/number=1 is the weekly window. TIME_LIMIT rows (MCP tools) are
@@ -802,6 +962,11 @@ function pauseSource(key, label, e) {
       // flag - so let changed on-disk credentials end this pause early.
       s.resumeOnFreshCreds = true;
     }
+    else if (key === "codex") {
+      const quiet = [300000, 900000, 1800000, 3600000];
+      const hold = Math.max(e.retryMs || 0, quiet[Math.min(s.streak, quiet.length) - 1]);
+      s.nextAt = now + hold + Math.floor(Math.random() * 30000);
+    }
     else if (e.retryMs && e.retryMs > 0) {
       // Honor the header, but never dip below the floor: this endpoint is
       // known to answer 429 with retry-after: 0, which would otherwise retry
@@ -811,7 +976,7 @@ function pauseSource(key, label, e) {
       s.backoff = Math.min(300000, Math.max(MIN_429_BACKOFF_MS, (s.backoff || PUSH_MS) * 2));
       s.nextAt = now + s.backoff;
     }
-    warnOnce("busy [" + label + "] - " + (key === "pro" ? "quiet" : "next try") + " until " + fmtClock(s.nextAt) + "  (" + (e.message || "429") + ")");
+    warnOnce("busy [" + label + "] - " + (key === "pro" || key === "codex" ? "quiet" : "next try") + " until " + fmtClock(s.nextAt) + "  (" + (e.message || "429") + ")");
     // After a few 429s in a row, reassure the human: the wait is persisted, so
     // neither leaving it open nor restarting can make it worse - it recovers
     // on its own. Reprinted every 3rd hit so it cannot scroll away unseen.
@@ -845,6 +1010,13 @@ async function fetchAndPush(reason) {
       console.log("  " + stamp() + "  found a changed Claude sign-in on disk - resuming now");
     }
   }
+  if (now < sources.codex.nextAt && sources.codex.resumeOnFreshCreds) {
+    const fp = await codexCredsFingerprint();
+    if (fp !== sources.codex.pausedFp) {
+      sources.codex.nextAt = 0; sources.codex.resumeOnFreshCreds = false;
+      console.log("  " + stamp() + "  found a changed Codex sign-in on disk - resuming now");
+    }
+  }
   if (now >= sources.pro.nextAt) {
     try {
       const snap = await fetchProSnapshot();
@@ -862,6 +1034,25 @@ async function fetchAndPush(reason) {
       sources.glm.backoff = 0; sources.glm.streak = 0; sources.glm.nextAt = 0;
     } catch (e) { if (!pauseSource("glm", "GLM", e)) notes.push("GLM: " + ((e && e.message) || "error")); }
   }
+  if (sources.codex.lastSnap && now - sources.codex.lastAt < Math.min(PUSH_MS, 300000)) {
+    streams.push(codexStream(sources.codex.lastSnap, true, sources.codex.lastAt));
+  } else if (now >= sources.codex.nextAt) {
+    try {
+      const snap = await fetchCodexSnapshot();
+      sources.codex.lastSnap = snap;
+      sources.codex.lastAt = Date.now();
+      streams.push(codexStream(snap, false, sources.codex.lastAt));
+      sources.codex.backoff = 0; sources.codex.streak = 0; sources.codex.nextAt = 0; sources.codex.resumeOnFreshCreds = false;
+    } catch (e) {
+      if (pauseSource("codex", "Codex", e)) sources.codex.pausedFp = await codexCredsFingerprint();
+      else notes.push("Codex: " + ((e && e.message) || "error"));
+      const cached = cachedCodexStream(now);
+      if (cached) streams.push(cached);
+    }
+  } else {
+    const cached = cachedCodexStream(now);
+    if (cached) streams.push(cached);
+  }
   if (streams.length === 0) {
     // Nothing pushed this cycle. Check again soon (about 15s, not a full
     // cycle) so the end of a settle window or a fresh re-login on disk is
@@ -874,8 +1065,9 @@ async function fetchAndPush(reason) {
   lastFetchAt = Date.now(); lastWarn = "";
   for (const s of streams) {
     const f = s.five_hour && s.five_hour.utilization;
+    const w = s.seven_day && s.seven_day.utilization;
     const meter = s.source === "claude_pro" ? ", query " + usageCount.count + " today" : "";
-    console.log("  " + stamp() + "  [" + s.label + "] usage sent to dashboard  (5-hour: " + (f == null ? "-" : f + "%") + meter + ")");
+    console.log("  " + stamp() + "  [" + s.label + "] usage sent to dashboard  (session: " + (f == null ? "-" : f + "%") + ", weekly: " + (w == null ? "-" : w + "%") + meter + ")");
   }
   if (reason) console.log("  " + stamp() + "  [" + reason + "]");
 }
@@ -917,7 +1109,7 @@ async function loop() {
   await loadUsageCount();
   console.log("");
   console.log("  ============================================");
-  console.log("   Claude Usage Sharer v" + SHARER_VERSION + " is running.");
+  console.log("   Agent Usage Sharer v" + SHARER_VERSION + " is running.");
   if (ACCOUNT_EMAIL) {
     console.log("   Broadcasting to dashboard account:");
     console.log("     >> " + ACCOUNT_EMAIL + " <<");
@@ -932,6 +1124,7 @@ async function loop() {
   console.log("  " + stamp() + "  update cadence: every " + Math.round(PUSH_MS / 1000) + "s  (change via sharer-config.json pushSeconds or CLAUDE_SHARER_PUSH_SECONDS, 120-3600)");
   console.log("  " + stamp() + "  usage-endpoint budget meter: " + usageCallSummary());
   console.log("  " + stamp() + "  reading your Claude Code sign-in(s) from disk (dedicated folders -> macOS Keychain -> ~/.claude).");
+  console.log("  " + stamp() + "  auto-detecting ChatGPT Codex from CODEX_HOME or ~/.codex/auth.json (no extra setup).");
   console.log("  " + stamp() + "  expired sign-ins renew themselves now (v7 on-demand refresh) - no more 8-hour re-login.");
   console.log("  If sharing still stops later, sign in to Claude Code again - it is picked up automatically.");
   loop();

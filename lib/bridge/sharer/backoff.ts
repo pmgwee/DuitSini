@@ -24,6 +24,9 @@ export const MIN_429_BACKOFF_MS = 60_000;
 /** Usage-endpoint 429 quiet ladder (pro source), in ms. v6. */
 export const USAGE_429_QUIET_MS = [900_000, 1_800_000, 3_600_000] as const;
 
+/** Codex quota-endpoint 429 ladder: back off independently from other agents. */
+export const CODEX_USAGE_429_QUIET_MS = [300_000, 900_000, 1_800_000, 3_600_000] as const;
+
 /** Refresh-endpoint 429 cooldown ladder, in ms. v3 discipline, retained in v7. */
 export const REFRESH_COOLDOWNS_MS = [900_000, 1_800_000, 3_600_000, 7_200_000] as const;
 
@@ -59,6 +62,18 @@ export function proUsage429Hold(
   jitterMs: number,
 ): number {
   return Math.max(retryMs || 0, ladderAt(USAGE_429_QUIET_MS, streak)) + jitterMs;
+}
+
+/**
+ * Codex quota-endpoint quiet hold. The 5-minute first rung matches the normal
+ * query cadence; repeated 429s become progressively quieter up to one hour.
+ */
+export function codexUsage429Hold(
+  streak: number,
+  retryMs: number | undefined,
+  jitterMs: number,
+): number {
+  return Math.max(retryMs || 0, ladderAt(CODEX_USAGE_429_QUIET_MS, streak)) + jitterMs;
 }
 
 /**
