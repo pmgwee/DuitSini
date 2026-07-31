@@ -115,7 +115,7 @@ function LiveViewSkeleton() {
         <Skeleton className="h-3.5 w-20" />
         <Skeleton className="h-3.5 w-12 rounded-full" />
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex flex-col items-center gap-1.5">
             <Skeleton className="size-23 rounded-full" />
@@ -249,6 +249,8 @@ function LiveView({
 /** One usage stream rendered as a labeled group of ring gauges. */
 function StreamSection({ stream, now, divided }: { stream: UsageStream; now: number; divided: boolean }) {
   const gauges = streamGauges(stream);
+  const showMascot =
+    gauges.length < 3 && gauges.some((limit) => limit.group === "weekly" && limit.key === "weekly_all");
   return (
     <div className={cn(divided && "border-t border-border/40 pt-4 first:border-t-0 first:pt-0")}>
       <div className="mb-2.5 flex items-center gap-1.5">
@@ -268,10 +270,15 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
       {gauges.length === 0 ? (
         <p className="py-2 text-[11px] text-muted-foreground/70">No usage limits reported for this source.</p>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-3 gap-2">
           {gauges.map((l) => (
-            <UsageGauge key={l.key} limit={l} now={now} source={stream.source} />
+            <UsageGauge key={l.key} limit={l} now={now} />
           ))}
+          {showMascot ? (
+            <div className="col-start-3 row-start-1 flex justify-center pt-3">
+              <AgentUsageMascot source={stream.source} />
+            </div>
+          ) : null}
         </div>
       )}
     </div>
@@ -324,30 +331,23 @@ function formatAgo(iso: string | null | undefined, now: number): string {
 function UsageGauge({
   limit,
   now,
-  source,
 }: {
   limit: UsageLimit;
   now: number;
-  source: string;
 }) {
   const pct = limit.percent;
   return (
     <div className="flex flex-col items-center gap-1.5 text-center">
-      <div className="flex items-end justify-center gap-0.5 sm:gap-1.5">
-        <ProgressRing
-          progress={(pct ?? 0) / 100}
-          color={utilizationColor(pct)}
-          size={92}
-          stroke={8}
-        >
-          <div className="text-sm font-semibold tabular-nums">
-            {pct == null ? "—" : `${Math.round(pct)}%`}
-          </div>
-        </ProgressRing>
-        {limit.group === "weekly" && limit.key === "weekly_all" ? (
-          <AgentUsageMascot source={source} />
-        ) : null}
-      </div>
+      <ProgressRing
+        progress={(pct ?? 0) / 100}
+        color={utilizationColor(pct)}
+        size={92}
+        stroke={8}
+      >
+        <div className="text-sm font-semibold tabular-nums">
+          {pct == null ? "—" : `${Math.round(pct)}%`}
+        </div>
+      </ProgressRing>
       <div className="text-[11px] font-medium leading-tight">{limit.label}</div>
       <div className="text-[10px] text-muted-foreground">
         resets {formatUntil(limit.resets_at, now)}
