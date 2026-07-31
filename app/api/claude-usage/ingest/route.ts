@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { z } from "zod";
 import { createSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { resolveBridgeUserId } from "@/lib/claude-usage/bridge-auth";
+import { bodySchema } from "@/lib/claude-usage/protocol";
+import { mergeUsageStreams } from "@/lib/claude-usage/stream-continuity";
 import type { Json } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -10,64 +11,6 @@ export const dynamic = "force-dynamic";
 // route returns well before this — but declaring it keeps the platform from
 // applying a shorter default that could race a slow (but still <8s) request.
 export const maxDuration = 20;
-
-const windowSchema = z
-  .object({
-    utilization: z.number().min(0).max(1000).nullable(),
-    resets_at: z.string().min(1).max(64).nullable(),
-  })
-  .nullable();
-
-const limitSchema = z.object({
-  key: z.string().max(64),
-  label: z.string().max(80),
-  group: z.enum(["session", "weekly"]),
-  percent: z.number().min(0).max(1000).nullable(),
-  resets_at: z.string().max(64).nullable(),
-  severity: z.string().max(32).nullable().optional(),
-});
-
-const providerSchema = z
-  .object({
-    name: z.string().max(80).nullable(),
-    gateway_host: z.string().max(120).nullable(),
-    official: z.boolean(),
-  })
-  .nullable();
-
-// One usage stream (e.g. Claude Pro from a dedicated subscription login, or
-// GLM from a cc-switch-routed Claude Code CLI). A bridge can push several at
-// once so the dashboard shows more than one account/plan live at the same time.
-const streamSchema = z.object({
-  source: z.string().min(1).max(32),
-  label: z.string().min(1).max(80),
-  five_hour: windowSchema.optional(),
-  seven_day: windowSchema.optional(),
-  limits: z.array(limitSchema).max(40).nullable().optional(),
-  provider: providerSchema.optional(),
-  cached: z.boolean().optional(),
-  observed_at: z.string().max(64).nullable().optional(),
-});
-
-const bodySchema = z.object({
-  user_id: z.string().uuid().optional(),
-  five_hour: windowSchema.optional(),
-  seven_day: windowSchema.optional(),
-  limits: z.array(limitSchema).max(40).nullable().optional(),
-  // Which cc-switch provider was active on the sender's machine when this
-  // snapshot was taken — purely informational (see bridge-auth.ts / bridge
-  // README). Absent for older bridge scripts that predate this field.
-  provider: providerSchema.optional(),
-  // Multi-source push: every available usage stream this cycle. Newer bridges
-  // send this; the legacy top-level fields above stay populated (mirroring the
-  // primary stream) so older servers/readers keep working.
-  streams: z.array(streamSchema).max(6).optional(),
-  // Self-reported push cadence (sharer v6.2+): lets the live route size its
-  // freshness window to the producer instead of a hardcoded constant. Bounds
-  // mirror the sharer's own clamp (120–3600) with slack for future changes.
-  push_seconds: z.number().int().min(60).max(7200).optional(),
-  sharer_version: z.string().max(16).optional(),
-});
 
 /**
  * Shallow-copy an object minus the named keys (for graceful column fallback).
@@ -115,7 +58,7 @@ export async function POST(req: NextRequest) {
     // Normalize to a streams array — the UI reads from streams_json. Newer
     // bridges send `streams`; a legacy single-source push is wrapped so the row
     // still carries the new shape.
-    const normalized =
+    const incoming =
       streams && streams.length > 0
         ? streams
         : [
@@ -129,14 +72,26 @@ export async function POST(req: NextRequest) {
             },
           ];
 
+    const admin = createSupabaseAdminClient();
+    // An ingest upsert replaces streams_json wholesale. Read the prior JSON so
+    // a single collector failure cannot silently delete one of the three agent
+    // sections. A missing/legacy column simply skips this enhancement.
+    const { data: previous } = await admin
+      .from("claude_usage_live")
+      .select("streams_json")
+      .eq("user_id", targetUser)
+      .maybeSingle();
+    const normalized = mergeUsageStreams(
+      incoming,
+      Array.isArray(previous?.streams_json) ? previous.streams_json : null,
+    );
+
     // The "primary" stream mirrors into the legacy scalar columns so older
     // servers/readers keep working. Prefer a Claude-subscription source so the
     // legacy single-gauge widget shows real account usage rather than a gateway.
     const primary =
       normalized.find((s) => s.source === "claude_pro" || s.source === "claude") ??
       normalized[0];
-
-    const admin = createSupabaseAdminClient();
 
     // Try the full row; if a JSON column's migration isn't applied yet, retry
     // progressively without the offending column(s) so the widget keeps working.

@@ -7,12 +7,11 @@ import {
   generalTailStart,
 } from "../config";
 import { retryMsFrom, safeFetch } from "../net";
-import type { RefreshManager } from "./claude-refresh";
 import type { UsageTracker } from "../tracker";
 import { codedError, type Snapshot, type UsageLimit, type UsageWindow } from "../types";
 
 /**
- * Claude subscription usage — piggyback first, refresh only as a last resort.
+ * Claude subscription usage — read-only public path, official-CLI dedicated path.
  *
  * WHY THIS SHAPE. cc-switch never suffers the sharer's rate-limit problems, and
  * its `subscription.rs` says why in one line: "第一层：仅读取凭据，不实现登录/刷新"
@@ -33,9 +32,8 @@ import { codedError, type Snapshot, type UsageLimit, type UsageWindow } from "..
  *      by Claude Code, this is the only path taken and we behave exactly like
  *      cc-switch — zero refresh calls.
  *   2. Only when a token is actually at/past expiry (or a real 401 comes back)
- *      does `RefreshManager` spend ONE heavily-gated refresh. See
- *      `claude-refresh.ts` — that is the v7 on-demand policy, NOT v3's scheduled
- *      expiry-minus-3h refresh, which is what caused the lockouts.
+ *      does `ClaudeCliRenewalManager` invoke the installed official CLI once.
+ *      DuitSini never calls the OAuth token endpoint or writes credentials.
  *
  * The candidate walk also self-heals: a stale dedicated token answers 401 and
  * the walk advances to a live source before any refresh is considered.
@@ -47,10 +45,12 @@ interface OAuthEntry {
   expiresAt?: number;
 }
 
-interface CredSource {
+export interface CredSource {
   label: string;
   /** File path, or null for the Keychain (which nothing can write a rotation back to). */
   path: string | null;
+  /** Dedicated secondary profiles are the only sources eligible for brokered renewal. */
+  dedicated: boolean;
   read: () => Promise<unknown>;
 }
 
@@ -87,9 +87,10 @@ function readKeychainCreds(): Promise<unknown> {
 export function credSources(): CredSource[] {
   const paths = claudeCredCandidates();
   const tailStart = generalTailStart(paths);
-  const fileSource = (p: string): CredSource => ({
+  const fileSource = (p: string, dedicated: boolean): CredSource => ({
     label: p,
     path: p,
+    dedicated,
     read: async () => {
       try {
         return JSON.parse(await readFile(p, "utf8"));
@@ -100,9 +101,9 @@ export function credSources(): CredSource[] {
   });
 
   const out: CredSource[] = [];
-  for (let i = 0; i < tailStart; i++) out.push(fileSource(paths[i]!));
-  out.push({ label: "macOS Keychain", path: null, read: readKeychainCreds });
-  for (let i = tailStart; i < paths.length; i++) out.push(fileSource(paths[i]!));
+  for (let i = 0; i < tailStart; i++) out.push(fileSource(paths[i]!, true));
+  out.push({ label: "macOS Keychain", path: null, dedicated: false, read: readKeychainCreds });
+  for (let i = tailStart; i < paths.length; i++) out.push(fileSource(paths[i]!, false));
   return out;
 }
 
@@ -169,6 +170,7 @@ async function fetchUsage(
   onCall: () => number,
   ctx: { source: string; expiresAt?: number },
   tracker?: UsageTracker,
+  fetcher: typeof safeFetch = safeFetch,
 ): Promise<Record<string, unknown>> {
   const now = Date.now();
   const callsToday = onCall();
@@ -180,7 +182,7 @@ async function fetchUsage(
     callsToday,
   });
 
-  const r = await safeFetch(USAGE_ENDPOINT, {
+  const r = await fetcher(USAGE_ENDPOINT, {
     headers: {
       Authorization: `Bearer ${token}`,
       "anthropic-beta": "oauth-2025-04-20",
@@ -237,6 +239,28 @@ export interface ProResult {
   sourceLabel: string;
 }
 
+interface DedicatedRenewalBroker {
+  renewIfNeeded(
+    creds: unknown,
+    path: string,
+    options?: { force?: boolean },
+  ): Promise<string | null>;
+}
+
+export interface FetchProOptions {
+  sources?: CredSource[];
+  fetcher?: typeof safeFetch;
+}
+
+function renewDedicated(
+  broker: DedicatedRenewalBroker,
+  creds: unknown,
+  path: string,
+  force = false,
+): Promise<string | null> {
+  return broker.renewIfNeeded(creds, path, { force });
+}
+
 /**
  * Walk the credential candidates and return the first snapshot a live token
  * produces.
@@ -250,29 +274,30 @@ export interface ProResult {
  *               account rather than find a working one.
  *   network   → STOP. safeFetch already retried; it says nothing about tokens.
  *
- * Pass `refresher` to enable step 2 of the policy documented at the top of this
+ * Pass `renewal` to enable step 2 of the policy documented at the top of this
  * file. Omit it for pure cc-switch behaviour (read-only, zero refresh calls).
  */
 export async function fetchProSnapshot(
   onCall: () => number,
-  refresher?: RefreshManager,
+  renewal?: DedicatedRenewalBroker,
   tracker?: UsageTracker,
+  options: FetchProOptions = {},
 ): Promise<ProResult> {
   let sawCreds = false;
   const rejected: string[] = [];
 
-  for (const src of credSources()) {
+  for (const src of options.sources ?? credSources()) {
     const creds = await src.read();
     const oauth = oauthEntryOf(creds);
     if (!oauth?.accessToken) continue;
     sawCreds = true;
 
     // Piggyback path: a token that is still valid is used verbatim and costs
-    // nothing. `refreshIfNeeded` only acts at real expiry and degrades to the
-    // current token on every gate, so this never throws.
+    // nothing. The dedicated renewal broker acts only near real expiry and
+    // degrades to the current token on every gate, so this never throws.
     const token =
-      refresher && src.path
-        ? ((await refresher.refreshIfNeeded(creds, src.path)) ?? oauth.accessToken)
+      renewal && src.path && src.dedicated
+        ? ((await renewDedicated(renewal, creds, src.path)) ?? oauth.accessToken)
         : oauth.accessToken;
 
     const snapshotFrom = (usage: Record<string, unknown>): Snapshot => ({
@@ -284,7 +309,13 @@ export async function fetchProSnapshot(
     try {
       return {
         snapshot: snapshotFrom(
-          await fetchUsage(token, onCall, { source: src.label, expiresAt: oauth.expiresAt }, tracker),
+          await fetchUsage(
+            token,
+            onCall,
+            { source: src.label, expiresAt: oauth.expiresAt },
+            tracker,
+            options.fetcher,
+          ),
         ),
         sourceLabel: src.label,
       };
@@ -296,8 +327,8 @@ export async function fetchProSnapshot(
       // its recorded expiry. Spend at most one forced refresh and retry once —
       // all gates still apply, so a dead login costs one POST per hold window,
       // never one per cycle.
-      if (code === 401 && refresher && src.path && oauth.refreshToken) {
-        const forced = await refresher.refreshIfNeeded(creds, src.path, true);
+      if (code === 401 && renewal && src.path && src.dedicated && oauth.refreshToken) {
+        const forced = await renewDedicated(renewal, creds, src.path, true);
         if (forced && forced !== token) {
           try {
             return {
@@ -307,6 +338,7 @@ export async function fetchProSnapshot(
                   onCall,
                   { source: src.label, expiresAt: oauth.expiresAt },
                   tracker,
+                  options.fetcher,
                 ),
               ),
               sourceLabel: src.label,

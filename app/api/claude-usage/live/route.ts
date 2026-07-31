@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Json } from "@/lib/supabase/types";
+import {
+  freshnessWindowMs,
+  streamSchema,
+  type UsageStream,
+} from "@/lib/claude-usage/protocol";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,25 +17,6 @@ export const dynamic = "force-dynamic";
  * no cadence; assume the 300s default (→ 11 min window). The clamp mirrors the
  * sharer's own 120–3600s bounds so a corrupt value can't pin the widget live.
  */
-const DEFAULT_PUSH_SECONDS = 300;
-const GRACE_MS = 60 * 1000;
-function staleAfterMs(pushSeconds: number | null | undefined): number {
-  const cadence = Math.min(3600, Math.max(120, pushSeconds ?? DEFAULT_PUSH_SECONDS));
-  return cadence * 2 * 1000 + GRACE_MS;
-}
-
-/** One usage stream as stored in streams_json (validated loosely at read). */
-type StreamRow = {
-  source: string;
-  label: string;
-  five_hour?: { utilization: number | null; resets_at: string | null } | null;
-  seven_day?: { utilization: number | null; resets_at: string | null } | null;
-  limits?: Json | null;
-  provider?: Json | null;
-  cached?: boolean;
-  observed_at?: string | null;
-};
-
 /**
  * Same-origin read of the signed-in user's live Claude usage snapshot (pushed
  * by the local bridge). RLS restricts the row to its owner. Returns an `error`
@@ -63,14 +48,21 @@ export async function GET() {
   }
 
   const ageMs = Date.now() - new Date(data.updated_at).getTime();
-  const fresh = ageMs < staleAfterMs(data.push_seconds);
+  const fresh = ageMs < freshnessWindowMs(data.push_seconds ?? 300);
 
   // Normalize to a streams array. Newer rows carry streams_json (one or more
   // sources, e.g. Claude Pro + GLM); older rows synthesize a single stream
   // from the legacy scalar columns so the multi-stream UI still has data.
-  const streams = Array.isArray(data.streams_json)
-    ? (data.streams_json as StreamRow[])
-    : [
+  const parsedStreams: UsageStream[] = Array.isArray(data.streams_json)
+    ? data.streams_json.flatMap((value) => {
+        const parsed = streamSchema.safeParse(value);
+        return parsed.success ? [parsed.data] : [];
+      })
+    : [];
+  const streams: UsageStream[] =
+    parsedStreams.length > 0
+      ? parsedStreams
+      : [
         {
           source: "claude",
           label: "Claude",
@@ -78,7 +70,7 @@ export async function GET() {
           seven_day: { utilization: data.seven_day_utilization, resets_at: data.seven_day_resets_at },
           limits: data.limits_json ?? null,
           provider: data.provider_json ?? null,
-        },
+        } as UsageStream,
       ];
 
   // Legacy single-source fields still mirror the primary stream for any older
@@ -103,7 +95,7 @@ export async function GET() {
     return NextResponse.json({
       ...payload,
       error: "stale",
-      message: `Bridge offline — last update ${mins} min ago. Showing a manual estimate.`,
+      message: `Bridge offline — last update ${mins} min ago. Showing saved provider readings.`,
     });
   }
   return NextResponse.json(payload);

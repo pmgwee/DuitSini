@@ -17,7 +17,6 @@ const MARKS = {
   openai: {
     name: "OpenAI",
     color: "#10a37f",
-    slug: "openai",
     domain: "openai.com",
   },
 } as const;

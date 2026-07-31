@@ -78,7 +78,7 @@ store.ts         persisted cooldowns + calibration (userData/desktop-state.json)
 net.ts           safeFetch: connection:close, 12s abort, 3 attempts
 collectors/
   claude-oauth.ts   credential walk → api.anthropic.com/api/oauth/usage
-  claude-refresh.ts gated on-demand refresh (v7 policy)
+  claude-cli-renewal.ts dedicated profiles → official Claude CLI renewal
   claude-local.ts   zero-network estimate from ~/.claude/projects/*.jsonl
   glm.ts            cc-switch provider detect → gateway quota endpoint
   codex.ts          Codex CLI auth walk → ChatGPT subscription quota
@@ -102,27 +102,28 @@ Minting runs in the preload because `/api/bridge/mac-command` is guarded by a
 `Sec-Fetch-Site` check and the session cookie. A genuine same-origin fetch from
 the signed-in document satisfies both with no header spoofing.
 
-## The rate-limit story (read before changing `claude-refresh.ts`)
+## The rate-limit story (read before changing Claude renewal)
 
 Two independent limiters have bitten this project:
 
 | Limiter | Trigger | Handling here |
 |---|---|---|
 | Usage-endpoint 429 | Call **volume** on a rolling window keyed to the account | 300s cadence, quiet ladder `15→30→60m`, local estimate covers the gap |
-| Token-endpoint 429 | **Refresh** POSTs retried in a loop | Refresh only at real expiry; ladder `15→30→60→120m`, persisted |
+| Token-endpoint 429 | Direct **refresh** POSTs retried in a loop | No direct token calls; dedicated profiles delegate to the official CLI once at expiry |
 
 cc-switch never hits either because it never refreshes — `subscription.rs`:
 *"第一层：仅读取凭据，不实现登录/刷新"* (layer 1: only reads credentials, does not
 implement login/refresh). It reads the live `~/.claude` store that Claude Code
 itself keeps fresh.
 
-This app copies that as the **default path**, and only falls back to one gated
-refresh when every candidate token is genuinely expired. That is the v7
-on-demand policy — *not* v3's scheduled expiry−3h refresh, which is what
-generated enough token-endpoint traffic to brick logins.
-
-**Every gate degrades to using the current token.** `refreshIfNeeded` never
-throws a cooldown at its caller; refresh is pure upside.
+This app keeps that exact read-only behavior for ordinary Claude Code and
+keychain sources. Only an explicitly dedicated profile such as
+`~/.claude-pro` is eligible for renewal. Near real expiry (or after a genuine
+usage 401), DuitSini invokes `claude auth login --claudeai` with Claude Code's
+documented refresh-token environment variables. The official CLI owns the
+exchange and credential write; DuitSini never calls a token endpoint or writes
+OAuth material. A file lock, persisted failure hold, and post-run rotation
+check prevent restart/concurrency loops.
 
 ### If Claude usage shows nothing
 
@@ -133,8 +134,9 @@ nothing on the machine keeps a Claude OAuth token fresh. Check:
 node -e "const fs=require('fs');const p=process.env.USERPROFILE+'/.claude-pro/.credentials.json';const o=JSON.parse(fs.readFileSync(p,'utf8')).claudeAiOauth;console.log('expires',new Date(o.expiresAt).toISOString())"
 ```
 
-If that is in the past and refresh returns 429, the login is flagged
-server-side and **only a fresh browser sign-in clears it**:
+If the official CLI cannot renew a revoked or scope-incomplete login, perform
+one fresh browser sign-in; DuitSini detects the changed credentials without a
+restart:
 
 ```bash
 CLAUDE_CONFIG_DIR=~/.claude-pro claude

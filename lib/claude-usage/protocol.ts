@@ -84,6 +84,8 @@ export const streamSchema = z.object({
   provider: providerSchema.optional(),
   cached: z.boolean().optional(),
   observed_at: z.string().max(64).nullable().optional(),
+  state: z.enum(["live", "cached", "auth_stale", "rate_limited", "offline"]).optional(),
+  status_message: z.string().max(200).nullable().optional(),
 });
 
 /**

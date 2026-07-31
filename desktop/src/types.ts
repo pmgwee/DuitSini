@@ -38,6 +38,8 @@ export interface UsageStream {
   provider?: ProviderInfo | null;
   cached?: boolean;
   observed_at?: string | null;
+  state?: "live" | "cached" | "auth_stale" | "rate_limited" | "offline";
+  status_message?: string | null;
 }
 
 /** What a collector returns for one cycle. */

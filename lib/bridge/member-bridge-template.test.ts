@@ -13,11 +13,11 @@ const bridge = () =>
     accountEmail: "member@example.test",
   });
 
-describe("member usage sharer v8", () => {
+describe("member usage sharer v9", () => {
   it("auto-discovers Codex CLI auth and uses the cc-switch quota contract", () => {
     const source = bridge();
 
-    expect(source).toContain('const SHARER_VERSION = "8"');
+    expect(source).toContain('const SHARER_VERSION = "9"');
     expect(source).toContain("https://chatgpt.com/backend-api/wham/usage");
     expect(source).toContain('process.env.CODEX_HOME');
     expect(source).toContain('join(homedir(), ".codex", "auth.json")');
@@ -25,6 +25,27 @@ describe("member usage sharer v8", () => {
     expect(source).toContain('"User-Agent": "codex-cli"');
     expect(source).toContain('source: "codex"');
     expect(source).toContain('label: "Codex"');
+  });
+
+  it("renews only dedicated Claude profiles through the official CLI", () => {
+    const source = bridge();
+
+    expect(source).toContain('args: ["auth", "login", "--claudeai"]');
+    expect(source).toContain("CLAUDE_CODE_OAUTH_REFRESH_TOKEN");
+    expect(source).toContain("src.dedicated");
+    expect(source).not.toContain("https://platform.claude.com/v1/oauth/token");
+    expect(source).not.toContain("https://console.anthropic.com/v1/oauth/token");
+    expect(source).not.toContain('grant_type: "refresh_token"');
+  });
+
+  it("persists last-known streams so one failed provider cannot disappear", () => {
+    const source = bridge();
+
+    expect(source).toContain('const SNAPSHOT_FILE = join(SCRIPT_DIR, ".sharer-snapshots.json")');
+    expect(source).toContain("await saveSnapshot(stream)");
+    expect(source).toContain('"auth_stale"');
+    expect(source).toContain('"rate_limited"');
+    expect(source).toContain('"offline"');
   });
 
   it("keeps one shared cadence and replaces every personalized placeholder", () => {

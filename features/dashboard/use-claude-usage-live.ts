@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  classifyLivePayload,
+  type UsageDeliveryStatus,
+} from "@/lib/claude-usage/live-status";
 
 export interface LiveUsageWindow {
   utilization: number | null;
@@ -41,6 +45,8 @@ export interface UsageStream {
   provider?: UsageProvider | null;
   cached?: boolean;
   observed_at?: string | null;
+  state?: "live" | "cached" | "auth_stale" | "rate_limited" | "offline";
+  status_message?: string | null;
 }
 
 export interface LiveUsage {
@@ -56,7 +62,7 @@ export interface LiveUsage {
   sharer_version?: string | null;
 }
 
-export type LiveStatus = "connecting" | "live" | "error";
+export type LiveStatus = UsageDeliveryStatus;
 
 /**
  * Same-origin endpoint that serves the latest snapshot the local Claude Usage
@@ -120,11 +126,19 @@ export function useClaudeUsageLive(intervalMs = 15_000): {
         if (!r.ok) throw new Error(String(r.status));
         const d: LiveUsage = await r.json();
         if (!active) return;
-        if (d.error) setState({ status: "error", data: d, error: d.message ?? d.error });
-        else setState({ status: "live", data: d });
+        const status = classifyLivePayload(d);
+        setState({
+          status,
+          data: d,
+          ...(d.error ? { error: d.message ?? d.error } : {}),
+        });
       } catch {
-        // Don't clobber a good 'live' state with a transient fetch failure.
-        if (active) setState((prev) => (prev.status === "live" ? prev : { status: "error" }));
+        // Do not clobber a renderable reading with a transient fetch failure.
+        if (active) {
+          setState((prev) =>
+            prev.status === "live" || prev.status === "cached" ? prev : { status: "error" },
+          );
+        }
       }
     };
     tickRef.current = tick;

@@ -38,9 +38,6 @@ export const LOCAL_ESTIMATE_MS = 60_000;
 /** How long an authoritative API snapshot stays usable before we re-fetch. */
 export const API_CACHE_MS = 300_000;
 
-/** Brief resilience window for Codex when a single query fails or is throttled. */
-export const CODEX_STALE_CACHE_MS = 600_000;
-
 export const CC_SWITCH_DIR = join(homedir(), ".cc-switch");
 export const CC_SWITCH_DB = join(CC_SWITCH_DIR, "cc-switch.db");
 export const CC_SWITCH_JSON = join(CC_SWITCH_DIR, "config.json");
@@ -53,10 +50,9 @@ export const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
  * member may deliberately track a Claude account that is NOT the one their main
  * Claude Code is pointed at), then the general ones.
  *
- * Under this app's no-refresh policy the order self-heals: a dedicated dir that
- * has gone stale answers 401, the walk advances, and the live `~/.claude` store
- * — which Claude Code itself keeps fresh — serves. That is exactly why we can
- * delete the refresh layer instead of porting it.
+ * Ordinary/general sources are always read-only and self-heal through the
+ * candidate walk. Dedicated sources are the only entries the scheduler may
+ * renew through the installed official Claude CLI.
  */
 export function claudeCredCandidates(): string[] {
   const home = homedir();

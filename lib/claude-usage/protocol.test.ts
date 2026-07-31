@@ -53,8 +53,21 @@ describe("snapshot schema (mirrors ingest route v7)", () => {
       provider: { name: "Anthropic", gateway_host: null, official: true },
       cached: true,
       observed_at: "2026-07-31T12:00:00Z",
+      state: "auth_stale",
+      status_message: "Automatic renewal is waiting for a fresh sign-in.",
     };
     expect(streamSchema.safeParse(stream).success).toBe(true);
+  });
+
+  it("accepts only the documented per-provider continuity states", () => {
+    for (const state of ["live", "cached", "auth_stale", "rate_limited", "offline"]) {
+      expect(streamSchema.safeParse({ source: "pro", label: "Claude Pro", state }).success).toBe(
+        true,
+      );
+    }
+    expect(
+      streamSchema.safeParse({ source: "pro", label: "Claude Pro", state: "mystery" }).success,
+    ).toBe(false);
   });
 
   it("parses a full multi-stream push body", () => {

@@ -7,11 +7,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   useClaudeUsageLive,
   type LiveUsage,
+  type LiveStatus,
   type LiveUsageWindow,
   type UsageLimit,
   type UsageProvider,
   type UsageStream,
 } from "./use-claude-usage-live";
+import { usageStatePresentation } from "@/lib/claude-usage/state-presentation";
 import { useNow } from "./use-now";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -43,7 +45,7 @@ export function ClaudeUsageTracker() {
   const streams = live.data ? normalizeStreams(live.data) : [];
   const liveReady =
     mode === "live" &&
-    live.status === "live" &&
+    (live.status === "live" || live.status === "cached") &&
     live.data &&
     streams.some(
       (s) => hasWindow(s.five_hour) || hasWindow(s.seven_day) || (Array.isArray(s.limits) && s.limits.length > 0),
@@ -54,8 +56,15 @@ export function ClaudeUsageTracker() {
       <div className="flex items-center gap-2 text-sm font-medium">
         <Sparkles className="size-4 text-primary" /> Agent Usage
         {liveReady ? (
-          <span className="rounded-full bg-success/15 px-1.5 py-0.5 text-[10px] font-medium text-success">
-            Live
+          <span
+            className={cn(
+              "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+              live.status === "live"
+                ? "bg-success/15 text-success"
+                : "bg-warning/15 text-warning",
+            )}
+          >
+            {live.status === "live" ? "Live" : "Saved"}
           </span>
         ) : null}
       </div>
@@ -249,6 +258,7 @@ function LiveView({
 /** One usage stream rendered as a labeled group of ring gauges. */
 function StreamSection({ stream, now, divided }: { stream: UsageStream; now: number; divided: boolean }) {
   const gauges = streamGauges(stream);
+  const state = usageStatePresentation(stream.state ?? (stream.cached ? "cached" : "live"));
   const showMascot =
     gauges.length < 3 && gauges.some((limit) => limit.group === "weekly" && limit.key === "weekly_all");
   return (
@@ -257,13 +267,18 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
         <AgentProviderIcon source={stream.source} />
         <span className="text-xs font-medium text-foreground">{stream.label}</span>
         <ProviderBadge provider={stream.provider} />
-        {stream.cached ? (
+        {state ? (
           <span
-            title={`Recent successful ${stream.label} reading reused briefly to protect its official quota endpoint. It refreshes automatically.`}
-            aria-label={`${stream.label} cached reading. Recent successful data is being reused briefly and refreshes automatically.`}
-            className="cursor-help rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+            title={`${stream.status_message || state.fallbackDescription} Observed ${formatAgo(stream.observed_at, now)}.`}
+            aria-label={`${stream.label}: ${state.label}. ${stream.status_message || state.fallbackDescription}`}
+            className={cn(
+              "cursor-help rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+              state.tone === "warning"
+                ? "bg-warning/15 text-warning"
+                : "bg-muted text-muted-foreground",
+            )}
           >
-            Cached
+            {state.label}
           </span>
         ) : null}
       </div>
@@ -366,7 +381,7 @@ function ManualView({
   liveError,
 }: {
   now: number;
-  liveStatus: "connecting" | "live" | "error";
+  liveStatus: LiveStatus;
   liveError?: string;
 }) {
   const {

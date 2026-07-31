@@ -7,14 +7,13 @@ import {
 import {
   API_CACHE_MS,
   CLIENT_VERSION,
-  CODEX_STALE_CACHE_MS,
   DEFAULT_PUSH_MS,
   LOCAL_ESTIMATE_MS,
   MIN_GAP_MS,
   clampPushMs,
 } from "./config";
 import { AllRejectedError, NoCredentialsError, fetchProSnapshot } from "./collectors/claude-oauth";
-import { RefreshManager } from "./collectors/claude-refresh";
+import { ClaudeCliRenewalManager } from "./collectors/claude-cli-renewal";
 import { LocalUsageEstimator } from "./collectors/claude-local";
 import {
   AllCodexCredentialsRejectedError,
@@ -44,7 +43,8 @@ import type { Snapshot, UsageStream } from "./types";
  *    usage endpoint is a rolling volume window keyed to the account, so pressing
  *    harder is precisely wrong.
  *
- * What is NOT here, deliberately: any token refresh. See `claude-oauth.ts`.
+ * General Claude Code credentials remain read-only. Dedicated secondary
+ * profiles may renew through the installed official Claude CLI only.
  */
 
 export type Status =
@@ -70,7 +70,7 @@ const jitter = (n: number) => Math.floor(Math.random() * n);
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private readonly local = new LocalUsageEstimator();
-  private readonly refresher: RefreshManager;
+  private readonly renewal: ClaudeCliRenewalManager;
   private pushMs = DEFAULT_PUSH_MS;
   private lastPushAt = 0;
   private lastApiAt = 0;
@@ -82,13 +82,25 @@ export class Scheduler {
   private running = false;
 
   constructor(private readonly deps: SchedulerDeps) {
-    this.refresher = new RefreshManager(deps.log, deps.tracker);
+    this.renewal = new ClaudeCliRenewalManager({
+      tracker: deps.tracker,
+      initialState: deps.store.get().cliRenewal,
+    });
   }
 
   async start(pushSeconds?: number): Promise<void> {
     if (pushSeconds) this.pushMs = clampPushMs(pushSeconds * 1000);
     this.local.loadCalibration(this.deps.store.get().calibration);
-    this.refresher.importState(this.deps.store.get().refresh);
+    const claude = this.deps.store.snapshot("claude_pro");
+    if (claude) {
+      this.lastApiSnapshot = this.snapshotOf(claude.stream);
+      this.lastApiAt = claude.observedAt;
+    }
+    const codex = this.deps.store.snapshot("codex");
+    if (codex) {
+      this.lastCodexSnapshot = this.snapshotOf(codex.stream);
+      this.lastCodexAt = codex.observedAt;
+    }
     // Prime the offline estimate immediately so the first paint is never empty.
     await this.refreshLocal();
     this.timer = setInterval(() => void this.tick(), 15_000);
@@ -170,14 +182,32 @@ export class Scheduler {
     const st = this.deps.store.source("pro");
     const now = Date.now();
 
-    const asStream = (snap: Snapshot, label: string): UsageStream => ({
+    const asStream = (
+      snap: Snapshot,
+      label: string,
+      state: UsageStream["state"] = "live",
+      statusMessage?: string,
+      observedAt = Date.now(),
+    ): UsageStream => ({
       source: "claude_pro",
       label,
       five_hour: snap.five_hour,
       seven_day: snap.seven_day,
       limits: snap.limits,
       provider: null,
+      cached: state !== "live",
+      observed_at: new Date(observedAt).toISOString(),
+      state,
+      status_message: statusMessage ?? null,
     });
+
+    const lastKnownStream = (
+      state: UsageStream["state"],
+      message: string,
+    ): UsageStream | null =>
+      this.lastApiSnapshot
+        ? asStream(this.lastApiSnapshot, "Claude Pro", state, message, this.lastApiAt)
+        : null;
 
     /**
      * The local estimate is only a proxy for CLAUDE PRO usage when Claude Code
@@ -192,17 +222,22 @@ export class Scheduler {
       const est = this.local.estimate();
       if (!est.five_hour && !est.seven_day) return null;
       this.deps.onStatus({ kind: "estimate", at: Date.now(), reason });
-      return asStream(est, "Claude Pro (estimate)");
+      return asStream(est, "Claude Pro (estimate)", "cached", reason);
     };
 
     if (now < st.nextAt) {
       const mins = Math.max(1, Math.ceil((st.nextAt - now) / 60_000));
       this.deps.log(`[Claude] cooling down ${mins}m (${st.message || "rate limit"})`);
-      return estimateStream(st.message || "cooling down after a rate limit");
+      return (
+        lastKnownStream(
+          st.message?.includes("sign-in") ? "auth_stale" : "rate_limited",
+          st.message || "Waiting for the provider cooldown before checking again.",
+        ) ?? estimateStream(st.message || "cooling down after a rate limit")
+      );
     }
     // A cached authoritative reading is still the better answer.
     if (this.lastApiSnapshot && now - this.lastApiAt < API_CACHE_MS) {
-      return asStream(this.lastApiSnapshot, "Claude Pro");
+      return asStream(this.lastApiSnapshot, "Claude Pro", "live", undefined, this.lastApiAt);
     }
 
     try {
@@ -212,10 +247,10 @@ export class Scheduler {
           this.deps.log(`usage call #${n} today`);
           return n;
         },
-        this.refresher,
+        this.renewal,
         this.deps.tracker,
       );
-      this.deps.store.setRefreshState(this.refresher.exportState());
+      this.deps.store.setCliRenewalState(this.renewal.exportState());
       this.lastApiSnapshot = snapshot;
       this.lastApiAt = Date.now();
       st.streak = 0;
@@ -233,11 +268,12 @@ export class Scheduler {
         this.deps.store.setCalibration(this.local.getCalibration());
       }
       this.deps.onStatus({ kind: "ok", at: Date.now(), sourceLabel });
-      return asStream(snapshot, "Claude Pro");
+      const stream = asStream(snapshot, "Claude Pro", "live", undefined, this.lastApiAt);
+      this.deps.store.setSnapshot(stream.source, stream, this.lastApiAt);
+      return stream;
     } catch (e) {
       const err = e as { code?: number | string; message: string; retryMs?: number };
-      // Persist any refresh hold the walk just armed, so a restart honours it.
-      this.deps.store.setRefreshState(this.refresher.exportState());
+      this.deps.store.setCliRenewalState(this.renewal.exportState());
 
       if (err.code === 429) {
         st.streak += 1;
@@ -248,26 +284,37 @@ export class Scheduler {
           `[Claude] rate-limited after ${this.deps.store.usageCallCount()} calls today; quiet for ${Math.round(hold / 60_000)}m`,
         );
         this.deps.onStatus({ kind: "paused", until: st.nextAt, reason: err.message });
-        return estimateStream("rate-limited — showing local estimate");
+        return (
+          lastKnownStream("rate_limited", "Provider rate limit; showing the last exact reading.") ??
+          estimateStream("rate-limited; showing local estimate")
+        );
       }
 
       if (e instanceof NoCredentialsError) {
         this.deps.onStatus({ kind: "error", reason: "No Claude sign-in found on this machine." });
-        return estimateStream("no Claude sign-in found");
+        return (
+          lastKnownStream("auth_stale", "Claude sign-in is unavailable; showing the last reading.") ??
+          estimateStream("no Claude sign-in found")
+        );
       }
 
       if (e instanceof AllRejectedError) {
-        // Under no-refresh this is the expected end state when the member does
-        // not actually use Claude Code on their Claude account. Retry gently and
-        // lean on the estimate meanwhile.
         st.nextAt = Date.now() + 10 * 60_000;
         st.message = "sign-in needs refreshing";
         this.deps.onStatus({ kind: "error", reason: e.message });
-        return estimateStream("sign-in stale — showing local estimate");
+        return (
+          lastKnownStream(
+            "auth_stale",
+            "Automatic renewal could not restore this sign-in; showing the last exact reading.",
+          ) ?? estimateStream("sign-in stale; showing local estimate")
+        );
       }
 
       this.deps.log(`[Claude] ${err.message}`);
-      return estimateStream("Claude unreachable — showing local estimate");
+      return (
+        lastKnownStream("offline", "Claude is temporarily unreachable; showing the last reading.") ??
+        estimateStream("Claude unreachable; showing local estimate")
+      );
     }
   }
 
@@ -281,24 +328,51 @@ export class Scheduler {
    */
   private async collectGlm(provider: DetectedProvider | null): Promise<UsageStream | null> {
     const st = this.deps.store.source("glm");
-    if (!provider || provider.official || !provider.monitorUrl || !provider.authToken) return null;
+    const stored = this.deps.store.snapshot("glm");
+    const lastKnown = (state: UsageStream["state"], message: string): UsageStream | null =>
+      stored
+        ? {
+            ...stored.stream,
+            cached: true,
+            observed_at: new Date(stored.observedAt).toISOString(),
+            state,
+            status_message: message,
+          }
+        : null;
+
+    if (!provider || provider.official || !provider.monitorUrl || !provider.authToken) {
+      return lastKnown("offline", "GLM routing is not currently detected; showing the last reading.");
+    }
 
     const label = provider.source === "zai" ? "GLM Coding" : provider.name || "Gateway";
 
-    const asStream = (snap: Snapshot, suffix = ""): UsageStream => ({
+    const asStream = (
+      snap: Snapshot,
+      suffix = "",
+      state: UsageStream["state"] = "live",
+      statusMessage?: string,
+    ): UsageStream => ({
       source: "glm",
       label: label + suffix,
       five_hour: snap.five_hour,
       seven_day: snap.seven_day,
       limits: snap.limits,
       provider: safeProvider(provider),
+      cached: state !== "live",
+      observed_at: new Date().toISOString(),
+      state,
+      status_message: statusMessage ?? null,
     });
 
     if (Date.now() < st.nextAt) {
       // Cooling down: fall back to the calibrated local estimate, which for a
       // routed Claude Code is exactly this provider's traffic.
+      const exact = lastKnown("rate_limited", "Provider cooldown; showing the last exact reading.");
+      if (exact) return exact;
       const est = this.local.estimate();
-      return est.five_hour || est.seven_day ? asStream(est, " (estimate)") : null;
+      return est.five_hour || est.seven_day
+        ? asStream(est, " (estimate)", "cached", "Provider cooldown; showing an estimate.")
+        : null;
     }
 
     try {
@@ -308,7 +382,9 @@ export class Scheduler {
       st.backoff = undefined;
       this.local.calibrateFrom(snap);
       this.deps.store.setCalibration(this.local.getCalibration());
-      return asStream(snap);
+      const stream = asStream(snap);
+      this.deps.store.setSnapshot(stream.source, stream);
+      return stream;
     } catch (e) {
       const err = e as { code?: number | string; retryMs?: number; message: string };
       if (err.code === 429) {
@@ -321,9 +397,26 @@ export class Scheduler {
       } else {
         this.deps.log(`[${label}] ${err.message}`);
       }
+      const exact = lastKnown(
+        err.code === 429 ? "rate_limited" : "offline",
+        err.code === 429
+          ? "Provider rate limit; showing the last exact reading."
+          : "GLM is temporarily unreachable; showing the last reading.",
+      );
+      if (exact) return exact;
       const est = this.local.estimate();
-      return est.five_hour || est.seven_day ? asStream(est, " (estimate)") : null;
+      return est.five_hour || est.seven_day
+        ? asStream(est, " (estimate)", "cached", "Showing a local estimate.")
+        : null;
     }
+  }
+
+  private snapshotOf(stream: UsageStream): Snapshot {
+    return {
+      five_hour: stream.five_hour ?? null,
+      seven_day: stream.seven_day ?? null,
+      limits: stream.limits ?? null,
+    };
   }
 
   /**
@@ -334,8 +427,11 @@ export class Scheduler {
   private async collectCodex(): Promise<UsageStream | null> {
     const state = this.deps.store.source("codex");
     const now = Date.now();
-    const cachedStream = (): UsageStream | null => {
-      if (!this.lastCodexSnapshot || now - this.lastCodexAt >= CODEX_STALE_CACHE_MS) return null;
+    const streamFromLast = (
+      streamState: UsageStream["state"],
+      message?: string,
+    ): UsageStream | null => {
+      if (!this.lastCodexSnapshot) return null;
       return {
         source: "codex",
         label: "Codex",
@@ -343,8 +439,10 @@ export class Scheduler {
         seven_day: this.lastCodexSnapshot.seven_day,
         limits: this.lastCodexSnapshot.limits,
         provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
-        cached: true,
+        cached: streamState !== "live",
         observed_at: new Date(this.lastCodexAt).toISOString(),
+        state: streamState,
+        status_message: message ?? null,
       };
     };
 
@@ -362,12 +460,15 @@ export class Scheduler {
       } else {
         const mins = Math.max(1, Math.ceil((state.nextAt - now) / 60_000));
         this.deps.log(`[Codex] cooling down ${mins}m (${state.message || "rate limit"})`);
-        return cachedStream();
+        return streamFromLast(
+          state.message?.includes("sign-in") ? "auth_stale" : "rate_limited",
+          state.message || "Waiting for the provider cooldown before checking again.",
+        );
       }
     }
 
     if (this.lastCodexSnapshot && now - this.lastCodexAt < API_CACHE_MS) {
-      return cachedStream();
+      return streamFromLast("live");
     }
 
     try {
@@ -379,7 +480,7 @@ export class Scheduler {
       state.message = undefined;
       state.credentialFingerprint = result.fingerprint;
       this.deps.log(`[Codex] quota ok via ${result.sourceLabel}`);
-      return {
+      const stream: UsageStream = {
         source: "codex",
         label: "Codex",
         five_hour: result.snapshot.five_hour,
@@ -388,7 +489,11 @@ export class Scheduler {
         provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
         cached: false,
         observed_at: new Date(this.lastCodexAt).toISOString(),
+        state: "live",
+        status_message: null,
       };
+      this.deps.store.setSnapshot(stream.source, stream, this.lastCodexAt);
+      return stream;
     } catch (error) {
       const err = error as { code?: number | string; retryMs?: number; message: string };
       state.credentialFingerprint =
@@ -400,15 +505,21 @@ export class Scheduler {
         state.nextAt = Date.now() + hold;
         state.message = "cooling down after a rate limit";
         this.deps.log(`[Codex] rate-limited; quiet for ${Math.round(hold / 60_000)}m`);
-        return cachedStream();
+        return streamFromLast("rate_limited", "Provider rate limit; showing the last exact reading.");
       }
       if (error instanceof AllCodexCredentialsRejectedError) {
         state.nextAt = Date.now() + 10 * 60_000;
         state.message = "Codex sign-in needs refreshing";
+        return streamFromLast("auth_stale", "Codex sign-in is stale; showing the last reading.");
       } else if (!(error instanceof NoCodexCredentialsError)) {
         this.deps.log(`[Codex] ${err.message}`);
       }
-      return cachedStream();
+      return streamFromLast(
+        error instanceof NoCodexCredentialsError ? "auth_stale" : "offline",
+        error instanceof NoCodexCredentialsError
+          ? "Codex sign-in is unavailable; showing the last reading."
+          : "Codex is temporarily unreachable; showing the last reading.",
+      );
     }
   }
 

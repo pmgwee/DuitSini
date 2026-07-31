@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Calibration } from "./collectors/claude-local";
-import type { RefreshState } from "./collectors/claude-refresh";
+import type { ClaudeCliRenewalState } from "./collectors/claude-cli-renewal";
+import type { UsageStream } from "./types";
 
 /**
  * Small JSON store beside the app's userData.
@@ -30,13 +31,10 @@ export interface PersistedState {
   calibration?: Calibration;
   /** Usage-endpoint call count, reset at local midnight. */
   usageCalls?: { day: string; count: number };
-  /**
-   * Per-credentials-path refresh holds. Persisted for the same reason the
-   * sharer persists them: a restart that forgot an in-flight refresh cooldown
-   * would fire a fresh POST straight into a window that is already throttling —
-   * which is how a login gets flagged in the first place.
-   */
-  refresh?: Record<string, RefreshState>;
+  /** Holds for official-CLI renewal of dedicated secondary Claude profiles. */
+  cliRenewal?: Record<string, ClaudeCliRenewalState>;
+  /** Last known provider readings. These keep all rings visible through outages. */
+  snapshots?: Record<string, { stream: UsageStream; observedAt: number }>;
   /**
    * A version the user chose to skip. While this equals the available version,
    * the toast stays quiet — the tray item and in-app badge still show it, so the
@@ -87,8 +85,20 @@ export class Store {
     this.data.calibration = c;
   }
 
-  setRefreshState(s: Record<string, RefreshState>): void {
-    this.data.refresh = s;
+  setCliRenewalState(s: Record<string, ClaudeCliRenewalState>): void {
+    this.data.cliRenewal = s;
+  }
+
+  setSnapshot(source: string, stream: UsageStream, observedAt = Date.now()): void {
+    (this.data.snapshots ??= {})[source] = {
+      stream: structuredClone(stream),
+      observedAt,
+    };
+  }
+
+  snapshot(source: string): { stream: UsageStream; observedAt: number } | null {
+    const value = this.data.snapshots?.[source];
+    return value ? structuredClone(value) : null;
   }
 
   /** Version the user chose to skip; the toast stays quiet for exactly this one. */

@@ -107,6 +107,14 @@
  * is ~3 refresh POSTs/day at 8h lifetimes — far below v3's early-refresh
  * schedule that produced the refresh-429 lockouts.
  *
+ * v9 — official-CLI renewal + durable continuity (2026-08-01). Direct token
+ * endpoint calls are removed. Ordinary Claude Code/keychain sources remain
+ * read-only; only dedicated profiles invoke `claude auth login --claudeai`
+ * with the official refresh-token environment contract. Cross-process locking,
+ * persisted holds, and post-run credential-rotation validation prevent retry
+ * loops. Last successful Claude/GLM/Codex readings persist beside the sharer,
+ * so one provider outage cannot delete its dashboard section.
+ *
  * IMPORTANT: the SOURCE below must contain NO backticks, no ${...}, and no
  * backslashes, so it embeds safely inside this template literal. Config is
  * injected via the __PLACEHOLDER__ tokens.
@@ -119,13 +127,14 @@ const SOURCE = `#!/usr/bin/env node
  * percentages to the dashboard. Your login/password is never sent.
  * Close this window anytime to stop.
  */
-import { readFile, writeFile, rename } from "node:fs/promises";
+import { open, readFile, writeFile, rename, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 
-const SHARER_VERSION = "8";
+const SHARER_VERSION = "9";
 const INGEST_URL = "__INGEST_URL__";
 const PULL_URL = "__PULL_URL__";
 // Which dashboard account this script broadcasts to. Baked in at download
@@ -139,8 +148,6 @@ const BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
 
 const USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const CODEX_USAGE_ENDPOINT = "https://chatgpt.com/backend-api/wham/usage";
-const TOKEN_ENDPOINTS = ["https://platform.claude.com/v1/oauth/token", "https://console.anthropic.com/v1/oauth/token"];
-const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CC_SWITCH_DB = join(homedir(), ".cc-switch", "cc-switch.db");
 const UA = "claude-code/2.1.9";
 // PUSH_MS default is 300s (v6; was 60s in v5, 30s originally): the unofficial
@@ -160,63 +167,33 @@ const UA = "claude-code/2.1.9";
 // PUSH_MS is configurable per member (cc-switch-style; see loadPushMs).
 let PUSH_MS = 300000;
 const PUSH_JITTER_MS = 8000, COMMAND_MS = 4000, MIN_GAP_MS = 9000, MIN_429_BACKOFF_MS = 60000;
-// Token-refresh discipline (v7 - ON-DEMAND ONLY). Subscription access tokens
-// live about 8 hours and the usage endpoint hard-rejects them (401) the
-// moment the recorded expiresAt passes (proven 2026-07-18: a 187-call day at
-// 300s cadence died at the exact expiry minute; only a fresh login revived
-// it). The refresh endpoint, in turn, flags a login that gets hammered (the
-// v3-era lockouts that once bricked a sign-in for a night). v7 threads the
-// needle:
-//   AS-IS FIRST - a token is used unchanged (v5/cc-switch parity) until
-//     EXPIRY_BUFFER_MS before its recorded expiry, or until the server
-//     answers a real 401. No early/scheduled refreshes, ever (v3's
-//     early-at-expiry-minus-3h schedule is what generated enough token-
-//     endpoint traffic to hit the refresh-429 lockouts).
-//   ONE GATED ATTEMPT - a refresh POST is spent only when every guard
-//     agrees: outside the persisted cooldown (.sharer-state.json beside the
-//     creds - restarts and second instances honor an in-progress wait),
-//     outside the post-boot/wake settle window, at least REFRESH_MIN_MS
-//     since the last attempt, and at least REFRESH_MIN_OK_GAP_MS since a
-//     SUCCESSFUL refresh (a fresh token that still 401s cannot be fixed by
-//     refreshing harder).
-//   DEGRADE, NEVER BLOCK - every gate and every failure falls back to using
-//     the current token as-is; the usage endpoint stays the only authority
-//     and the candidate walk / all-rejected pause handle the rest. Worst
-//     case equals the old v5/v6 behavior (manual re-login); a working
-//     refresh removes the 8-hour ceiling (~3 refresh POSTs/day at 8h
-//     lifetimes).
+// v9 renewal discipline. Ordinary Claude Code credentials and keychain values
+// stay read-only, preserving cc-switch behavior. A dedicated secondary profile
+// renews only when close to expiry or after a real 401, by invoking the installed
+// official Claude CLI with its documented refresh-token environment contract.
+// DuitSini never calls the token endpoint or writes OAuth credentials itself.
+// A persisted one-hour failure hold plus a cross-process file lock prevents
+// restart loops and competing web/desktop sharers. A CLI exit counts as success
+// only after the credential file contains a changed token with later expiry.
 const REFRESH_ENABLED = true;
-const EXPIRY_BUFFER_MS = 300000, REFRESH_MIN_MS = 45000, REFRESH_MIN_OK_GAP_MS = 900000;
-const REFRESH_COOLDOWNS_MS = [900000, 1800000, 3600000, 7200000];
-// People run this from early morning (~6am boot/wake) to late night (~3am
-// sleep). Right after startup or waking from sleep the network is often only
-// half-up; a refresh POST fired then can succeed server-side (rotating the
-// refresh token) while the response is lost - leaving us holding a dead token.
-// So refresh attempts wait out a short settle window after start/wake; usage
-// pushes are unaffected (they are safe to retry, refreshes are not).
-// A refresh rejected with 4xx means the token is dead (revoked or rotated
-// away) - retrying cannot fix it, only a re-login can, so it holds long and
-// watches the disk for fresh credentials. 5xx = token service unwell; hold a
-// modest window instead of fast-retrying.
-const REAUTH_BLOCK_MS = 3600000, TOKEN_5XX_BLOCK_MS = 600000;
-
-let lastFetchAt = 0, lastPullSeen = 0, lastRefreshAt = 0, lastWarn = "", backoff = 0, pushJitter = 0;
-let refreshDayKey = "", refreshCountToday = 0;
+const EXPIRY_BUFFER_MS = 300000, CLI_LOGIN_TIMEOUT_MS = 30000, CLI_FAILURE_HOLD_MS = 3600000;
+// Wait briefly after boot/wake before invoking the CLI. Usage reads continue;
+// a last-known exact snapshot stays visible while renewal is unavailable.
+let lastFetchAt = 0, lastPullSeen = 0, lastWarn = "", backoff = 0, pushJitter = 0;
 let settleUntil = Date.now() + 8000 + Math.floor(Math.random() * 15000);
 let lastTickAt = Date.now(), scheduledGap = 4000;
 // Per-source scheduling: a rate-limited source pauses ITSELF (nextAt in the
 // future) while every other source keeps flowing - one busy endpoint must
 // never blank the whole dashboard again.
 const sources = {
-  pro: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, activeLabel: "", lastRejects: "", pausedFp: "" },
-  glm: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false },
+  pro: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, activeLabel: "", lastRejects: "", pausedFp: "", lastSnap: null, lastAt: 0 },
+  glm: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, lastSnap: null, lastAt: 0 },
   codex: { nextAt: 0, backoff: 0, streak: 0, resumeOnFreshCreds: false, activeLabel: "", lastRejects: "", pausedFp: "", lastSnap: null, lastAt: 0 },
 };
 
 const stamp = () => new Date().toLocaleTimeString();
 function fmtClock(t) { return new Date(t).toLocaleTimeString(); }
 function warnOnce(m) { if (m === lastWarn) return; lastWarn = m; console.warn("  " + stamp() + "  " + m); }
-function noteRefresh() { const k = new Date().toDateString(); if (k !== refreshDayKey) { refreshDayKey = k; refreshCountToday = 0; } refreshCountToday++; return "refresh " + refreshCountToday; }
 
 // How long the server told us to wait, from its rate-limit headers. retry-after
 // is seconds; the reset header is an absolute unix time (seconds). Returns ms,
@@ -302,9 +279,9 @@ function readKeychainCreds() {
 // knows WHICH login is feeding the dashboard.
 function proCredSources() {
   const paths = proCredsCandidates();
-  const fileSource = function (p) {
+  const fileSource = function (p, dedicated) {
     return {
-      label: p, path: p,
+      label: p, path: p, dedicated: dedicated,
       read: async function () { try { return JSON.parse(await readFile(p, "utf8")); } catch (e) { return null; } },
     };
   };
@@ -312,9 +289,9 @@ function proCredSources() {
   // The general tail = CLAUDE_CONFIG_DIR (if set) + the plain ~/.claude;
   // everything before it is a dedicated dir. The keychain slots between.
   const tailStart = paths.length - (process.env.CLAUDE_CONFIG_DIR ? 2 : 1);
-  for (let i = 0; i < tailStart; i++) out.push(fileSource(paths[i]));
-  out.push({ label: "macOS Keychain", path: null, read: readKeychainCreds });
-  for (let i = tailStart; i < paths.length; i++) out.push(fileSource(paths[i]));
+  for (let i = 0; i < tailStart; i++) out.push(fileSource(paths[i], true));
+  out.push({ label: "macOS Keychain", path: null, dedicated: false, read: readKeychainCreds });
+  for (let i = tailStart; i < paths.length; i++) out.push(fileSource(paths[i], false));
   return out;
 }
 
@@ -390,6 +367,36 @@ async function codexCredsFingerprint() {
 
 // v5: the script's own directory - sharer-config.json lives beside the script.
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const SNAPSHOT_FILE = join(SCRIPT_DIR, ".sharer-snapshots.json");
+let savedSnapshots = {};
+
+async function loadSnapshots() {
+  try {
+    const value = JSON.parse(await readFile(SNAPSHOT_FILE, "utf8"));
+    savedSnapshots = value && typeof value === "object" ? value : {};
+  } catch (e) { savedSnapshots = {}; }
+}
+
+async function saveSnapshot(stream) {
+  const observedAt = Date.now();
+  const clean = Object.assign({}, stream, { cached: false, observed_at: new Date(observedAt).toISOString(), state: "live", status_message: null });
+  savedSnapshots[stream.source] = { stream: clean, observedAt: observedAt };
+  const tmp = SNAPSHOT_FILE + "." + process.pid + "." + Math.floor(Math.random() * 1e9) + ".tmp";
+  try { await writeFile(tmp, JSON.stringify(savedSnapshots, null, 2), "utf8"); await rename(tmp, SNAPSHOT_FILE); }
+  catch (e) { /* continuity is best-effort; collection must keep running */ }
+  return clean;
+}
+
+function lastSnapshot(source, state, message) {
+  const saved = savedSnapshots[source];
+  if (!saved || !saved.stream) return null;
+  return Object.assign({}, saved.stream, {
+    cached: state !== "live",
+    observed_at: new Date(saved.observedAt || Date.now()).toISOString(),
+    state: state,
+    status_message: message || null,
+  });
+}
 
 // Effective push cadence: env CLAUDE_SHARER_PUSH_SECONDS wins, else
 // {"pushSeconds": N} from a sharer-config.json beside this script, else 300s.
@@ -449,22 +456,8 @@ function usageCallSummary() {
   return usageCount.count + " usage calls today (since " + fmtClock(usageCount.firstAt) + ")";
 }
 
-async function writeCreds(path, creds) {
-  // Unique temp name per process+call: if two instances ever write at the same
-  // instant, a SHARED temp path would let them truncate/rename over each other
-  // and corrupt the credentials file (bricking both -> re-login). A pid+random
-  // suffix keeps each write isolated; rename is atomic, so readers see either
-  // the old or new whole file, never a torn one.
-  const tmp = path + "." + process.pid + "." + Math.floor(Math.random() * 1e9) + ".sharer.tmp";
-  await writeFile(tmp, JSON.stringify(creds, null, 2), "utf8");
-  await rename(tmp, path);
-}
-
-// Refresh throttle state, persisted next to the credentials file. Restarting
-// the sharer (or running two copies against one login) re-reads this, so a
-// cooldown already in progress is honored instead of reset. This is what makes
-// restarts safe: the old behavior of "restart -> immediate refresh attempt" is
-// exactly what kept a rate-limited login locked.
+// Dedicated-profile renewal state is persisted beside its credentials. It
+// contains only a one-way fingerprint and timing gates, never OAuth material.
 function stateFileFor(credsPath) { return join(dirname(credsPath), ".sharer-state.json"); }
 async function readState(credsPath) {
   try { const s = JSON.parse(await readFile(stateFileFor(credsPath), "utf8")); return s && typeof s === "object" ? s : {}; }
@@ -479,144 +472,122 @@ async function writeState(credsPath, patch) {
   return next;
 }
 
-async function refresh(creds, path) {
-  const o = oauthEntryOf(creds);
-  const rt = o && o.refreshToken;
-  if (!rt) throw new Error("Please open Claude Code and sign in first.");
-  let lastErr;
-  for (const url of TOKEN_ENDPOINTS) {
-    let resp;
-    try { resp = await safeFetch(url, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": UA }, body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rt, client_id: OAUTH_CLIENT_ID }) }); }
-    catch (e) { lastErr = e; continue; }
-    if (resp.status === 404) { lastErr = new Error("token endpoint 404"); continue; }
-    if (resp.status === 429) {
-      // Surface how long the endpoint wants us to wait, which creds file is
-      // stuck, and how stale its token is (tokenAge > 0 => already expired) -
-      // this is what tells us whether it's one file being hammered vs. a
-      // genuinely long server-side limit.
-      const ra = resp.headers.get("retry-after");
-      const reset = resp.headers.get("anthropic-ratelimit-unified-reset");
-      const exp2 = o.expiresAt;
-      const ageMin = typeof exp2 === "number" ? Math.round((Date.now() - exp2) / 60000) : null;
-      throw Object.assign(new Error("Anthropic token-refresh rate-limited (429) at " + url + (ra ? " retry-after=" + ra + "s" : "") + (reset ? " reset=" + reset : "") + " creds=" + path + (ageMin == null ? "" : " tokenAge=" + ageMin + "m")), { code: 429, retryMs: retryMsFrom(ra, reset) });
-    }
-    if (!resp.ok) {
-      // 4xx: THIS refresh token is no longer accepted (revoked, or a rotation
-      // response was lost in transit). Retrying can never fix that - only a
-      // fresh login can - and blind per-cycle retries are exactly the
-      // hammering that gets a login flagged. 5xx: the token service itself is
-      // struggling; fast retries do not help either.
-      const kind = resp.status < 500 ? "reauth" : "5xx";
-      throw Object.assign(new Error("Could not refresh your sign-in (" + resp.status + ")."), { code: kind });
-    }
-    const j = await resp.json();
-    if (!j.access_token) throw new Error("Refresh returned no token.");
-    // Mutate the oauth entry IN PLACE inside the whole parsed credentials
-    // file, then write the whole file back - sibling fields (mcpOAuth etc.)
-    // and the key spelling ("claudeAiOauth" vs "claude.ai_oauth") survive.
-    o.accessToken = j.access_token;
-    if (j.refresh_token) o.refreshToken = j.refresh_token;
-    o.expiresAt = Date.now() + (j.expires_in || 3600) * 1000;
-    await writeCreds(path, creds);
-    console.log("  " + stamp() + "  refreshed your Claude sign-in (valid ~" + Math.max(1, Math.round((j.expires_in || 3600) / 3600)) + "h; " + noteRefresh() + " today)");
-    return o.accessToken;
-  }
-  throw lastErr || new Error("Refresh failed.");
+function oauthFingerprint(o) {
+  return createHash("sha256").update(String(o.accessToken || "")).update(String.fromCharCode(0)).update(String(o.refreshToken || "")).digest("hex").slice(0, 20);
 }
 
-// Refresh de-duplication across restarts AND multiple instances that share one
-// credentials file. The refresh endpoint ROTATES the refresh token on each
-// success, so two processes (or a fresh restart with a cold in-memory timer)
-// refreshing at once invalidate each other and stampede the endpoint into a
-// 429 - the exact thing that bricked the login. Before spending a network
-// refresh we: (1) wait a short random jitter so simultaneous starters desync;
-// (2) re-read the file from disk - if a sibling already refreshed it (a newer,
-// still-valid expiresAt than the token we came in with), ADOPT that token and
-// skip the network entirely. Only if the disk token is still stale do we
-// actually hit the endpoint.
-async function refreshOrAdoptFromDisk(creds, path, staleExp) {
-  await new Promise(function (r) { setTimeout(r, 200 + Math.floor(Math.random() * 800)); });
-  try {
-    const fresh = JSON.parse(await readFile(path, "utf8"));
-    const fo = oauthEntryOf(fresh);
-    if (fo && fo.accessToken && typeof fo.expiresAt === "number" && fo.expiresAt > staleExp && Date.now() < fo.expiresAt - EXPIRY_BUFFER_MS) {
-      // A sibling/other login refreshed it while we waited - use their token
-      // (the next cycle re-reads the file anyway; no write needed here).
-      console.log("  " + stamp() + "  adopted a fresher sign-in from disk (another process refreshed it)");
-      return fo.accessToken;
-    }
-    // Refresh with the newest refresh token on disk, not our possibly-rotated
-    // in-memory one, so we never present a token a sibling already
-    // invalidated - and refresh the FRESH file object, so the write-back
-    // preserves whatever else the newest file holds.
-    if (fo && fo.refreshToken) return await refresh(fresh, path);
-  } catch (e) { /* unreadable/torn write - fall through to refresh what we have */ }
-  return await refresh(creds, path);
+function oauthFresh(o) {
+  return !!(o && o.accessToken && typeof o.expiresAt === "number" && o.expiresAt > Date.now() + EXPIRY_BUFFER_MS);
 }
 
-// One cooldown-aware network refresh. Any 429 - INCLUDING while the old token
-// is still valid (previously ignored, which let the pre-expiry window fire a
-// refresh attempt every cycle) - arms an escalating hold in the state file;
-// the next attempt waits it out instead of poking the endpoint again. Repeated
-// pokes are what flag a login server-side and used to brick it for a night.
-async function attemptRefresh(creds, path, staleExp) {
-  await writeState(path, { lastRefreshAttemptAt: Date.now() });
+function runOfficialClaudeLogin(path, o) {
+  return new Promise(function (resolve) {
+    const env = Object.assign({}, process.env);
+    delete env.ANTHROPIC_API_KEY;
+    delete env.ANTHROPIC_AUTH_TOKEN;
+    delete env.ANTHROPIC_BASE_URL;
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete env.CLAUDE_CODE_USE_BEDROCK;
+    delete env.CLAUDE_CODE_USE_VERTEX;
+    delete env.CLAUDE_CODE_USE_FOUNDRY;
+    env.CLAUDE_CONFIG_DIR = dirname(path);
+    env.CLAUDE_CODE_OAUTH_REFRESH_TOKEN = o.refreshToken;
+    env.CLAUDE_CODE_OAUTH_SCOPES = Array.isArray(o.scopes) ? o.scopes.join(" ") : "";
+    const request = {
+      command: process.platform === "win32" ? "claude.cmd" : "claude",
+      args: ["auth", "login", "--claudeai"],
+      env: env,
+      timeout: CLI_LOGIN_TIMEOUT_MS,
+    };
+    execFile(request.command, request.args, { env: request.env, timeout: request.timeout, windowsHide: true, shell: process.platform === "win32", maxBuffer: 262144 }, function (err) {
+      resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, timedOut: !!(err && err.killed) });
+    });
+  });
+}
+
+function renewLockFile(path) { return join(dirname(path), ".duitsini-claude-renew.lock"); }
+
+async function pidExists(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return !!(e && e.code === "EPERM"); }
+}
+
+async function staleRenewLock(path) {
   try {
-    const token = await refreshOrAdoptFromDisk(creds, path, staleExp);
-    await writeState(path, { refreshBlockedUntil: 0, refreshStreak: 0, lastRefreshOkAt: Date.now() });
-    return token;
+    const lock = JSON.parse(await readFile(path, "utf8"));
+    const age = Date.now() - (lock.startedAt || (await stat(path)).mtimeMs);
+    if (age <= CLI_LOGIN_TIMEOUT_MS + 30000) return false;
+    return typeof lock.pid !== "number" || !(await pidExists(lock.pid));
   } catch (e) {
-    if (e && e.code === 429) {
-      const st = await readState(path);
-      const streak = (typeof st.refreshStreak === "number" ? st.refreshStreak : 0) + 1;
-      const ladder = REFRESH_COOLDOWNS_MS[Math.min(streak, REFRESH_COOLDOWNS_MS.length) - 1];
-      const hold = Math.max(e.retryMs || 0, ladder) + Math.floor(Math.random() * 180000);
-      const until = Date.now() + hold;
-      await writeState(path, { refreshStreak: streak, refreshBlockedUntil: until });
-      e.blockedUntil = until;
-    } else if (e && (e.code === "reauth" || e.code === "5xx")) {
-      const until = Date.now() + (e.code === "reauth" ? REAUTH_BLOCK_MS : TOKEN_5XX_BLOCK_MS);
-      await writeState(path, { refreshBlockedUntil: until });
-      e.blockedUntil = until;
-      if (e.code === "reauth") e.message = e.message + " Please sign in again on this computer (re-run the setup) - it is picked up automatically.";
-    }
-    throw e;
+    try { return Date.now() - (await stat(path)).mtimeMs > CLI_LOGIN_TIMEOUT_MS + 30000; }
+    catch (e2) { return false; }
   }
 }
 
-// v7: decide whether to spend a refresh POST before this usage call. The
-// token is used AS-IS (v5/cc-switch parity - the server is the authority)
-// until its recorded expiry is actually upon us; force=true means a real 401
-// just came back on this token, which overrides the clock. Every gate below
-// DEGRADES to returning the current token instead of throwing: refresh here
-// is pure upside, and the candidate walk / all-rejected pause in
-// fetchProSnapshot remain the only failure authority.
+async function withRenewLock(path, task) {
+  const lockPath = renewLockFile(path);
+  const nonce = process.pid + "-" + Date.now() + "-" + Math.floor(Math.random() * 1e9);
+  const deadline = Date.now() + CLI_LOGIN_TIMEOUT_MS + 10000;
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx");
+      try { await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: Date.now(), nonce: nonce }), "utf8"); }
+      finally { await handle.close(); }
+      break;
+    } catch (e) {
+      if (!e || e.code !== "EEXIST") throw e;
+      if (await staleRenewLock(lockPath)) { await unlink(lockPath).catch(function () {}); continue; }
+      if (Date.now() >= deadline) throw new Error("Timed out waiting for another Claude renewal.");
+      await new Promise(function (resolve) { setTimeout(resolve, 250); });
+    }
+  }
+  try { return await task(); }
+  finally {
+    try { const lock = JSON.parse(await readFile(lockPath, "utf8")); if (lock.nonce === nonce) await unlink(lockPath); }
+    catch (e) { /* never remove a lock that no longer belongs to us */ }
+  }
+}
+
+// Ordinary Claude Code and keychain sources stay read-only. This function is
+// called only for dedicated profiles and delegates renewal to the official CLI.
 async function getToken(creds, path, force) {
   const o = oauthEntryOf(creds);
   if (!o || !o.accessToken) throw new Error("Please sign in to Claude Code with your Claude Pro/Max account first.");
   if (!REFRESH_ENABLED || !o.refreshToken || !path) return o.accessToken;
-  const now = Date.now(), exp = typeof o.expiresAt === "number" ? o.expiresAt : 0;
-  // No early/scheduled refreshes, ever: v3's expiry-minus-3h schedule is what
-  // generated enough token-endpoint traffic to trip refresh-429 lockouts.
-  const usable = !force && now < exp - EXPIRY_BUFFER_MS;
-  if (usable) return o.accessToken;
-  const st = await readState(path);
-  // A refresh that SUCCEEDED minutes ago and still yields 401s cannot be
-  // fixed by refreshing harder - this gate (not bypassed by force) caps a
-  // pathological loop at one refresh per REFRESH_MIN_OK_GAP_MS per source.
-  const lastOk = typeof st.lastRefreshOkAt === "number" ? st.lastRefreshOkAt : 0;
-  if (now - lastOk < REFRESH_MIN_OK_GAP_MS) return o.accessToken;
-  const blockedUntil = typeof st.refreshBlockedUntil === "number" ? st.refreshBlockedUntil : 0;
-  if (now < blockedUntil) return o.accessToken;
-  // A refresh POST into a half-up network right after boot/wake can succeed
-  // server-side (rotating the refresh token) while the response is lost -
-  // stranding the login. Usage calls are safe to retry; refreshes are not.
-  if (now < settleUntil) return o.accessToken;
-  if (now - lastRefreshAt < REFRESH_MIN_MS) return o.accessToken;
-  lastRefreshAt = now;
-  try { return await attemptRefresh(creds, path, exp); }
-  catch (e) {
-    warnOnce("couldn't refresh the sign-in (" + ((e && e.message) || "error") + "); using the current one" + (e && e.blockedUntil ? "; next attempt " + fmtClock(e.blockedUntil) : ""));
+  if (!force && oauthFresh(o)) return o.accessToken;
+  const fp = oauthFingerprint(o);
+  let st = await readState(path);
+  if (st.fingerprint && st.fingerprint !== fp) st = await writeState(path, { fingerprint: fp, cliBlockedUntil: 0 });
+  if (Date.now() < (st.cliBlockedUntil || 0) || Date.now() < settleUntil) return o.accessToken;
+  try {
+    return await withRenewLock(path, async function () {
+      let latestCreds = creds;
+      try { latestCreds = JSON.parse(await readFile(path, "utf8")); } catch (e) { /* use caller copy */ }
+      const latest = oauthEntryOf(latestCreds) || o;
+      const latestFp = oauthFingerprint(latest);
+      if (latestFp !== fp && oauthFresh(latest)) return latest.accessToken;
+      if (!latest.refreshToken) return latest.accessToken || o.accessToken;
+      await writeState(path, { fingerprint: latestFp, lastCliAttemptAt: Date.now() });
+      const result = await runOfficialClaudeLogin(path, latest);
+      if (result.code !== 0 || result.timedOut) {
+        await writeState(path, { fingerprint: latestFp, cliBlockedUntil: Date.now() + CLI_FAILURE_HOLD_MS });
+        warnOnce("[Claude Pro] official CLI renewal did not complete; showing the last exact reading and retrying later.");
+        return latest.accessToken || o.accessToken;
+      }
+      let rotated = null;
+      try { rotated = oauthEntryOf(JSON.parse(await readFile(path, "utf8"))); } catch (e) { rotated = null; }
+      if (!rotated || !rotated.accessToken || oauthFingerprint(rotated) === latestFp || !oauthFresh(rotated) || rotated.expiresAt <= (latest.expiresAt || 0)) {
+        await writeState(path, { fingerprint: latestFp, cliBlockedUntil: Date.now() + CLI_FAILURE_HOLD_MS });
+        warnOnce("[Claude Pro] official CLI exited without rotating the credentials; retrying later.");
+        return latest.accessToken || o.accessToken;
+      }
+      await writeState(path, { fingerprint: oauthFingerprint(rotated), cliBlockedUntil: 0, lastCliOkAt: Date.now() });
+      console.log("  " + stamp() + "  [Claude Pro] renewed dedicated sign-in through the official Claude CLI");
+      return rotated.accessToken;
+    });
+  } catch (e) {
+    await writeState(path, { fingerprint: fp, cliBlockedUntil: Date.now() + CLI_FAILURE_HOLD_MS });
+    warnOnce("[Claude Pro] official CLI renewal is temporarily unavailable; showing the last exact reading.");
     return o.accessToken;
   }
 }
@@ -728,7 +699,7 @@ async function fetchProSnapshot() {
     // v7: file sources go through getToken, which refreshes ON DEMAND (at
     // real expiry only) and otherwise returns the token as-is; the keychain
     // source is always as-is (nothing can write a rotation back to it).
-    const token = (src.path && REFRESH_ENABLED)
+    const token = (src.path && src.dedicated && REFRESH_ENABLED)
       ? await getToken(creds, src.path)
       : oauth.accessToken;
     try {
@@ -743,7 +714,7 @@ async function fetchProSnapshot() {
         // genuinely NEW token. All refresh guards still apply (cooldowns,
         // settle window, 15-min ok-gap), so a dead login costs at most one
         // refresh POST per hold window - never one per cycle.
-        if (e.code === 401 && src.path && REFRESH_ENABLED && oauth.refreshToken) {
+        if (e.code === 401 && src.path && src.dedicated && REFRESH_ENABLED && oauth.refreshToken) {
           let token2 = null;
           try { token2 = await getToken(creds, src.path, true); } catch (e2) { token2 = null; }
           if (token2 && token2 !== token) {
@@ -860,7 +831,7 @@ async function fetchCodexSnapshot() {
   ), { code: "cooldown", until: Date.now() + 600000 });
 }
 
-function codexStream(snap, cached, observedAt) {
+function codexStream(snap, cached, observedAt, state, message) {
   return {
     source: "codex",
     label: "Codex",
@@ -870,12 +841,14 @@ function codexStream(snap, cached, observedAt) {
     provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
     cached: !!cached,
     observed_at: new Date(observedAt).toISOString(),
+    state: state || (cached ? "cached" : "live"),
+    status_message: message || null,
   };
 }
 
-function cachedCodexStream(now) {
-  if (!sources.codex.lastSnap || now - sources.codex.lastAt >= 600000) return null;
-  return codexStream(sources.codex.lastSnap, true, sources.codex.lastAt);
+function cachedCodexStream(state, message) {
+  if (sources.codex.lastSnap) return codexStream(sources.codex.lastSnap, state !== "live", sources.codex.lastAt, state, message);
+  return lastSnapshot("codex", state, message);
 }
 
 // Fetch GLM Coding Plan usage from a z.ai/bigmodel gateway using the provider's
@@ -1020,37 +993,55 @@ async function fetchAndPush(reason) {
   if (now >= sources.pro.nextAt) {
     try {
       const snap = await fetchProSnapshot();
-      streams.push({ source: "claude_pro", label: "Claude Pro", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: null });
+      const stream = { source: "claude_pro", label: "Claude Pro", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: null, cached: false, observed_at: new Date().toISOString(), state: "live", status_message: null };
+      streams.push(await saveSnapshot(stream));
       sources.pro.backoff = 0; sources.pro.streak = 0; sources.pro.nextAt = 0; sources.pro.resumeOnFreshCreds = false;
     } catch (e) {
       if (pauseSource("pro", "Claude Pro", e)) sources.pro.pausedFp = await credsFingerprint();
       else notes.push("Claude Pro: " + ((e && e.message) || "error"));
+      const cached = lastSnapshot("claude_pro", e && e.code === 429 ? "rate_limited" : (e && (e.code === "cooldown" || e.code === "reauth") ? "auth_stale" : "offline"), (e && e.message) || "Claude is temporarily unavailable.");
+      if (cached) streams.push(cached);
     }
+  } else {
+    const cached = lastSnapshot("claude_pro", sources.pro.resumeOnFreshCreds ? "auth_stale" : "rate_limited", "Waiting before the next Claude usage check.");
+    if (cached) streams.push(cached);
   }
   if (provider && provider.source === "zai" && provider.authToken && now >= sources.glm.nextAt) {
     try {
       const snap = await fetchGlmUsage(provider);
-      streams.push({ source: "glm", label: "GLM Coding", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: safeProvider(provider) });
+      const stream = { source: "glm", label: "GLM Coding", five_hour: snap.five_hour, seven_day: snap.seven_day, limits: snap.limits, provider: safeProvider(provider), cached: false, observed_at: new Date().toISOString(), state: "live", status_message: null };
+      streams.push(await saveSnapshot(stream));
       sources.glm.backoff = 0; sources.glm.streak = 0; sources.glm.nextAt = 0;
-    } catch (e) { if (!pauseSource("glm", "GLM", e)) notes.push("GLM: " + ((e && e.message) || "error")); }
+    } catch (e) {
+      if (!pauseSource("glm", "GLM", e)) notes.push("GLM: " + ((e && e.message) || "error"));
+      const cached = lastSnapshot("glm", e && e.code === 429 ? "rate_limited" : "offline", (e && e.message) || "GLM is temporarily unavailable.");
+      if (cached) streams.push(cached);
+    }
+  } else if (provider && provider.source === "zai" && provider.authToken) {
+    const cached = lastSnapshot("glm", "rate_limited", "Waiting before the next GLM usage check.");
+    if (cached) streams.push(cached);
+  } else {
+    const cached = lastSnapshot("glm", "offline", "GLM routing is not currently detected; showing the last reading.");
+    if (cached) streams.push(cached);
   }
   if (sources.codex.lastSnap && now - sources.codex.lastAt < Math.min(PUSH_MS, 300000)) {
-    streams.push(codexStream(sources.codex.lastSnap, true, sources.codex.lastAt));
+    streams.push(codexStream(sources.codex.lastSnap, false, sources.codex.lastAt, "live", null));
   } else if (now >= sources.codex.nextAt) {
     try {
       const snap = await fetchCodexSnapshot();
       sources.codex.lastSnap = snap;
       sources.codex.lastAt = Date.now();
-      streams.push(codexStream(snap, false, sources.codex.lastAt));
+      const stream = codexStream(snap, false, sources.codex.lastAt, "live", null);
+      streams.push(await saveSnapshot(stream));
       sources.codex.backoff = 0; sources.codex.streak = 0; sources.codex.nextAt = 0; sources.codex.resumeOnFreshCreds = false;
     } catch (e) {
       if (pauseSource("codex", "Codex", e)) sources.codex.pausedFp = await codexCredsFingerprint();
       else notes.push("Codex: " + ((e && e.message) || "error"));
-      const cached = cachedCodexStream(now);
+      const cached = cachedCodexStream(e && e.code === 429 ? "rate_limited" : (e && e.code === "cooldown" ? "auth_stale" : "offline"), (e && e.message) || "Codex is temporarily unavailable.");
       if (cached) streams.push(cached);
     }
   } else {
-    const cached = cachedCodexStream(now);
+    const cached = cachedCodexStream(sources.codex.resumeOnFreshCreds ? "auth_stale" : "rate_limited", "Waiting before the next Codex usage check.");
     if (cached) streams.push(cached);
   }
   if (streams.length === 0) {
@@ -1107,6 +1098,7 @@ async function loop() {
 (async function start() {
   PUSH_MS = await loadPushMs();
   await loadUsageCount();
+  await loadSnapshots();
   console.log("");
   console.log("  ============================================");
   console.log("   Agent Usage Sharer v" + SHARER_VERSION + " is running.");
@@ -1125,7 +1117,7 @@ async function loop() {
   console.log("  " + stamp() + "  usage-endpoint budget meter: " + usageCallSummary());
   console.log("  " + stamp() + "  reading your Claude Code sign-in(s) from disk (dedicated folders -> macOS Keychain -> ~/.claude).");
   console.log("  " + stamp() + "  auto-detecting ChatGPT Codex from CODEX_HOME or ~/.codex/auth.json (no extra setup).");
-  console.log("  " + stamp() + "  expired sign-ins renew themselves now (v7 on-demand refresh) - no more 8-hour re-login.");
+  console.log("  " + stamp() + "  dedicated Claude sign-ins renew through the official Claude CLI (v9).");
   console.log("  If sharing still stops later, sign in to Claude Code again - it is picked up automatically.");
   loop();
 })();
