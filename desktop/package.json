@@ -1,6 +1,6 @@
 {
   "name": "duitsini-desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "DuitSini Desktop — Electron shell over the live web app, with local AI-usage collectors.",
   "main": "dist/desktop/src/main.js",

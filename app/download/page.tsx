@@ -2,66 +2,22 @@ import Link from "next/link";
 import { Download, Monitor, Apple, Activity, Bell, TerminalSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroVideo } from "@/components/hero-video";
+import {
+  formatDesktopReleaseSize,
+  getLatestDesktopRelease,
+} from "@/lib/releases/desktop-release";
 
 /**
- * Public download landing page (no auth). Resolves the latest Windows installer
- * from the GitHub Releases API server-side (cached 1h to stay well within the
- * 60-req/h unauthenticated limit — at most 24 fetches/day). If the fetch fails,
- * degrades to a button linking the releases page so the download never breaks.
+ * Public download landing page (no auth). Reads electron-builder's updater
+ * manifest, the same file the installed app trusts, so a newly published
+ * installer can never be advertised under the previous version.
  */
 
-const GITHUB_OWNER = "pmgwee";
-const GITHUB_REPO = "DuitSini";
-
-interface ReleaseAsset {
-  name: string;
-  browser_download_url: string;
-  size: number;
-}
-interface Release {
-  tag_name: string;
-  name: string | null;
-  html_url: string;
-  assets: ReleaseAsset[];
-}
-
-async function getLatestRelease(): Promise<Release | null> {
-  try {
-    const r = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
-      headers: { Accept: "application/vnd.github+json" },
-      // 5 minutes, not an hour. Releases are rare, but the page is WRONG for the
-      // whole window right after one — it kept advertising v1.1.6 (with that
-      // build's byte size) while v1.1.8 was live, which is exactly when people
-      // are being sent here. At 300s this is at most 12 requests/hour against
-      // GitHub's 60/hour unauthenticated limit, shared across all visitors.
-      next: { revalidate: 300 },
-    });
-    if (!r.ok) return null;
-    return (await r.json()) as Release;
-  } catch {
-    return null;
-  }
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return "";
-  const mb = bytes / (1024 * 1024);
-  return `${Math.round(mb)} MB`;
-}
-
 export default async function DownloadPage() {
-  const release = await getLatestRelease();
-  const tag = release?.tag_name ?? "latest";
-  const versionLabel = tag.startsWith("v") ? tag.slice(1) : tag;
-
-  // The Windows NSIS installer is named DuitSini-Setup-*.exe. The blockmap and
-  // latest.yml are also in the release (for auto-update) but only the .exe is
-  // what a user downloads.
-  const winAsset = release?.assets.find(
-    (a) => a.name.endsWith(".exe") && a.name.includes("Setup"),
-  );
-  const winUrl = winAsset?.browser_download_url ?? `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
-  const winSize = winAsset ? formatBytes(winAsset.size) : "~96 MB";
+  const release = await getLatestDesktopRelease();
+  const versionLabel = release.version ? `v${release.version}` : "Latest version";
+  const sizeLabel = formatDesktopReleaseSize(release.sizeBytes);
+  const metadata = [versionLabel, sizeLabel, "Windows 10+"].filter(Boolean).join(" · ");
 
   return (
     <main className="relative w-full overflow-hidden bg-background">
@@ -85,9 +41,9 @@ export default async function DownloadPage() {
           Track your AI usage — without leaving the app.
         </h1>
         <p className="mt-4 max-w-xl text-balance text-white/90 text-shadow-[0_1px_6px_rgba(0,0,0,0.6)]">
-          Install once, sign in with Google, and your Claude / GLM plan usage
-          updates live — on every device. No Terminal, no ZIP, no script to
-          babysit.
+          Install once and DuitSini automatically brings your Claude, Codex,
+          and Z.AI subscription usage into one live dashboard. No Terminal,
+          ZIP, API key, or second usage sharer.
         </p>
 
         {/* Download card — dark glass over the video (matches the landing page's
@@ -95,21 +51,24 @@ export default async function DownloadPage() {
             white card that clashes with the cinematic video; dark glass integrates. */}
         <div className="mt-10 w-full max-w-md rounded-3xl border border-white/15 bg-black/70 p-6 text-left shadow-2xl backdrop-blur-xl">
           {/* Windows */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <div className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25">
                 <Monitor className="size-5" />
               </div>
               <div>
-                <div className="font-semibold text-white">Windows</div>
-                <div className="text-xs text-white/60">
-                  v{versionLabel} · {winSize} · Windows 10+
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-white">Windows</span>
+                  <span className="rounded-full bg-success/20 px-2 py-0.5 text-[10px] font-medium text-success">
+                    Recommended
+                  </span>
                 </div>
+                <div className="text-xs text-white/60">{metadata}</div>
               </div>
             </div>
-            <Button asChild size="sm" className="gap-2">
-              <a href={winUrl} download>
-                <Download className="size-4" /> Free
+            <Button asChild size="sm" className="w-full gap-2 sm:w-auto">
+              <a href={release.downloadUrl} download>
+                <Download className="size-4" /> Download free
               </a>
             </Button>
           </div>
@@ -134,9 +93,9 @@ export default async function DownloadPage() {
         {/* What you get */}
         <div className="mt-10 grid w-full max-w-md gap-3 text-left">
           {[
-            { icon: Activity, text: "Live Claude Pro & GLM usage tracking" },
-            { icon: Bell, text: "System tray + start-at-login" },
-            { icon: TerminalSquare, text: "No Terminal, no ZIP, no scripts" },
+            { icon: Activity, text: "Claude, Codex & Z.AI limits in one live dashboard" },
+            { icon: Bell, text: "Automatic updates keep every new feature current" },
+            { icon: TerminalSquare, text: "No Terminal, ZIP, API key, or second sharer" },
           ].map(({ icon: Icon, text }) => (
             <div
               key={text}

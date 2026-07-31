@@ -16,6 +16,7 @@ import { useNow } from "./use-now";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentProviderIcon } from "./agent-provider-icon";
+import { AgentUsageMascot } from "./agent-usage-mascot";
 
 const SESSION_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -114,7 +115,7 @@ function LiveViewSkeleton() {
         <Skeleton className="h-3.5 w-20" />
         <Skeleton className="h-3.5 w-12 rounded-full" />
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex flex-col items-center gap-1.5">
             <Skeleton className="size-23 rounded-full" />
@@ -255,7 +256,11 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
         <span className="text-xs font-medium text-foreground">{stream.label}</span>
         <ProviderBadge provider={stream.provider} />
         {stream.cached ? (
-          <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+          <span
+            title={`Recent successful ${stream.label} reading reused briefly to protect its official quota endpoint. It refreshes automatically.`}
+            aria-label={`${stream.label} cached reading. Recent successful data is being reused briefly and refreshes automatically.`}
+            className="cursor-help rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+          >
             Cached
           </span>
         ) : null}
@@ -263,9 +268,9 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
       {gauges.length === 0 ? (
         <p className="py-2 text-[11px] text-muted-foreground/70">No usage limits reported for this source.</p>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {gauges.map((l) => (
-            <UsageGauge key={l.key} limit={l} now={now} />
+            <UsageGauge key={l.key} limit={l} now={now} source={stream.source} />
           ))}
         </div>
       )}
@@ -316,15 +321,33 @@ function formatAgo(iso: string | null | undefined, now: number): string {
 }
 
 /** One compact ring gauge — used for each limit (session + weekly models). */
-function UsageGauge({ limit, now }: { limit: UsageLimit; now: number }) {
+function UsageGauge({
+  limit,
+  now,
+  source,
+}: {
+  limit: UsageLimit;
+  now: number;
+  source: string;
+}) {
   const pct = limit.percent;
   return (
     <div className="flex flex-col items-center gap-1.5 text-center">
-      <ProgressRing progress={(pct ?? 0) / 100} color={utilizationColor(pct)} size={92} stroke={8}>
-        <div className="text-sm font-semibold tabular-nums">
-          {pct == null ? "—" : `${Math.round(pct)}%`}
-        </div>
-      </ProgressRing>
+      <div className="flex items-end justify-center gap-0.5 sm:gap-1.5">
+        <ProgressRing
+          progress={(pct ?? 0) / 100}
+          color={utilizationColor(pct)}
+          size={92}
+          stroke={8}
+        >
+          <div className="text-sm font-semibold tabular-nums">
+            {pct == null ? "—" : `${Math.round(pct)}%`}
+          </div>
+        </ProgressRing>
+        {limit.group === "weekly" && limit.key === "weekly_all" ? (
+          <AgentUsageMascot source={source} />
+        ) : null}
+      </div>
       <div className="text-[11px] font-medium leading-tight">{limit.label}</div>
       <div className="text-[10px] text-muted-foreground">
         resets {formatUntil(limit.resets_at, now)}

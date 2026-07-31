@@ -1,7 +1,18 @@
 import Link from "next/link";
-import { Activity, CalendarDays, Download, Sparkles, TrendingUp } from "lucide-react";
+import {
+  Activity,
+  CalendarDays,
+  Download,
+  MonitorDown,
+  Sparkles,
+  TrendingUp,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroVideo } from "@/components/hero-video";
+import {
+  formatDesktopReleaseSize,
+  getLatestDesktopRelease,
+} from "@/lib/releases/desktop-release";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /** The three core surfaces, in the same order as the in-app sidebar. */
@@ -13,10 +24,20 @@ const CORE_FEATURES = [
 
 export default async function Home() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const [
+    {
+      data: { user },
+    },
+    desktopRelease,
+  ] = await Promise.all([supabase.auth.getUser(), getLatestDesktopRelease()]);
   const authed = Boolean(user);
+  const desktopVersion = desktopRelease.version
+    ? `v${desktopRelease.version}`
+    : "Latest version";
+  const desktopSize = formatDesktopReleaseSize(desktopRelease.sizeBytes);
+  const desktopMetadata = [desktopVersion, desktopSize, "Windows 10+"]
+    .filter(Boolean)
+    .join(" · ");
 
   // Authed users jump straight into the feature; others land on the passwordless
   // sign-in, where `next` returns them to the page they actually picked.
@@ -87,13 +108,30 @@ export default async function Home() {
           .
         </p>
 
-        {/* Desktop app download — prominent primary CTA. /download is public, so
-            this is a plain Link (not hrefFor) regardless of auth state. */}
-        <div className="mt-7">
-          <Button asChild size="lg" className="gap-2">
+        {/* Public desktop CTA: current release details come from the exact updater
+            manifest the installed app trusts, so the hint follows every publish. */}
+        <div className="mt-7 w-full max-w-xl rounded-2xl border border-white/15 bg-black/55 p-3 shadow-2xl backdrop-blur-xl sm:flex sm:items-center sm:justify-between sm:gap-4 sm:text-left">
+          <div className="flex items-center justify-center gap-3 sm:justify-start">
+            <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/20 text-primary ring-1 ring-primary/30">
+              <MonitorDown className="size-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                <span className="text-sm font-semibold text-white">Desktop recommended</span>
+                <span className="rounded-full bg-success/20 px-2 py-0.5 text-[10px] font-medium text-success">
+                  Free
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-white/70">
+                Auto-detect Claude, Codex &amp; Z.AI usage · no Terminal or second sharer
+              </p>
+              <p className="mt-1 text-[10px] text-white/50">{desktopMetadata}</p>
+            </div>
+          </div>
+          <Button asChild size="sm" className="mt-3 w-full gap-2 sm:mt-0 sm:w-auto">
             <Link href="/download">
               <Download className="size-4" />
-              Download Free
+              Download free
             </Link>
           </Button>
         </div>
