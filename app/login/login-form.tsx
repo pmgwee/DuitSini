@@ -84,11 +84,11 @@ export function LoginForm({
     // lets the music widget read the user's YouTube (Music) playlists and
     // likes; `access_type=offline` + `prompt=consent` mint a refresh token.
     //
-    // NOTE: YouTube Music's private InnerTube API (algorithmic shelves like
-    // "Listen again") no longer accepts OAuth — Google removed YT Music OAuth
-    // in Nov 2024. That data is reached via an opt-in cookie flow instead
-    // (see lib/google/ytmusic.ts). This scope still powers the official-API
-    // library/likes/playlist sync, which is all it's used for.
+    // NOTE: recommendations do NOT come through this scope. Google removed YT
+    // Music OAuth in Nov 2024, and the cookie workaround that replaced it was
+    // retired too — the recommender now reads YouTube Music's public InnerTube
+    // surfaces anonymously (see lib/music/sources.ts). This scope only powers
+    // the official-API library/likes/playlist sync.
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {

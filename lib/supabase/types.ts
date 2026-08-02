@@ -192,10 +192,12 @@ export type Database = {
       music_plays: {
         Row: {
           channel: string
+          complete_count: number
           first_played_at: string
           id: string
           last_played_at: string
           play_count: number
+          skip_count: number
           thumbnail: string | null
           title: string
           user_id: string
@@ -203,10 +205,12 @@ export type Database = {
         }
         Insert: {
           channel?: string
+          complete_count?: number
           first_played_at?: string
           id?: string
           last_played_at?: string
           play_count?: number
+          skip_count?: number
           thumbnail?: string | null
           title: string
           user_id: string
@@ -214,12 +218,41 @@ export type Database = {
         }
         Update: {
           channel?: string
+          complete_count?: number
           first_played_at?: string
           id?: string
           last_played_at?: string
           play_count?: number
+          skip_count?: number
           thumbnail?: string | null
           title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      music_transitions: {
+        Row: {
+          completions: number
+          from_video_id: string
+          skips: number
+          to_video_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completions?: number
+          from_video_id: string
+          skips?: number
+          to_video_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completions?: number
+          from_video_id?: string
+          skips?: number
+          to_video_id?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
@@ -619,6 +652,18 @@ export type Database = {
           p_thumbnail: string
           p_title: string
           p_video_id: string
+        }
+        Returns: undefined
+      }
+      log_music_signal: {
+        Args: { p_signal: string; p_video_id: string }
+        Returns: undefined
+      }
+      log_music_transition: {
+        Args: {
+          p_from_video_id: string
+          p_signal: string
+          p_to_video_id: string
         }
         Returns: undefined
       }

@@ -19,7 +19,6 @@ import {
 import { cn } from "@/lib/utils";
 import type { MusicPlaylist, MusicTrack } from "@/types/music";
 import { useMusicPlayer } from "./player-context";
-import { CookieConnect } from "./cookie-connect";
 
 type Shelf = "listen" | "playlists" | "liked" | "search";
 
@@ -289,7 +288,6 @@ export function MusicWidget() {
         {shelf === "listen" &&
           (connected ? (
             <div className="flex flex-1 flex-col gap-2">
-              <CookieConnect />
               {listenAgain.isLoading ? (
                 <ShelfNote>Loading your listens…</ShelfNote>
               ) : (listenAgain.data?.tracks.length ?? 0) > 0 ? (

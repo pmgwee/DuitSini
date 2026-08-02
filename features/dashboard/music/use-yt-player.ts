@@ -99,6 +99,21 @@ export function useYTPlayer(
   const hasVideoRef = useRef(false);
   hasVideoRef.current = playerReady && current !== null;
 
+  // --- Autoplay + behavioural signals ---------------------------------------
+  // Token that extends the current station; set when the queue was topped up
+  // from /api/yt/radio, so a long session keeps going past the first page.
+  const continuationRef = useRef<string | null>(null);
+  // Guards against firing several overlapping top-up requests.
+  const extendingRef = useRef(false);
+  // Wall-clock ms when the current track started, for skip detection.
+  const startedAtRef = useRef(0);
+  // The track that handed off to the current one — the "from" half of a
+  // transition, which is what the learned sequencing model is keyed on.
+  const previousIdRef = useRef<string | null>(null);
+  // Set when a track reached its natural end, so the outgoing-track check
+  // doesn't also report it as a skip.
+  const completedRef = useRef(false);
+
   // Warm up the IFrame API on mount so the first play can create the player
   // within the click gesture — keeping autoplay allowed.
   useEffect(() => {
@@ -209,16 +224,56 @@ export function useYTPlayer(
   /** Dock the video into `el` (dashboard slot) or park it off-screen (null). */
   const registerSlot = useCallback((el: HTMLElement | null) => setSlotEl(el), []);
 
-  const playIndex = useCallback((i: number) => {
-    const track = queueRef.current[i];
-    const player = playerRef.current;
-    if (!track || !player) return;
-    indexRef.current = i;
-    setIndex(i);
-    setCurrent(track);
-    setPosition(0);
-    player.loadVideoById(track.videoId);
-  }, []);
+  /**
+   * Report a skip or completion. Fire-and-forget: the recommender degrades
+   * gracefully without these, so a failed request must never disturb playback.
+   */
+  const emitSignal = useCallback(
+    (videoId: string, signal: "skip" | "complete", from: string | null) => {
+      void fetch("/api/yt/signals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId, signal, from }),
+      }).catch(() => {});
+    },
+    [],
+  );
+
+  /**
+   * Judge the track we're leaving. Abandoning inside the first 30 seconds is
+   * the strongest negative signal both Spotify and Apple Music record, so it's
+   * the threshold we use too. A track that ended naturally is handled by the
+   * ENDED branch and flagged here so it isn't double-counted.
+   */
+  const settleOutgoing = useCallback(() => {
+    if (completedRef.current) {
+      completedRef.current = false;
+      return;
+    }
+    const outgoing = queueRef.current[indexRef.current];
+    if (!outgoing || !startedAtRef.current) return;
+    const playedMs = Date.now() - startedAtRef.current;
+    if (playedMs < 30_000) {
+      emitSignal(outgoing.videoId, "skip", previousIdRef.current);
+    }
+  }, [emitSignal]);
+
+  const playIndex = useCallback(
+    (i: number) => {
+      const track = queueRef.current[i];
+      const player = playerRef.current;
+      if (!track || !player) return;
+      settleOutgoing();
+      previousIdRef.current = queueRef.current[indexRef.current]?.videoId ?? null;
+      indexRef.current = i;
+      setIndex(i);
+      setCurrent(track);
+      setPosition(0);
+      startedAtRef.current = 0;
+      player.loadVideoById(track.videoId);
+    },
+    [settleOutgoing],
+  );
 
   const skip = useCallback(
     (delta: number) => {
@@ -227,6 +282,63 @@ export function useYTPlayer(
     },
     [playIndex],
   );
+
+  /**
+   * Endless autoplay: top the queue up from the station rather than stopping.
+   *
+   * The queue used to be a finite array — when it ran out, playback simply
+   * ended and the listener had to go pick something, which is what made the
+   * player feel like it was looping over the same shelf. Now the tail of the
+   * queue asks /api/yt/radio for a continuation of whatever is playing, the
+   * same way Apple Music's Autoplay keeps a session alive indefinitely.
+   *
+   * Returns true when tracks were appended.
+   */
+  const extendQueue = useCallback(async (): Promise<boolean> => {
+    if (extendingRef.current) return false;
+    const seedTrack = queueRef.current[indexRef.current];
+    if (!seedTrack) return false;
+
+    extendingRef.current = true;
+    try {
+      const response = await fetch("/api/yt/radio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Prefer extending the station already in flight; otherwise start a
+          // fresh one seeded by the track that just finished.
+          continuation: continuationRef.current ?? undefined,
+          seed: continuationRef.current ? undefined : seedTrack.videoId,
+          exclude: queueRef.current.slice(-60).map((t) => t.videoId),
+        }),
+      });
+      if (!response.ok) return false;
+      const data = (await response.json()) as {
+        tracks: MusicTrack[];
+        continuation: string | null;
+      };
+      if (!data.tracks?.length) {
+        // A dead station shouldn't be retried forever with the same token.
+        continuationRef.current = null;
+        return false;
+      }
+      queueRef.current = [...queueRef.current, ...data.tracks];
+      continuationRef.current = data.continuation;
+      setQueueLength(queueRef.current.length);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      extendingRef.current = false;
+    }
+  }, []);
+
+  // The player's event handlers are created once, so they must reach the latest
+  // closure through a ref rather than capturing a stale one.
+  const extendQueueRef = useRef(extendQueue);
+  extendQueueRef.current = extendQueue;
+  const emitSignalRef = useRef(emitSignal);
+  emitSignalRef.current = emitSignal;
 
   /**
    * Create the player on demand, once. `firstVideoId` is loaded straight into
@@ -269,6 +381,7 @@ export function useYTPlayer(
                     const track = queueRef.current[indexRef.current];
                     if (track && loggedIdRef.current !== track.videoId) {
                       loggedIdRef.current = track.videoId;
+                      startedAtRef.current = Date.now();
                       onTrackStartRef.current?.(track);
                     }
                   } else if (e.data === state.PAUSED) {
@@ -277,7 +390,26 @@ export function useYTPlayer(
                     setIsPlaying(true);
                   } else if (e.data === state.ENDED) {
                     setIsPlaying(false);
-                    skip(1);
+                    // A natural end is the passive positive signal, and it also
+                    // tells the transition model that this hand-off worked.
+                    const finished = queueRef.current[indexRef.current];
+                    if (finished) {
+                      completedRef.current = true;
+                      emitSignalRef.current(
+                        finished.videoId,
+                        "complete",
+                        previousIdRef.current,
+                      );
+                    }
+                    // At the tail of the queue, extend the station instead of
+                    // stopping — this is what makes playback endless.
+                    if (indexRef.current >= queueRef.current.length - 1) {
+                      void extendQueueRef.current().then((extended) => {
+                        if (extended) skip(1);
+                      });
+                    } else {
+                      skip(1);
+                    }
                   }
                 },
                 onError: (e) => {
@@ -298,6 +430,12 @@ export function useYTPlayer(
     async (tracks: MusicTrack[], i: number) => {
       queueRef.current = tracks;
       setQueueLength(tracks.length);
+      // A new queue starts a new station: drop the old continuation token and
+      // the transition history so we don't attribute a hand-off across queues.
+      continuationRef.current = null;
+      previousIdRef.current = null;
+      completedRef.current = false;
+      startedAtRef.current = 0;
       const track = tracks[i];
       const created = !playerRef.current && !creatingRef.current;
       // Seed the very first player with the target video so YouTube skips its
@@ -331,11 +469,27 @@ export function useYTPlayer(
     if (p) p.stopVideo();
     queueRef.current = [];
     indexRef.current = -1;
+    continuationRef.current = null;
+    previousIdRef.current = null;
+    startedAtRef.current = 0;
     setQueueLength(0);
     setCurrent(null);
     setIsPlaying(false);
     setPosition(0);
   }, []);
+
+  /**
+   * Advance one track. At the tail of the queue this tops the station up first,
+   * so "next" is always available once something is playing — the listener can
+   * keep pressing forward indefinitely instead of hitting a dead end.
+   */
+  const next = useCallback(async () => {
+    if (indexRef.current < queueRef.current.length - 1) {
+      skip(1);
+      return;
+    }
+    if (await extendQueue()) skip(1);
+  }, [skip, extendQueue]);
 
   const setVolume = useCallback(
     (v: number) => {
@@ -411,10 +565,12 @@ export function useYTPlayer(
     volume,
     muted,
     hasPrev: index > 0,
-    hasNext: index >= 0 && index < queueLength - 1,
+    // Always available once something is playing: at the tail, `next` tops the
+    // station up rather than dead-ending.
+    hasNext: index >= 0,
     playQueue,
     toggle,
-    next: () => skip(1),
+    next: () => void next(),
     prev: () => skip(-1),
     stop,
     setVolume,

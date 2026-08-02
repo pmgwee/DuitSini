@@ -3,12 +3,15 @@ import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getGoogleAccessToken } from "@/lib/google/tokens";
 import { LIKED_MUSIC_ID, listPlaylistTracks } from "@/lib/google/youtube";
-import { getYTMusicCookie, markYTMusicCookieOk } from "@/lib/google/ytm-cookies";
-import { getListenAgainRecommendations } from "@/lib/google/ytmusic";
+import { buildShelf } from "@/lib/music/recommend";
+import { loadHistory, loadTransitionBias } from "@/lib/music/store";
 import type { MusicTrack } from "@/types/music";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Candidate generation fans out to several InnerTube calls; give it room, but
+// stay under the platform ceiling so a slow source returns JSON, not an HTML 504.
+export const maxDuration = 30;
 
 const playSchema = z.object({
   videoId: z.string().min(1).max(64),
@@ -36,38 +39,17 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 /**
- * Compose the "Listen again" shelf:
- *   [last-played] · [YT Music recs, shuffled] · [remaining local plays, shuffled]
+ * GET — the discovery shelf.
  *
- * The most-recently-played song is pinned at #1 — the "stack on top" behavior
- * the player already had. When cookies are connected, YouTube Music's picks sit
- * ABOVE the local history; both groups reshuffle on every request so the shelf
- * varies on refresh (like YT Music itself) instead of reading as a static list.
- * All entries are de-duplicated by videoId.
- */
-function composeShelf(local: MusicTrack[], recs: MusicTrack[]): MusicTrack[] {
-  const seen = new Set<string>();
-  const out: MusicTrack[] = [];
-  const push = (t: MusicTrack) => {
-    if (seen.has(t.videoId)) return;
-    seen.add(t.videoId);
-    out.push(t);
-  };
-  // 1. Pinned: the song you last played (most recent), if any.
-  if (local.length > 0) push(local[0]);
-  // 2. YouTube Music recommendations (connected only) — reshuffled each fetch.
-  for (const t of shuffle(recs)) push(t);
-  // 3. Remaining local plays — reshuffled each fetch, below the recs.
-  for (const t of shuffle(local.slice(1))) push(t);
-  return out.slice(0, SHELF_CAP);
-}
-
-/**
- * GET — the "Listen again" shelf. The last-played song is pinned at the top;
- * YouTube Music's algorithmic picks (when connected via cookies) sit above the
- * local history. Both the recommendations and the local history reshuffle on
- * each fetch so the shelf feels alive on refresh. The Liked-Music seed is the
- * final fallback when there are no local plays and no/empty recommendations.
+ * Previously this reshuffled the listener's own play history, which by
+ * construction could never surface anything new: shuffling a set you have
+ * already heard is still that set. Now the history is used only as SEED
+ * material, and the shelf itself comes from YouTube Music's recommendation
+ * surfaces (song radio, "you might also like", similar artists, editorial
+ * playlists) ranked against the listener's own behavioural signals.
+ *
+ * None of it is authenticated — the old cookie path is gone, so there is
+ * nothing to expire and nothing to re-capture.
  */
 export async function GET() {
   const supabase = await createSupabaseServerClient();
@@ -76,39 +58,34 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ tracks: [], seeded: false }, { status: 401 });
 
-  const { data, error } = await supabase
-    .from("music_plays")
-    .select("video_id, title, channel, thumbnail")
-    .eq("user_id", user.id)
-    .order("last_played_at", { ascending: false })
-    .limit(24);
-  if (error) return NextResponse.json({ tracks: [], seeded: false }, { status: 500 });
+  const history = await loadHistory(supabase, user.id);
 
-  const local: MusicTrack[] = data.map((r) => ({
-    videoId: r.video_id,
-    title: r.title,
-    channel: r.channel,
-    thumbnail: r.thumbnail,
-  }));
+  if (history.length > 0) {
+    const transitionBias = await loadTransitionBias(supabase, user.id);
+    let tracks: MusicTrack[] = [];
+    try {
+      tracks = await buildShelf(history, { limit: SHELF_CAP, transitionBias });
+    } catch (err) {
+      // Recommendation must never take the dashboard down.
+      console.error("[yt/plays] shelf build failed:", (err as Error)?.message ?? err);
+    }
 
-  // OPT-IN enrichment via the user's YT Music session cookies. Never throws —
-  // any failure (no cookies, expired, Google shape change) leaves recs empty.
-  let recs: MusicTrack[] = [];
-  const cookie = await getYTMusicCookie(user.id);
-  if (cookie) {
-    const { tracks, fresh } = await getListenAgainRecommendations(cookie);
-    recs = tracks;
-    if (tracks.length > 0 && fresh) void markYTMusicCookieOk(user.id);
+    // If every source failed (network, IP block, shape change) fall back to the
+    // old recency behaviour so the widget still plays something.
+    if (tracks.length === 0) {
+      tracks = history.slice(0, SHELF_CAP).map((entry) => ({
+        videoId: entry.videoId,
+        title: entry.title,
+        channel: entry.channel,
+        thumbnail: entry.thumbnail,
+        source: "local" as const,
+      }));
+    }
+
+    return NextResponse.json<ListenAgainResponse>({ tracks, seeded: false });
   }
 
-  if (local.length > 0 || recs.length > 0) {
-    return NextResponse.json<ListenAgainResponse>({
-      tracks: composeShelf(local, recs),
-      seeded: false,
-    });
-  }
-
-  // Final fallback: Liked Music seed (no local plays and no/empty recs).
+  // Cold start: no in-app plays yet — seed from Liked Music.
   const token = await getGoogleAccessToken(user.id);
   if (token) {
     const liked = await listPlaylistTracks(token, LIKED_MUSIC_ID);
