@@ -325,10 +325,59 @@ export function MusicWidget() {
         </div>
 
         <div className="mt-2 flex items-center gap-3">
-          {/* Balance spacer keeps the transport centered; the volume control
-              sits at the right edge, mirroring the floating mini-player so the
-              two stay visually consistent across pages. */}
-          <div className="flex-1" aria-hidden="true" />
+          {/* Left of the transport: like the track that's PLAYING. Hearing a
+              song is the moment you decide you love it, so the control has to
+              be here — both Spotify and Apple Music put it in Now Playing (and
+              on the lock screen) for exactly this reason. Without it, liking
+              means hunting for the track in a list afterwards. */}
+          <div className="flex flex-1 items-center gap-1">
+            <button
+              type="button"
+              disabled={!player.current}
+              aria-pressed={player.current ? likedIds.has(player.current.videoId) : false}
+              aria-label={
+                player.current && likedIds.has(player.current.videoId)
+                  ? "Remove from Liked"
+                  : "Like this track"
+              }
+              title={
+                player.current && likedIds.has(player.current.videoId)
+                  ? "Remove from Liked"
+                  : "Like"
+              }
+              onClick={() => player.current && void toggleLike(player.current)}
+              className={cn(
+                "grid size-9 place-items-center rounded-full transition-colors hover:bg-accent disabled:opacity-30",
+                player.current && likedIds.has(player.current.videoId)
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Heart
+                className={cn(
+                  "size-4",
+                  player.current &&
+                    likedIds.has(player.current.videoId) &&
+                    "fill-current",
+                )}
+              />
+            </button>
+            <button
+              type="button"
+              disabled={!player.current}
+              aria-label="Don't suggest this again"
+              title="Not interested"
+              onClick={() => {
+                if (!player.current) return;
+                const t = player.current;
+                void suppressTrack(t);
+                player.next();
+              }}
+              className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-30"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
           <button
             type="button"
             aria-label="Previous"

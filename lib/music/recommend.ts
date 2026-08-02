@@ -89,6 +89,16 @@ export interface ShelfOptions {
   likes?: LikedTrack[];
   /** Tracks to remove entirely (not-interested / active snooze). */
   suppressed?: Set<string>;
+  /**
+   * Cold-start prior: the listener's imported YouTube "Liked Music".
+   *
+   * Used ONLY to seed neighbourhoods when there is no in-app behaviour yet, and
+   * never as a confidence signal — an import is not the same statement as a
+   * heart tapped here, and it may be years stale. Without this, a brand-new
+   * listener with a large imported library got their own liked songs shuffled
+   * back at them, which is precisely the loop this recommender exists to break.
+   */
+  coldStart?: MusicTrack[];
 }
 
 /**
@@ -136,11 +146,28 @@ export async function buildShelf(
     transitionBias,
     likes = [],
     suppressed = new Set<string>(),
+    coldStart = [],
   } = options;
-  if (history.length === 0 && likes.length === 0) return [];
+  if (history.length === 0 && likes.length === 0 && coldStart.length === 0) return [];
 
   const likeIds = new Set(likes.map((l) => l.videoId));
-  const seedPool = mergeLikesIntoHistory(history, likes);
+  let seedPool = mergeLikesIntoHistory(history, likes);
+
+  // Cold start only: borrow the imported library to find a starting
+  // neighbourhood. Once any real in-app behaviour exists this contributes
+  // nothing, so the prior fades on its own rather than needing to be expired.
+  if (seedPool.length === 0) {
+    seedPool = coldStart.slice(0, 30).map((track) => ({
+      videoId: track.videoId,
+      title: track.title,
+      channel: track.channel,
+      thumbnail: track.thumbnail,
+      playCount: 1,
+      lastPlayedAt: new Date(now).toISOString(),
+      skipCount: 0,
+      completeCount: 0,
+    }));
+  }
 
   const seeds = pickSeeds(seedPool, SEED_COUNT, now, random, likeIds);
   if (seeds.length === 0) return [];

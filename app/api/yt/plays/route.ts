@@ -105,15 +105,27 @@ export async function GET() {
     return NextResponse.json<ListenAgainResponse>({ tracks, seeded: false });
   }
 
-  // Cold start: no in-app plays yet — seed from Liked Music.
+  // Cold start: nothing in-app yet. Use the imported YouTube "Liked Music" as a
+  // SEED for real recommendations rather than displaying it back.
+  //
+  // Shuffling the import was the old behaviour and it reproduced the exact
+  // problem this recommender exists to solve: a new listener with a large
+  // library got their own familiar songs in a random order, and looped there
+  // until they searched manually. Seeding from it instead means even the very
+  // first shelf is mostly music they haven't heard.
   const token = await getGoogleAccessToken(user.id);
   if (token) {
     const liked = await listPlaylistTracks(token, LIKED_MUSIC_ID);
     if (liked && liked.length > 0) {
-      return NextResponse.json<ListenAgainResponse>({
-        tracks: shuffle(liked).slice(0, 12),
-        seeded: true,
-      });
+      let tracks: MusicTrack[] = [];
+      try {
+        tracks = await buildShelf([], { limit: SHELF_CAP, coldStart: shuffle(liked) });
+      } catch (err) {
+        console.error("[yt/plays] cold-start build failed:", (err as Error)?.message ?? err);
+      }
+      // Only if every source failed do we fall back to showing the import.
+      if (tracks.length === 0) tracks = shuffle(liked).slice(0, 12);
+      return NextResponse.json<ListenAgainResponse>({ tracks, seeded: true });
     }
   }
   return NextResponse.json<ListenAgainResponse>({ tracks: [], seeded: false });
