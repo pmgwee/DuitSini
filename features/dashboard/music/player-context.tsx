@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import type { MusicTrack } from "@/types/music";
 import { useYTPlayer } from "./use-yt-player";
 
@@ -20,24 +19,34 @@ const MusicPlayerContext = createContext<MusicPlayerApi | null>(null);
  * page is recorded to "Listen again", not only when the dashboard is open.
  */
 export function MusicPlayerProvider({ children }: { children: ReactNode }) {
-  const queryClient = useQueryClient();
   // The one and only home for the live iframe. Fixed-position; its coordinates
   // are driven imperatively by the hook (docked over the card, or off-screen).
   const portalRef = useRef<HTMLDivElement | null>(null);
 
+  /**
+   * Record the play — and DO NOT refresh the shelf.
+   *
+   * This used to invalidate the "listen again" query, so starting a track
+   * rebuilt the whole list underneath the listener: the row they were about to
+   * play next simply vanished. Recording feedback and recomputing
+   * recommendations are separate concerns, and every incumbent keeps them
+   * separate. Spotify's recommendations are a batch pipeline, not a live
+   * request; a Daily Mix opened again within 8 hours is explicitly NOT
+   * remixed, and their own API docs state listening history "will not update
+   * in real time". A shelf that does not move under your feet is the feature,
+   * not a limitation — see the refresh policy in `music-widget.tsx`.
+   */
   const logPlay = useMemo(
     () => (track: MusicTrack) => {
       void fetch("/api/yt/plays", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(track),
-      })
-        .then(() => queryClient.invalidateQueries({ queryKey: ["yt", "listen-again"] }))
-        .catch(() => {
-          /* best-effort logging; never block playback */
-        });
+      }).catch(() => {
+        /* best-effort logging; never block playback */
+      });
     },
-    [queryClient],
+    [],
   );
 
   const player = useYTPlayer(logPlay, portalRef);

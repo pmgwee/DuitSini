@@ -11,6 +11,7 @@ import {
   Music4,
   Pause,
   Play,
+  RefreshCw,
   Search,
   Undo2,
   Volume1,
@@ -117,12 +118,47 @@ export function MusicWidget() {
   });
   const connected = library.data?.connected ?? false;
 
+  /**
+   * The recommendation shelf, and the rules for when it is allowed to change.
+   *
+   * REFRESH POLICY — copied from how the incumbents actually behave, because
+   * the obvious implementation (recompute after every signal) is the one that
+   * feels broken. Spotify's Discover Weekly is frozen for a week; a Daily Mix
+   * reopened within 8 hours is explicitly not remixed, only after a long gap;
+   * their listening-history API "will not update in real time". Their stated
+   * reason: a list that does not change under your feet feels trustworthy.
+   *
+   * So this shelf recomputes at session boundaries ONLY — a fresh page load,
+   * or the listener explicitly asking. Liking, playing, or blocking a track
+   * records the signal immediately and is reflected in the NEXT build. Nothing
+   * a listener does mid-session may reorder the list they are reading.
+   *
+   * `staleTime: Infinity` + no refetch-on-focus is what enforces that: within a
+   * session the only way to rebuild is `listenAgain.refetch()`.
+   */
   const listenAgain = useQuery({
     queryKey: ["yt", "listen-again"],
     queryFn: () =>
       getJSON<ListenAgainResponse>("/api/yt/plays", { tracks: [], seeded: false }),
-    staleTime: 60_000,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
+
+  /**
+   * Rows removed by the listener this session (blocked tracks).
+   *
+   * Applied locally so the row disappears instantly — that IS the direct
+   * response to their action — while every other row stays exactly where it
+   * was. This is the difference between "the thing I clicked went away" and
+   * "the whole list rearranged itself".
+   */
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const visibleListenAgain = (listenAgain.data?.tracks ?? []).filter(
+    (t) => !hiddenIds.has(t.videoId),
+  );
+  /** True once a signal has landed that the next rebuild will act on. */
+  const [pendingSignals, setPendingSignals] = useState(false);
 
   // Local likes — the taste signal we own. Distinct from the imported YouTube
   // "Liked Music" list below, which is read-only and only a cold-start prior.
@@ -133,11 +169,26 @@ export function MusicWidget() {
   });
   const likedIds = new Set((likes.data?.tracks ?? []).map((t) => t.videoId));
 
-  /** Refetch everything a taste signal can move. */
+  /**
+   * A taste signal landed.
+   *
+   * Refresh the LIBRARY (your likes — a container of your own actions, which
+   * must reflect them at once) but deliberately NOT the recommendation shelf.
+   * Rebuilding recommendations mid-session is what made the list you were
+   * reading disappear. The signal is stored server-side and applied at the
+   * next rebuild; `pendingSignals` just lets the refresh control say so.
+   */
   const invalidateTaste = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["yt", "likes"] });
-    void queryClient.invalidateQueries({ queryKey: ["yt", "listen-again"] });
+    setPendingSignals(true);
   }, [queryClient]);
+
+  /** Explicit, user-initiated rebuild — the only in-session refresh path. */
+  const refreshShelf = useCallback(() => {
+    setHiddenIds(new Set());
+    setPendingSignals(false);
+    void listenAgain.refetch();
+  }, [listenAgain]);
 
   const likeTrack = useCallback(
     async (track: MusicTrack) => {
@@ -200,10 +251,17 @@ export function MusicWidget() {
           .catch(() => {})
           .then(invalidateTaste);
 
+      // Hide just this row, immediately. The rest of the list is untouched.
+      setHiddenIds((prev) => new Set(prev).add(track.videoId));
       await send("not_interested");
       setToast({
         message: `Won’t suggest “${track.title}” again`,
         undo: () => {
+          setHiddenIds((prev) => {
+            const next = new Set(prev);
+            next.delete(track.videoId);
+            return next;
+          });
           void fetch("/api/yt/suppress", {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
@@ -465,7 +523,7 @@ export function MusicWidget() {
             <div className="flex flex-1 flex-col gap-2">
               {listenAgain.isLoading ? (
                 <ShelfNote>Loading your listens…</ShelfNote>
-              ) : (listenAgain.data?.tracks.length ?? 0) > 0 ? (
+              ) : visibleListenAgain.length > 0 ? (
                 <>
                   {listenAgain.data?.seeded && (
                     <p className="mb-1.5 text-[11px] text-muted-foreground/80">
@@ -473,13 +531,30 @@ export function MusicWidget() {
                     </p>
                   )}
                   <TrackList
-                    tracks={listenAgain.data!.tracks}
+                    tracks={visibleListenAgain}
                     activeId={player.current?.videoId}
-                    onPlay={(i) => void player.playQueue(listenAgain.data!.tracks, i)}
+                    onPlay={(i) => void player.playQueue(visibleListenAgain, i)}
                     likedIds={likedIds}
                     onToggleLike={(t) => void toggleLike(t)}
                     onSuppress={(t) => void suppressTrack(t)}
                   />
+                  {/* The list is deliberately frozen while you're using it. This
+                      is the only in-session way to rebuild — and it only offers
+                      itself once your likes/skips would actually change the
+                      result, so it never nags. */}
+                  {pendingSignals && (
+                    <button
+                      type="button"
+                      onClick={refreshShelf}
+                      disabled={listenAgain.isFetching}
+                      className="mt-1 flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={cn("size-3", listenAgain.isFetching && "animate-spin")}
+                      />
+                      {listenAgain.isFetching ? "Rebuilding…" : "Update with your new likes"}
+                    </button>
+                  )}
                 </>
               ) : (
                 <ShelfNote>Play something — this shelf builds itself from your listens.</ShelfNote>
