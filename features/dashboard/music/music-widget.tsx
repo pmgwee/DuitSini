@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -12,9 +12,11 @@ import {
   Pause,
   Play,
   Search,
+  Undo2,
   Volume1,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MusicPlaylist, MusicTrack } from "@/types/music";
@@ -36,6 +38,26 @@ interface LibraryResponse {
 interface ListenAgainResponse {
   tracks: MusicTrack[];
   seeded: boolean;
+}
+interface LikesResponse {
+  tracks: MusicTrack[];
+}
+
+/**
+ * A transient confirmation with an escape hatch.
+ *
+ * Every like, unlike and suppression raises one. This is the fix for the single
+ * most-reported flaw in Spotify's own liked list: a heart rendered on every row
+ * means people un-like tracks by accident while scrolling, and with no undo the
+ * track is effectively gone. Making the action reversible costs one state
+ * variable and removes the entire class of complaint.
+ */
+interface ToastState {
+  message: string;
+  /** Primary escape hatch — always present. */
+  undo: () => void;
+  /** Optional softer alternative (e.g. "Snooze instead" after a hard block). */
+  alt?: { label: string; run: () => void };
 }
 
 async function getJSON<T>(url: string, fallback: T): Promise<T> {
@@ -65,8 +87,18 @@ export function MusicWidget() {
   const [searchResults, setSearchResults] = useState<MusicTrack[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchConfigured, setSearchConfigured] = useState<boolean | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   const player = useMusicPlayer();
+  const queryClient = useQueryClient();
+
+  // Auto-dismiss. 6s is long enough to read and reach the undo, short enough
+  // that it never feels like it's in the way.
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), 6000);
+    return () => window.clearTimeout(id);
+  }, [toast]);
 
   // Register the inline slot so the fixed video portal glues itself over it.
   // The layout effect's cleanup runs before the slot detaches on unmount, so
@@ -91,6 +123,100 @@ export function MusicWidget() {
       getJSON<ListenAgainResponse>("/api/yt/plays", { tracks: [], seeded: false }),
     staleTime: 60_000,
   });
+
+  // Local likes — the taste signal we own. Distinct from the imported YouTube
+  // "Liked Music" list below, which is read-only and only a cold-start prior.
+  const likes = useQuery({
+    queryKey: ["yt", "likes"],
+    queryFn: () => getJSON<LikesResponse>("/api/yt/likes", { tracks: [] }),
+    staleTime: 30_000,
+  });
+  const likedIds = new Set((likes.data?.tracks ?? []).map((t) => t.videoId));
+
+  /** Refetch everything a taste signal can move. */
+  const invalidateTaste = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["yt", "likes"] });
+    void queryClient.invalidateQueries({ queryKey: ["yt", "listen-again"] });
+  }, [queryClient]);
+
+  const likeTrack = useCallback(
+    async (track: MusicTrack) => {
+      await fetch("/api/yt/likes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId: track.videoId,
+          title: track.title,
+          channel: track.channel,
+          thumbnail: track.thumbnail,
+        }),
+      }).catch(() => {});
+      invalidateTaste();
+    },
+    [invalidateTaste],
+  );
+
+  const unlikeTrack = useCallback(
+    async (videoId: string) => {
+      await fetch("/api/yt/likes", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId }),
+      }).catch(() => {});
+      invalidateTaste();
+    },
+    [invalidateTaste],
+  );
+
+  const toggleLike = useCallback(
+    async (track: MusicTrack) => {
+      const wasLiked = likedIds.has(track.videoId);
+      if (wasLiked) {
+        await unlikeTrack(track.videoId);
+        setToast({
+          message: `Removed “${track.title}” from Liked`,
+          undo: () => void likeTrack(track),
+        });
+      } else {
+        await likeTrack(track);
+        setToast({
+          message: `Added “${track.title}” to Liked`,
+          undo: () => void unlikeTrack(track.videoId),
+        });
+      }
+    },
+    [likedIds, likeTrack, unlikeTrack],
+  );
+
+  /** Push a track away. Hard block by default, with snooze offered as the softer option. */
+  const suppressTrack = useCallback(
+    async (track: MusicTrack) => {
+      const send = (kind: "not_interested" | "snooze") =>
+        fetch("/api/yt/suppress", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ videoId: track.videoId, kind }),
+        })
+          .catch(() => {})
+          .then(invalidateTaste);
+
+      await send("not_interested");
+      setToast({
+        message: `Won’t suggest “${track.title}” again`,
+        undo: () => {
+          void fetch("/api/yt/suppress", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ videoId: track.videoId }),
+          })
+            .catch(() => {})
+            .then(invalidateTaste);
+        },
+        alt: { label: "Snooze 30d instead", run: () => void send("snooze") },
+      });
+    },
+    [invalidateTaste],
+  );
 
   const playlistId = shelf === "liked" ? "LM" : openPlaylist?.id ?? null;
   const playlistTracks = useQuery({
@@ -301,6 +427,9 @@ export function MusicWidget() {
                     tracks={listenAgain.data!.tracks}
                     activeId={player.current?.videoId}
                     onPlay={(i) => void player.playQueue(listenAgain.data!.tracks, i)}
+                    likedIds={likedIds}
+                    onToggleLike={(t) => void toggleLike(t)}
+                    onSuppress={(t) => void suppressTrack(t)}
                   />
                 </>
               ) : (
@@ -367,19 +496,44 @@ export function MusicWidget() {
             </ul>
           ))}
 
+        {/* Liked = the tracks YOU hearted here. This is the store shelf for the
+            signal we actually own and learn from. The imported YouTube "Liked
+            Music" list is shown underneath, clearly separated, because it is
+            read-only and only seeds recommendations while this shelf is empty. */}
         {shelf === "liked" &&
-          (!connected ? (
-            connectHint
-          ) : playlistTracks.isLoading ? (
-            <ShelfNote>Loading Liked Music…</ShelfNote>
-          ) : (playlistTracks.data?.tracks.length ?? 0) > 0 ? (
+          (likes.isLoading ? (
+            <ShelfNote>Loading your likes…</ShelfNote>
+          ) : (likes.data?.tracks.length ?? 0) > 0 ? (
             <TrackList
-              tracks={playlistTracks.data!.tracks}
+              tracks={likes.data!.tracks}
               activeId={player.current?.videoId}
-              onPlay={(i) => void player.playQueue(playlistTracks.data!.tracks, i)}
+              onPlay={(i) => void player.playQueue(likes.data!.tracks, i)}
+              likedIds={likedIds}
+              onToggleLike={(t) => void toggleLike(t)}
+              // No "not interested" here — pushing away something you just
+              // hearted is contradictory; unliking is the right verb.
             />
           ) : (
-            <ShelfNote>No liked music found on your account.</ShelfNote>
+            <div className="flex flex-1 flex-col gap-2">
+              <ShelfNote>
+                Tap the ♥ on any track to save it here — it teaches your
+                recommendations too.
+              </ShelfNote>
+              {connected && (playlistTracks.data?.tracks.length ?? 0) > 0 && (
+                <>
+                  <p className="px-1 text-[11px] text-muted-foreground/80">
+                    From your YouTube Music likes
+                  </p>
+                  <TrackList
+                    tracks={playlistTracks.data!.tracks}
+                    activeId={player.current?.videoId}
+                    onPlay={(i) => void player.playQueue(playlistTracks.data!.tracks, i)}
+                    likedIds={likedIds}
+                    onToggleLike={(t) => void toggleLike(t)}
+                  />
+                </>
+              )}
+            </div>
           ))}
 
         {shelf === "search" && (
@@ -416,11 +570,46 @@ export function MusicWidget() {
                 tracks={searchResults}
                 activeId={player.current?.videoId}
                 onPlay={(i) => void player.playQueue(searchResults, i)}
+                likedIds={likedIds}
+                onToggleLike={(t) => void toggleLike(t)}
               />
             )}
           </div>
         )}
       </div>
+
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-xl border border-border/60 bg-surface-2 px-3 py-2 text-xs shadow-lg"
+        >
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{toast.message}</span>
+          {toast.alt && (
+            <button
+              type="button"
+              onClick={() => {
+                toast.alt!.run();
+                setToast(null);
+              }}
+              className="shrink-0 rounded-lg px-2 py-1 font-medium text-muted-foreground hover:bg-accent"
+            >
+              {toast.alt.label}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              toast.undo();
+              setToast(null);
+            }}
+            className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-primary hover:bg-accent"
+          >
+            <Undo2 className="size-3.5" />
+            Undo
+          </button>
+        </div>
+      )}
 
       <p className="text-center text-[11px] text-muted-foreground/70">
         Powered by YouTube · official Data &amp; IFrame APIs · keeps playing across pages
@@ -437,10 +626,18 @@ function TrackList({
   tracks,
   activeId,
   onPlay,
+  likedIds,
+  onToggleLike,
+  onSuppress,
 }: {
   tracks: MusicTrack[];
   activeId?: string;
   onPlay: (index: number) => void;
+  /** videoIds the listener has liked — drives the filled heart. */
+  likedIds?: Set<string>;
+  onToggleLike?: (track: MusicTrack) => void;
+  /** Omitted on shelves where "not interested" is meaningless (e.g. Liked). */
+  onSuppress?: (track: MusicTrack) => void;
 }) {
   return (
     // Shared by every shelf so the cap is identical across all of them. Rows
@@ -449,38 +646,82 @@ function TrackList({
     // clipped, even in the Playlists shelf where the back-button trims the
     // list's available height. Anything beyond 6 scrolls into view.
     <ul className="flex max-h-83 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-      {tracks.map((t, i) => (
-        <li key={`${t.videoId}-${i}`}>
-          <button
-            type="button"
-            onClick={() => onPlay(i)}
+      {tracks.map((t, i) => {
+        const liked = likedIds?.has(t.videoId) ?? false;
+        return (
+          // The row is a flex container rather than one big button: a nested
+          // button is invalid HTML, and the like control must be its own hit
+          // target so it can never be triggered by a mis-aimed play tap.
+          <li
+            key={`${t.videoId}-${i}`}
             className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent",
+              "group flex items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-accent",
               t.videoId === activeId && "bg-accent",
             )}
           >
-            {t.thumbnail ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={t.thumbnail} alt="" className="size-10 shrink-0 rounded object-cover" />
-            ) : (
-              <div className="grid size-10 shrink-0 place-items-center rounded bg-muted text-muted-foreground">
-                <Music4 className="size-4" />
+            <button
+              type="button"
+              onClick={() => onPlay(i)}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 text-left"
+            >
+              {t.thumbnail ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={t.thumbnail} alt="" className="size-10 shrink-0 rounded object-cover" />
+              ) : (
+                <div className="grid size-10 shrink-0 place-items-center rounded bg-muted text-muted-foreground">
+                  <Music4 className="size-4" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-xs font-medium">{t.title}</span>
+                  {t.source === "recommended" && (
+                    <span className="shrink-0 rounded-full bg-primary/12 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-primary ring-1 ring-primary/20">
+                      For you
+                    </span>
+                  )}
+                </div>
+                <div className="truncate text-[11px] text-muted-foreground">{t.channel}</div>
               </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-xs font-medium">{t.title}</span>
-                {t.source === "recommended" && (
-                  <span className="shrink-0 rounded-full bg-primary/12 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-primary ring-1 ring-primary/20">
-                    For you
-                  </span>
+            </button>
+
+            {/* One button, one job — this ONLY likes. Spotify's equivalent also
+                opens a playlist picker depending on state, which is their
+                most-complained-about interaction. */}
+            {onToggleLike && (
+              <button
+                type="button"
+                onClick={() => onToggleLike(t)}
+                aria-pressed={liked}
+                aria-label={liked ? `Remove ${t.title} from Liked` : `Like ${t.title}`}
+                title={liked ? "Remove from Liked" : "Like"}
+                className={cn(
+                  "grid size-8 shrink-0 place-items-center rounded-full transition-colors hover:bg-background/70",
+                  // A set like stays visible; an unset one appears on hover or
+                  // keyboard focus, so resting rows stay quiet.
+                  liked
+                    ? "text-primary"
+                    : "text-muted-foreground opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
                 )}
-              </div>
-              <div className="truncate text-[11px] text-muted-foreground">{t.channel}</div>
-            </div>
-          </button>
-        </li>
-      ))}
+              >
+                <Heart className={cn("size-4", liked && "fill-current")} />
+              </button>
+            )}
+
+            {onSuppress && (
+              <button
+                type="button"
+                onClick={() => onSuppress(t)}
+                aria-label={`Don't suggest ${t.title} again`}
+                title="Not interested"
+                className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground opacity-0 transition-colors hover:bg-background/70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

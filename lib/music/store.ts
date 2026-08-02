@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
-import type { HistoryEntry } from "./types";
+import type { HistoryEntry, LikedTrack, Suppressions } from "./types";
 
 /**
  * Reads of the listener's behavioural record. All RLS-scoped — these run on the
@@ -39,6 +39,65 @@ export async function loadHistory(supabase: Client, userId: string): Promise<His
     skipCount: row.skip_count ?? 0,
     completeCount: row.complete_count ?? 0,
   }));
+}
+
+/** Every track the listener has liked, newest first. `[]` on any error. */
+export async function loadLikes(supabase: Client, userId: string): Promise<LikedTrack[]> {
+  const { data, error } = await supabase
+    .from("music_likes")
+    .select("video_id, title, channel, thumbnail, liked_at")
+    .eq("user_id", userId)
+    .order("liked_at", { ascending: false })
+    .limit(500);
+
+  if (error || !data) {
+    if (error) console.error("[music/store] likes load failed:", error.message);
+    return [];
+  }
+
+  return data.map((row) => ({
+    videoId: row.video_id,
+    title: row.title,
+    channel: row.channel,
+    thumbnail: row.thumbnail,
+    likedAt: row.liked_at,
+  }));
+}
+
+/**
+ * Tracks the listener has pushed away.
+ *
+ * An expired snooze is simply not returned — the row can stay until it is
+ * overwritten, so lapsing needs no cleanup job.
+ */
+export async function loadSuppressions(
+  supabase: Client,
+  userId: string,
+): Promise<Suppressions> {
+  const suppressions: Suppressions = { notInterested: new Set(), snoozedUntil: new Map() };
+
+  const { data, error } = await supabase
+    .from("music_suppressions")
+    .select("video_id, kind, until")
+    .eq("user_id", userId)
+    .limit(2000);
+
+  if (error || !data) {
+    if (error) console.error("[music/store] suppressions load failed:", error.message);
+    return suppressions;
+  }
+
+  const now = Date.now();
+  for (const row of data) {
+    if (row.kind === "not_interested") {
+      suppressions.notInterested.add(row.video_id);
+      continue;
+    }
+    if (row.until && Date.parse(row.until) > now) {
+      suppressions.snoozedUntil.set(row.video_id, row.until);
+    }
+  }
+  return suppressions;
 }
 
 /**

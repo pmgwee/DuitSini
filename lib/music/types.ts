@@ -29,6 +29,30 @@ export interface Candidate {
   occurrences: Occurrence[];
 }
 
+/** A track the listener explicitly liked. Carries its own metadata so the
+ *  Liked shelf renders without needing a matching play row. */
+export interface LikedTrack {
+  videoId: string;
+  title: string;
+  channel: string;
+  thumbnail: string | null;
+  /** ISO timestamp. Used for shelf ordering, NOT for decaying the like itself. */
+  likedAt: string;
+}
+
+/**
+ * Tracks the listener has pushed away.
+ *
+ * `notInterested` is permanent; `snoozedUntil` lapses on its own. Both are
+ * filtered out of candidate generation entirely rather than merely down-ranked
+ * — a listener who says "not this" should not have to say it twice.
+ */
+export interface Suppressions {
+  notInterested: Set<string>;
+  /** videoId -> ISO timestamp the snooze expires. */
+  snoozedUntil: Map<string, string>;
+}
+
 /** A track the user has played, with the behavioural signals we've logged. */
 export interface HistoryEntry {
   videoId: string;
