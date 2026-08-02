@@ -78,12 +78,48 @@ signal hierarchy becomes, strongest to weakest:
 A like must do **three** things, not one: boost the track, boost its neighbourhood (its radio
 becomes a preferred seed in `pickSeeds`), and never be silently overridden by a recency penalty.
 
-**2. A like decays in influence unless it is re-listened.**
+**2. A like raises CONFIDENCE, not preference — and decay is applied to the user state, not to
+item–item relations.**
 
-Per the Spotify Community observation 📄 and the "dynamic taste" requirement: a like from 8 months
-ago that was never replayed should not pin the profile. Weight a like by
-`likeWeight × recencyDecay(lastPlayedAt)` rather than treating it as permanent. This is what makes
-the profile follow taste changes instead of accumulating a permanent floor.
+*(This section was revised after a second research pass; the first draft said simply "a like
+decays unless re-listened", which the literature contests. See "Revision" below.)*
+
+Hu, Koren & Volinsky 2008 ✅ (paper read directly; winner of the 2017 ICDM 10-Year
+Highest-Impact Award 📄) is the canonical treatment of exactly our situation, and it splits a
+signal into **two** magnitudes rather than one:
+
+- **preference** `p_ui` — binary. Did the user engage at all?
+- **confidence** `c_ui = 1 + α·r_ui` — how sure are we? (α = 40 worked in their experiments ✅)
+
+The insight that matters here: *"explicit feedback indicates user preference, whereas the implicit
+feedback numerical value indicates confidence"* 📄. So a like is **not** a larger preference than a
+play — preference is already 1. A like is a large jump in **confidence** that `p_ui = 1` is real.
+Twelve plays and one like both say "yes"; the like says it with far less ambiguity. Our ranking
+should therefore multiply a confidence term, not add a bonus.
+
+On decay, the evidence is genuinely split and the naive reading is wrong:
+
+- Ding & Li 2005 ✅ propose exponential time weights with a half-life `T0`, personalised per
+  item-cluster, and report improved precision.
+- **Koren 2009 (the Netflix-Prize-winning temporal-dynamics work) ✅ found the opposite**:
+  *"prediction quality improves as we moderate that time decay, reaching best quality when there
+  is no decay at all… just underweighting past actions lose too many signals along with the lost
+  noise, given the scarcity of data per user."*
+- A 2010 analysis 📄 finds decay is real but **piecewise** — a short-term component (< ~3 h), a
+  plateau, then long-term drift beyond ~10 days — not one smooth exponential.
+
+The reconciliation Koren himself gives ✅: *"we can deduce that two items are related if users
+rated them similarly within a short time frame, even if this happened long ago."* Old data is
+excellent for learning **relations**; it is bad for asserting **current state**. So:
+
+| Layer | Decay? | Why |
+|---|---|---|
+| Item–item co-occurrence (`similarity.ts` vectors) | **No** | An old like still proves two songs belong together |
+| Seed selection + ranking (`pickSeeds`, `score`) | **Yes** | This is a claim about what you want *now* |
+
+This is the corrected version of the "dynamic taste" requirement: the profile tracks taste change
+through **which seeds are chosen and how candidates are ranked**, while the similarity graph keeps
+its full history. Decaying the graph would throw away the very signal that makes the graph work.
 
 **3. The imported YouTube "Liked Music" is a COLD-START PRIOR ONLY — kept, but demoted.**
 
@@ -146,13 +182,51 @@ Drawn from documented failures of the incumbents, not from imitation:
 - Reward weights are initially guesses. They should be tuned against observed skip rate, not
   asserted — the incumbents' own numbers came from A/B tests we cannot replicate at this scale.
 
+## Prior art, vetted
+
+Checked first-hand with `gh repo view --json …pushedAt,createdAt,isArchived,isFork` ✅, because
+`updatedAt` from search listings includes README/metadata edits and overstates activity:
+
+| Repo | ★ | Last **push** | Created | Archived/Fork | Verdict |
+|---|---|---|---|---|---|
+| `benfred/implicit` | 3,806 | **2026-05-08** | 2016-04-17 | no / no | Healthy — the reference ALS implementation of Hu-Koren-Volinsky |
+| `lyst/lightfm` | 5,107 | **2024-07-24** | 2015-07-30 | no / no | ⚠️ **~2 years without a push.** Highest-starred of the three and the one most tutorials still recommend for hybrid explicit+implicit — do not adopt on star count |
+| `RUCAIBox/RecBole` | 4,524 | 2025-02-24 | 2020-06-11 | no / no | Slowing (~17 months); research toolkit, heavier than we need |
+
+Two details in `implicit`'s source ✅ (read directly) are worth copying even though we will not
+take the dependency — our pool is a few hundred candidates, not a factorisation problem:
+
+- **Negative confidence is a first-class input:** *"Negative items can also be passed with a higher
+  confidence value by passing a negative value, indicating that the user disliked the item."* That
+  is exactly our skip signal, and it validates modelling skips as negative confidence rather than
+  as absence.
+- **`explain()` returns the top contributing past items** for a recommendation. That is the
+  "Because you liked X" label, and we already carry the equivalent data in
+  `Candidate.occurrences`.
+
+## Revision (second research pass)
+
+The first draft of this ADR recommended flatly that "a like decays unless re-listened". A second,
+wider pass found that Koren 2009 ✅ reports the opposite result on Netflix data, and that the
+correct move is to separate the layer that decays (user state) from the layer that must not
+(item–item relations). Decision 2 above is rewritten accordingly. Recording this because the first
+version rested on a single 2020 forum post 📄 and would have degraded the similarity graph.
+
 ## Evidence quality
 
-- Spotify's recommendations/controls pages and Google's `videos.rate` reference were **read
-  directly** ✅; claims sourced to them are quoted, not paraphrased from search snippets.
+- Spotify's recommendations/controls pages, Google's `videos.rate` reference, the Hu-Koren-Volinsky
+  paper, the Koren temporal-dynamics paper, and `implicit`'s ALS source were **read directly** ✅;
+  claims from them are quoted, not paraphrased from search snippets.
 - Vendor pages describe the vendor's own system and are marked 📄 where used as fact about
   mechanism, per the "厂商自己的页面 ≠ 事实" rule.
-- **Reddit was attempted and abandoned.** Three queries via `opencli reddit search` returned
-  off-target results (r/indieheads album write-ups, r/lastfm tool lists). No community sentiment
-  is claimed anywhere in this ADR. Falling back to built-in `WebSearch` was explicitly declined.
-- No GitHub repositories are cited, so no `pushedAt` health checks were required.
+- **Reddit:** `opencli reddit search` produced off-target results three times; `opencli reddit
+  subreddit <name>` works ✅ and was used to browse r/truespotify and r/AppleMusic. Front-page
+  content was largely support noise, so **no community sentiment is claimed in this ADR**. The one
+  on-topic post seen — an r/AppleMusic complaint that unwanted content can only be answered with
+  *"suggest less"* — is consistent with Decision 4 (ship real negative controls) but is a single
+  data point and is not load-bearing.
+- **Twitter/X and 小红书 were unavailable, not skipped:** both returned
+  `AUTH_REQUIRED` ✅ (`no ct0 cookie` / `search results are blocked behind a login wall`). They
+  need a one-time Chrome login. B站 via OpenCLI worked ✅ but surfaced mostly download/skin
+  tutorials — no usable product analysis.
+- Built-in `WebSearch` was **not** used at any point.
