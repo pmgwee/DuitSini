@@ -11,7 +11,8 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
 import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
 import { Store } from "./store";
@@ -788,6 +789,52 @@ ipcMain.on("duitsini:update-install", () => updater.installAndRestart());
 // wiring robust to renderer reloads/navigation.
 ipcMain.handle("duitsini:update-state:get", () => updater.getState());
 ipcMain.on("duitsini:update-open-popup", () => openUpdatePopup());
+
+/**
+ * One-click Claude Pro sign-in renewal (F4). Triggered from the dashboard when a
+ * dedicated profile's login is dead. Spawns the official CLI's FULL browser flow
+ * against that profile's config dir — no refresh-token env, so the CLI opens the
+ * system browser for a fresh OAuth authorization (the only thing that clears a
+ * rotated/flagged login). Detached and unref'd: the CLI lives until the user
+ * completes sign-in, and the next collection cycle picks up the new credentials
+ * via ClaudeCliRenewalManager.externalReloginDetected — no restart needed.
+ */
+async function renewClaudeSignin(): Promise<{
+  ok: boolean;
+  reason?: string;
+  configDir?: string;
+}> {
+  const target = scheduler?.claudeProRenewalTarget();
+  if (!target) return { ok: false, reason: "no-dead-login" };
+  const configDir = dirname(target);
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  // A dead login cannot be headless-refreshed — strip every credential env so
+  // the CLI falls back to its full browser authorization flow.
+  delete env.CLAUDE_CODE_OAUTH_REFRESH_TOKEN;
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  delete env.CLAUDE_CODE_OAUTH_SCOPES;
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.ANTHROPIC_BASE_URL;
+  env.CLAUDE_CONFIG_DIR = configDir;
+  usageTracker.event("claude_renew_signin", { configDir });
+  try {
+    const child = spawn(
+      process.platform === "win32" ? "claude.cmd" : "claude",
+      ["auth", "login", "--claudeai"],
+      { env, detached: true, stdio: "ignore", shell: process.platform === "win32" },
+    );
+    child.on("error", (e) =>
+      usageTracker.event("claude_renew_signin_error", { message: e.message }),
+    );
+    child.unref();
+    return { ok: true, configDir };
+  } catch (e) {
+    usageTracker.event("claude_renew_signin_error", { message: (e as Error).message });
+    return { ok: false, reason: (e as Error).message };
+  }
+}
+ipcMain.handle("duitsini:renew-claude-signin", () => renewClaudeSignin());
 
 // Tray app: closing every window must not quit on Windows/Linux either.
 app.on("window-all-closed", () => {

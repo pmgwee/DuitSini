@@ -5,7 +5,25 @@ import { dirname, join } from "node:path";
 import type { UsageTracker } from "../tracker";
 
 const EXPIRY_BUFFER_MS = 5 * 60_000;
-const FAILURE_HOLD_MS = 60 * 60_000;
+/**
+ * Hold ladder indexed by consecutive no-advance renewal failures. The old flat
+ * 1h hold retried forever at the same cadence; escalating (1h→2h→4h→8h, capped)
+ * spends fewer CLI invocations on a login that is not coming back.
+ */
+const FAILURE_HOLD_LADDER_MS = [
+  60 * 60_000,
+  2 * 60 * 60_000,
+  4 * 60 * 60_000,
+  8 * 60 * 60_000,
+] as const;
+/**
+ * After this many consecutive no-advance failures the login is treated as dead
+ * (rotated/flagged): the scheduler stops spending usage-endpoint calls on it
+ * and surfaces an actionable "renew your sign-in" state until a fresh login
+ * appears on disk. Per the project's hard-won rule, only a real browser sign-in
+ * clears a dead login — looping the CLI forever would only deepen the flag.
+ */
+const RELOGIN_STREAK_THRESHOLD = 3;
 const LOGIN_TIMEOUT_MS = 30_000;
 const LOCK_WAIT_MS = LOGIN_TIMEOUT_MS + 10_000;
 const LOCK_STALE_MS = LOGIN_TIMEOUT_MS + 30_000;
@@ -29,6 +47,9 @@ export interface ClaudeCliLoginRequest {
 export interface ClaudeCliLoginResult {
   code: number;
   timedOut?: boolean;
+  /** Captured so a failure is attributable instead of a bare `exitCode:1`. */
+  stdout?: string;
+  stderr?: string;
 }
 
 export interface ClaudeCliRenewalState {
@@ -37,6 +58,10 @@ export interface ClaudeCliRenewalState {
   blockedUntil?: number;
   lastAttemptAt?: number;
   lastOkAt?: number;
+  /** Consecutive no-advance renewal failures. Indexes the hold ladder. */
+  streak?: number;
+  /** True once `streak` crosses RELOGIN_STREAK_THRESHOLD — login presumed dead. */
+  requiresRelogin?: boolean;
 }
 
 interface ClaudeCliRenewalDeps {
@@ -96,16 +121,20 @@ function defaultRun(request: ClaudeCliLoginRequest): Promise<ClaudeCliLoginResul
         shell: process.platform === "win32",
         maxBuffer: 256 * 1024,
       },
-      (error) => {
+      (error, stdout, stderr) => {
+        const out = typeof stdout === "string" ? stdout : "";
+        const tail = typeof stderr === "string" ? stderr : "";
         const result = error as NodeJS.ErrnoException & {
           code?: number | string;
           killed?: boolean;
           signal?: string;
         };
-        if (!error) return resolve({ code: 0 });
+        if (!error) return resolve({ code: 0, stdout: out, stderr: tail });
         resolve({
           code: typeof result.code === "number" ? result.code : 1,
           timedOut: Boolean(result.killed || result.signal === "SIGTERM"),
+          stdout: out,
+          stderr: tail,
         });
       },
     );
@@ -217,6 +246,40 @@ export class ClaudeCliRenewalManager {
     return structuredClone(this.states);
   }
 
+  /**
+   * Path of a dedicated profile whose login is presumed dead (renewal exhausted
+   * the streak). The scheduler uses this to STOP spending usage-endpoint calls
+   * on a token that cannot be refreshed — that volume is itself the account-
+   * keyed 429 risk — and to surface an actionable state instead.
+   */
+  terminalPath(): string | undefined {
+    for (const [path, state] of Object.entries(this.states)) {
+      if (state.requiresRelogin) return path;
+    }
+    return undefined;
+  }
+
+  /**
+   * For a terminal path, read the credentials file and detect a FRESH external
+   * sign-in (fingerprint changed AND the token is usable). Clears the dead-
+   * login state so normal collection resumes; returns false while the same dead
+   * login is still on disk so the caller keeps skipping the network call.
+   */
+  async externalReloginDetected(path: string): Promise<boolean> {
+    const state = this.states[path];
+    if (!state?.requiresRelogin) return false;
+    const oauth = oauthEntryOf(await this.readCredentials(path));
+    if (!oauth?.accessToken) return false;
+    const fingerprint = tokenFingerprint(oauth);
+    if (fingerprint === state.fingerprint || !isFresh(oauth, this.now())) return false;
+    delete state.blockedUntil;
+    state.fingerprint = fingerprint;
+    state.streak = 0;
+    state.requiresRelogin = false;
+    state.lastOkAt = this.now();
+    return true;
+  }
+
   async renewIfNeeded(
     credentials: unknown,
     path: string,
@@ -229,7 +292,11 @@ export class ClaudeCliRenewalManager {
     const state = (this.states[path] ??= {});
 
     if (state.fingerprint && state.fingerprint !== fingerprint) {
+      // A fresh login (manual browser sign-in, or another tool) replaces a dead
+      // one: clear every consequence of the previous login's failure streak.
       delete state.blockedUntil;
+      state.streak = 0;
+      state.requiresRelogin = false;
     }
     state.fingerprint = fingerprint;
 
@@ -294,15 +361,14 @@ export class ClaudeCliRenewalManager {
         result = { code: 1 };
       }
 
-      if (result.code !== 0 || result.timedOut) {
-        this.hold(path, latestFingerprint, this.now());
-        this.track("cli_renew_fail", path, latest, {
-          exitCode: result.code,
-          timedOut: Boolean(result.timedOut),
-        });
-        return latest.accessToken ?? oauth.accessToken!;
-      }
-
+      // The CLI may rotate the credentials on disk and STILL exit non-zero (a
+      // post-write warning, a signal, telemetry shutdown). The file is ground
+      // truth: inspect it on EVERY termination and credit the rotation
+      // regardless of exit code. Only record a failure when the exchange
+      // produced no usable new token — this is what stops a "rotated-but-
+      // exited-1" renewal from mis-lighting the failure streak (and, eventually,
+      // the dead-login state), which is the bug that silently bricked the
+      // tracker after the rotation chain broke.
       const rotatedCredentials = await this.readCredentials(path);
       const rotated = oauthEntryOf(rotatedCredentials);
       const rotatedFingerprint = rotated ? tokenFingerprint(rotated) : null;
@@ -313,19 +379,33 @@ export class ClaudeCliRenewalManager {
         rotated.expiresAt > (latest.expiresAt ?? 0) &&
         rotated.expiresAt > this.now() + EXPIRY_BUFFER_MS;
 
-      if (!rotated || !rotatedFingerprint || !expiryAdvanced) {
-        this.hold(path, latestFingerprint, this.now());
-        this.track("cli_renew_invalid_result", path, latest);
-        return latest.accessToken ?? oauth.accessToken!;
+      if (rotated && rotatedFingerprint && expiryAdvanced) {
+        // The token was refreshed — even if the subprocess exited non-zero.
+        // The login is healthy again; reset the failure streak.
+        this.states[path] = {
+          fingerprint: rotatedFingerprint,
+          lastAttemptAt: attemptAt,
+          lastOkAt: this.now(),
+          streak: 0,
+          requiresRelogin: false,
+        };
+        this.track("cli_renew_ok", path, rotated);
+        return rotated.accessToken!;
       }
 
-      this.states[path] = {
-        fingerprint: rotatedFingerprint,
-        lastAttemptAt: attemptAt,
-        lastOkAt: this.now(),
-      };
-      this.track("cli_renew_ok", path, rotated);
-      return rotated.accessToken!;
+      // No advance. Hold, bump the streak (escalating the next hold and, once
+      // it crosses the threshold, marking the login dead), and record why —
+      // including the captured stderr so the next failure is attributable
+      // instead of a bare, undiagnostic `exitCode:1`.
+      const nominalExit = result.code === 0 && !result.timedOut;
+      this.hold(path, latestFingerprint, this.now());
+      this.track(nominalExit ? "cli_renew_invalid_result" : "cli_renew_fail", path, latest, {
+        exitCode: result.code,
+        timedOut: Boolean(result.timedOut),
+        ...(result.stderr ? { stderr: result.stderr.slice(-1000) } : {}),
+        ...(result.stdout ? { stdout: result.stdout.slice(-1000) } : {}),
+      });
+      return latest.accessToken ?? oauth.accessToken!;
     });
 
     this.inFlight.set(path, renewal);
@@ -339,7 +419,12 @@ export class ClaudeCliRenewalManager {
   private hold(path: string, fingerprint: string, now: number): void {
     const state = (this.states[path] ??= {});
     state.fingerprint = fingerprint;
-    state.blockedUntil = now + FAILURE_HOLD_MS;
+    const streak = (state.streak ?? 0) + 1;
+    state.streak = streak;
+    const holdMs =
+      FAILURE_HOLD_LADDER_MS[Math.min(streak, FAILURE_HOLD_LADDER_MS.length) - 1];
+    state.blockedUntil = now + holdMs;
+    if (streak >= RELOGIN_STREAK_THRESHOLD) state.requiresRelogin = true;
   }
 
   private track(
