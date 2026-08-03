@@ -290,7 +290,7 @@ export function MusicWidget() {
   );
 
   return (
-    <div className="flex h-full flex-col gap-4 rounded-2xl border border-border/60 bg-surface/40 p-5">
+    <div className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-surface/40 p-5 lg:absolute lg:inset-0 lg:overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-medium">
@@ -492,7 +492,7 @@ export function MusicWidget() {
 
       {/* Shelf content — grows to fill the card so the list reaches the bottom
           edge (aligned like the Connect Claude card in the left column). */}
-      <div className="flex min-h-[9rem] flex-1 flex-col">
+      <div className="flex min-h-[9rem] flex-1 flex-col lg:min-h-0">
         {shelf === "listen" &&
           (connected ? (
             <div className="flex flex-1 flex-col gap-2">

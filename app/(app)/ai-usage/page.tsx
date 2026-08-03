@@ -23,7 +23,16 @@ export default function AiUsagePage() {
           <ClaudeUsageTracker />
           <ConnectClaudeCard />
         </div>
-        <MusicWidget />
+        {/* Music card is absolutely positioned into a relative cell at lg so
+            its height is anchored to the LEFT column (tracker + connect card)
+            rather than its own content. Without this, the card's video player +
+            controls + unbounded list make Music the tallest grid item, so it
+            defines the row and overshoots past the usage cards. Taken out of
+            flow, the left column defines the row, the relative cell stretches
+            to it, and Music fills that height with the list scrolling inside. */}
+        <div className="lg:relative">
+          <MusicWidget />
+        </div>
       </div>
     </div>
   );
