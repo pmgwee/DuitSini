@@ -525,6 +525,24 @@ export function MusicWidget() {
                 <ShelfNote>Loading your listens…</ShelfNote>
               ) : visibleListenAgain.length > 0 ? (
                 <>
+                  {/* The list is deliberately frozen while you're using it. This
+                      is the only in-session way to rebuild — and it only offers
+                      itself once your likes/skips would actually change the
+                      result, so it never nags. Sits at the top of the shelf so
+                      it's reachable without scrolling past the tracks. */}
+                  {pendingSignals && (
+                    <button
+                      type="button"
+                      onClick={refreshShelf}
+                      disabled={listenAgain.isFetching}
+                      className="mb-1.5 flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={cn("size-3", listenAgain.isFetching && "animate-spin")}
+                      />
+                      {listenAgain.isFetching ? "Rebuilding…" : "Update with your new likes"}
+                    </button>
+                  )}
                   {listenAgain.data?.seeded && (
                     <p className="mb-1.5 text-[11px] text-muted-foreground/80">
                       Seeded from your Liked Music — plays in this app take over from here.
@@ -539,23 +557,6 @@ export function MusicWidget() {
                     onSuppress={(t) => void suppressTrack(t)}
                     calmRows
                   />
-                  {/* The list is deliberately frozen while you're using it. This
-                      is the only in-session way to rebuild — and it only offers
-                      itself once your likes/skips would actually change the
-                      result, so it never nags. */}
-                  {pendingSignals && (
-                    <button
-                      type="button"
-                      onClick={refreshShelf}
-                      disabled={listenAgain.isFetching}
-                      className="mt-1 flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                    >
-                      <RefreshCw
-                        className={cn("size-3", listenAgain.isFetching && "animate-spin")}
-                      />
-                      {listenAgain.isFetching ? "Rebuilding…" : "Update with your new likes"}
-                    </button>
-                  )}
                 </>
               ) : (
                 <ShelfNote>Play something — this shelf builds itself from your listens.</ShelfNote>
