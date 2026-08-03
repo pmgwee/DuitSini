@@ -13,9 +13,11 @@ import {
   claudeCredCandidates,
   clampPushMs,
   generalTailStart,
+  renewalMode,
 } from "./config";
-import { AllRejectedError, NoCredentialsError, fetchProSnapshot } from "./collectors/claude-oauth";
+import { AllRejectedError, NoCredentialsError, fetchProSnapshot, type RenewalBroker } from "./collectors/claude-oauth";
 import { ClaudeCliRenewalManager } from "./collectors/claude-cli-renewal";
+import { RefreshManager } from "./collectors/claude-refresh";
 import { LocalUsageEstimator } from "./collectors/claude-local";
 import {
   AllCodexCredentialsRejectedError,
@@ -72,7 +74,7 @@ const jitter = (n: number) => Math.floor(Math.random() * n);
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
   private readonly local = new LocalUsageEstimator();
-  private readonly renewal: ClaudeCliRenewalManager;
+  private readonly renewal: RenewalBroker | undefined;
   private pushMs = DEFAULT_PUSH_MS;
   private lastPushAt = 0;
   private lastApiAt = 0;
@@ -84,10 +86,16 @@ export class Scheduler {
   private running = false;
 
   constructor(private readonly deps: SchedulerDeps) {
-    this.renewal = new ClaudeCliRenewalManager({
-      tracker: deps.tracker,
-      initialState: deps.store.get().cliRenewal,
-    });
+    // Pick the renewal strategy from DUITSINI_RENEWAL_MODE (default cli-renew).
+    // A switch, never a layer — only one broker ever touches a credentials file.
+    const mode = renewalMode();
+    const initialState = deps.store.get().cliRenewal;
+    this.renewal =
+      mode === "direct-post"
+        ? new RefreshManager({ tracker: deps.tracker, log: deps.log, initialState })
+        : mode === "off"
+          ? undefined
+          : new ClaudeCliRenewalManager({ tracker: deps.tracker, initialState });
   }
 
   async start(pushSeconds?: number): Promise<void> {
@@ -134,7 +142,7 @@ export class Scheduler {
     // auth_stale, but the streak never accrues because there was no token to
     // attempt). Without this fallback the button silently no-ops on the most
     // common stale situation.
-    const dead = this.renewal.terminalPath();
+    const dead = this.renewal?.terminalPath();
     if (dead) return dead;
     const paths = claudeCredCandidates();
     return paths.slice(0, generalTailStart(paths))[0] ?? null;
@@ -253,8 +261,8 @@ export class Scheduler {
     // refreshed — that volume is the account-keyed 429 risk. Poll the cheap
     // local credentials file so a fresh sign-in is detected promptly, but skip
     // the network call entirely until then.
-    const deadPath = this.renewal.terminalPath();
-    if (deadPath && !(await this.renewal.externalReloginDetected(deadPath))) {
+    const deadPath = this.renewal?.terminalPath();
+    if (deadPath && !(await this.renewal?.externalReloginDetected(deadPath))) {
       this.deps.onStatus({ kind: "error", reason: "Claude Pro sign-in needs renewing." });
       return (
         lastKnownStream(
@@ -289,7 +297,7 @@ export class Scheduler {
         this.renewal,
         this.deps.tracker,
       );
-      this.deps.store.setCliRenewalState(this.renewal.exportState());
+      if (this.renewal) this.deps.store.setCliRenewalState(this.renewal.exportState());
       this.lastApiSnapshot = snapshot;
       this.lastApiAt = Date.now();
       st.streak = 0;
@@ -312,7 +320,7 @@ export class Scheduler {
       return stream;
     } catch (e) {
       const err = e as { code?: number | string; message: string; retryMs?: number };
-      this.deps.store.setCliRenewalState(this.renewal.exportState());
+      if (this.renewal) this.deps.store.setCliRenewalState(this.renewal.exportState());
 
       if (err.code === 429) {
         st.streak += 1;

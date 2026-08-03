@@ -247,6 +247,21 @@ interface DedicatedRenewalBroker {
   ): Promise<string | null>;
 }
 
+/**
+ * A renewal strategy for dedicated Claude profiles. `ClaudeCliRenewalManager`
+ * (default, `claude auth login`) and `RefreshManager` (F5, direct token-endpoint
+ * POST) both implement this; the scheduler picks one via `renewalMode()`. The
+ * credential walk only needs `renewIfNeeded`; the scheduler uses the rest for
+ * the F3 dead-login stop and F4 one-click recovery floor.
+ */
+export interface RenewalBroker extends DedicatedRenewalBroker {
+  exportState(): Record<string, unknown>;
+  /** Path of a profile whose login is dead and must not be hammered. */
+  terminalPath(): string | undefined;
+  /** True once a fresh external sign-in has landed for a terminal path. */
+  externalReloginDetected(path: string): Promise<boolean>;
+}
+
 export interface FetchProOptions {
   sources?: CredSource[];
   fetcher?: typeof safeFetch;
