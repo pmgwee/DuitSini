@@ -537,7 +537,7 @@ export function MusicWidget() {
                     likedIds={likedIds}
                     onToggleLike={(t) => void toggleLike(t)}
                     onSuppress={(t) => void suppressTrack(t)}
-                    likeLikedOnly
+                    calmRows
                   />
                   {/* The list is deliberately frozen while you're using it. This
                       is the only in-session way to rebuild — and it only offers
@@ -754,7 +754,7 @@ function TrackList({
   likedIds,
   onToggleLike,
   onSuppress,
-  likeLikedOnly,
+  calmRows,
 }: {
   tracks: MusicTrack[];
   activeId?: string;
@@ -765,14 +765,19 @@ function TrackList({
   /** Omitted on shelves where "not interested" is meaningless (e.g. Liked). */
   onSuppress?: (track: MusicTrack) => void;
   /**
-   * Recommendation-shelf calmness: render the heart ONLY on rows the listener
-   * has already liked. An unset heart on every row is the single most-reported
-   * flaw in Spotify's own lists (accidental un-likes mid-scroll), and touch
-   * devices have no hover to keep it hidden — so on Listen again the heart is
-   * not rendered at all until a like exists. Liking a new track happens from
-   * Now Playing; the heart here is the "you liked this" marker + its undo path.
+   * Match the desktop Listen-again shelf's resting calm on touch devices.
+   *
+   * Desktop (a hover device) already keeps unset hearts and the ✕ hidden until
+   * you hover a row, because `hover-capable:` gates their hide behind
+   * @media(hover:hover). Touch has no hover, so without this flag those
+   * controls are forced always-visible — every iPad row sprouts a ♥ and a ✕,
+   * the clutter this app's own notes call out as Spotify's most-complained-
+   * about list flaw. With `calmRows` the hide is ungated (plain `opacity-0`),
+   * so touch rows rest as quiet as desktop's; the controls still appear on
+   * hover/focus where a hover exists. Like/suppress a new track from Now
+   * Playing, as on desktop — the per-row heart is the "you liked this" marker.
    */
-  likeLikedOnly?: boolean;
+  calmRows?: boolean;
 }) {
   return (
     // Shared by every shelf so the cap is identical across all of them. Rows
@@ -823,7 +828,7 @@ function TrackList({
             {/* One button, one job — this ONLY likes. Spotify's equivalent also
                 opens a playlist picker depending on state, which is their
                 most-complained-about interaction. */}
-            {onToggleLike && (!likeLikedOnly || liked) && (
+            {onToggleLike && (
               <button
                 type="button"
                 onClick={() => onToggleLike(t)}
@@ -833,13 +838,16 @@ function TrackList({
                 className={cn(
                   "grid size-8 shrink-0 place-items-center rounded-full transition-colors hover:bg-background/70",
                   // A set like stays visible; an unset one appears on hover or
-                  // keyboard focus, so resting rows stay quiet — but only where
-                  // hover exists. Touch devices (iPad) have no hover, so the
-                  // heart is gated behind @media(hover:hover): visible by
-                  // default on touch, hover-revealed on mouse.
+                  // keyboard focus, so resting rows stay quiet. On touch (no
+                  // hover) the unset heart would otherwise be forced always-
+                  // visible — `calmRows` (Listen again) drops the hover-capable
+                  // gate so touch rows rest as quiet as desktop's.
                   liked
                     ? "text-primary"
-                    : "text-muted-foreground hover-capable:opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
+                    : [
+                        "text-muted-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                        calmRows ? "opacity-0" : "hover-capable:opacity-0",
+                      ],
                 )}
               >
                 <Heart className={cn("size-4", liked && "fill-current")} />
@@ -852,7 +860,10 @@ function TrackList({
                 onClick={() => onSuppress(t)}
                 aria-label={`Don't suggest ${t.title} again`}
                 title="Not interested"
-                className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground hover-capable:opacity-0 transition-colors hover:bg-background/70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                className={cn(
+                  "grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-background/70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100",
+                  calmRows ? "opacity-0" : "hover-capable:opacity-0",
+                )}
               >
                 <X className="size-4" />
               </button>
