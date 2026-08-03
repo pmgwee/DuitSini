@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is(.dark *))
+
+/* Pointer/touch capability. iPadOS Safari matches (hover: none) for touch
+   input, so hover-revealed controls (e.g. the ♥ / ✕ on music track rows) are
+   unreachable there — gating their hide behind this variant keeps them visible
+   on touch while preserving the calm "appear on hover" behavior on mouse. */
+@custom-variant hover-capable (@media (hover: hover));
 
 /* ============================================================
    Design tokens — dark-first premium palette (OKLCH)

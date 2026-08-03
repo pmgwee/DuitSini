@@ -822,10 +822,13 @@ function TrackList({
                 className={cn(
                   "grid size-8 shrink-0 place-items-center rounded-full transition-colors hover:bg-background/70",
                   // A set like stays visible; an unset one appears on hover or
-                  // keyboard focus, so resting rows stay quiet.
+                  // keyboard focus, so resting rows stay quiet — but only where
+                  // hover exists. Touch devices (iPad) have no hover, so the
+                  // heart is gated behind @media(hover:hover): visible by
+                  // default on touch, hover-revealed on mouse.
                   liked
                     ? "text-primary"
-                    : "text-muted-foreground opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
+                    : "text-muted-foreground hover-capable:opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
                 )}
               >
                 <Heart className={cn("size-4", liked && "fill-current")} />
@@ -838,7 +841,7 @@ function TrackList({
                 onClick={() => onSuppress(t)}
                 aria-label={`Don't suggest ${t.title} again`}
                 title="Not interested"
-                className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground opacity-0 transition-colors hover:bg-background/70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground hover-capable:opacity-0 transition-colors hover:bg-background/70 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <X className="size-4" />
               </button>
