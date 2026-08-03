@@ -1,7 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Calibration } from "./collectors/claude-local";
-import type { ClaudeCliRenewalState } from "./collectors/claude-cli-renewal";
 import type { UsageStream } from "./types";
 
 /**
@@ -31,8 +30,12 @@ export interface PersistedState {
   calibration?: Calibration;
   /** Usage-endpoint call count, reset at local midnight. */
   usageCalls?: { day: string; count: number };
-  /** Holds for official-CLI renewal of dedicated secondary Claude profiles. */
-  cliRenewal?: Record<string, ClaudeCliRenewalState>;
+  /**
+   * Persisted renewal-broker state (mode-agnostic blob). Shape depends on the
+   * active `renewalMode()`; each broker tolerates foreign fields, so switching
+   * modes between runs degrades gracefully rather than crashing on load.
+   */
+  cliRenewal?: Record<string, unknown>;
   /** Last known provider readings. These keep all rings visible through outages. */
   snapshots?: Record<string, { stream: UsageStream; observedAt: number }>;
   /**
@@ -85,7 +88,7 @@ export class Store {
     this.data.calibration = c;
   }
 
-  setCliRenewalState(s: Record<string, ClaudeCliRenewalState>): void {
+  setCliRenewalState(s: Record<string, unknown>): void {
     this.data.cliRenewal = s;
   }
 

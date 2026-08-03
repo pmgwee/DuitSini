@@ -42,6 +42,27 @@ export const CC_SWITCH_DIR = join(homedir(), ".cc-switch");
 export const CC_SWITCH_DB = join(CC_SWITCH_DIR, "cc-switch.db");
 export const CC_SWITCH_JSON = join(CC_SWITCH_DIR, "config.json");
 
+/**
+ * How a dedicated Claude profile (~/.claude-pro) is kept alive. A switch, not a
+ * layer — only one mode is ever active on a given credentials file.
+ *
+ *   cli-renew (default) — delegate to `claude auth login --claudeai` (the path
+ *                         that shipped in the Aug 1 hardening; F1–F4 harden it).
+ *   direct-post         — F5: a single direct `grant_type=refresh_token` POST,
+ *                         the v7 discipline. The trial primitive — a serialized
+ *                         single-poster refresh may avoid the rotation breakage
+ *                         that plagues `auth login` (#25609/#24317).
+ *   off                 — pure read-only (cc-switch behaviour). No refresh
+ *                         attempts at all; F4 one-click re-login is the only
+ *                         recovery. Safety valve if both primitives misbehave.
+ */
+export type RenewalMode = "cli-renew" | "direct-post" | "off";
+
+export function renewalMode(): RenewalMode {
+  const m = (process.env.DUITSINI_RENEWAL_MODE ?? "cli-renew").trim();
+  return m === "direct-post" || m === "off" ? m : "cli-renew";
+}
+
 /** Claude Code session transcripts — the zero-network estimate's input. */
 export const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 

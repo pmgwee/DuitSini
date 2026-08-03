@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { open, readFile, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { UsageTracker } from "../tracker";
+import type { RenewalBroker } from "./claude-oauth";
 
 const EXPIRY_BUFFER_MS = 5 * 60_000;
 /**
@@ -73,7 +74,7 @@ interface ClaudeCliRenewalDeps {
     task: () => Promise<string | null>,
   ) => Promise<string | null>;
   tracker?: Pick<UsageTracker, "event">;
-  initialState?: Record<string, ClaudeCliRenewalState>;
+  initialState?: Record<string, unknown>;
 }
 
 function oauthEntryOf(credentials: unknown): OAuthEntry | null {
@@ -221,7 +222,7 @@ async function defaultWithLock(
  * installed official Claude CLI. This class never calls Anthropic's token
  * endpoint itself and never places OAuth secrets in command-line arguments.
  */
-export class ClaudeCliRenewalManager {
+export class ClaudeCliRenewalManager implements RenewalBroker {
   private readonly now: () => number;
   private readonly run: (request: ClaudeCliLoginRequest) => Promise<ClaudeCliLoginResult>;
   private readonly readCredentials: (path: string) => Promise<unknown>;
@@ -239,7 +240,7 @@ export class ClaudeCliRenewalManager {
     this.readCredentials = deps.readCredentials ?? defaultReadCredentials;
     this.withLock = deps.withLock ?? defaultWithLock;
     this.tracker = deps.tracker;
-    this.states = structuredClone(deps.initialState ?? {});
+    this.states = structuredClone(deps.initialState ?? {}) as Record<string, ClaudeCliRenewalState>;
   }
 
   exportState(): Record<string, ClaudeCliRenewalState> {
