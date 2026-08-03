@@ -4,7 +4,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getGoogleAccessToken } from "@/lib/google/tokens";
 import { LIKED_MUSIC_ID, listPlaylistTracks } from "@/lib/google/youtube";
 import { buildShelf } from "@/lib/music/recommend";
-import { loadHistory, loadTransitionBias } from "@/lib/music/store";
+import {
+  loadHistory,
+  loadLikes,
+  loadSuppressions,
+  loadTransitionBias,
+} from "@/lib/music/store";
 import type { MusicTrack } from "@/types/music";
 
 export const runtime = "nodejs";
@@ -58,13 +63,28 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ tracks: [], seeded: false }, { status: 401 });
 
-  const history = await loadHistory(supabase, user.id);
+  const [history, likes, suppressions] = await Promise.all([
+    loadHistory(supabase, user.id),
+    loadLikes(supabase, user.id),
+    loadSuppressions(supabase, user.id),
+  ]);
 
-  if (history.length > 0) {
+  // A like alone is enough to build a shelf from — the listener has told us
+  // something real even if they haven't played anything yet.
+  if (history.length > 0 || likes.length > 0) {
     const transitionBias = await loadTransitionBias(supabase, user.id);
+    const suppressed = new Set([
+      ...suppressions.notInterested,
+      ...suppressions.snoozedUntil.keys(),
+    ]);
     let tracks: MusicTrack[] = [];
     try {
-      tracks = await buildShelf(history, { limit: SHELF_CAP, transitionBias });
+      tracks = await buildShelf(history, {
+        limit: SHELF_CAP,
+        transitionBias,
+        likes,
+        suppressed,
+      });
     } catch (err) {
       // Recommendation must never take the dashboard down.
       console.error("[yt/plays] shelf build failed:", (err as Error)?.message ?? err);
@@ -85,15 +105,27 @@ export async function GET() {
     return NextResponse.json<ListenAgainResponse>({ tracks, seeded: false });
   }
 
-  // Cold start: no in-app plays yet — seed from Liked Music.
+  // Cold start: nothing in-app yet. Use the imported YouTube "Liked Music" as a
+  // SEED for real recommendations rather than displaying it back.
+  //
+  // Shuffling the import was the old behaviour and it reproduced the exact
+  // problem this recommender exists to solve: a new listener with a large
+  // library got their own familiar songs in a random order, and looped there
+  // until they searched manually. Seeding from it instead means even the very
+  // first shelf is mostly music they haven't heard.
   const token = await getGoogleAccessToken(user.id);
   if (token) {
     const liked = await listPlaylistTracks(token, LIKED_MUSIC_ID);
     if (liked && liked.length > 0) {
-      return NextResponse.json<ListenAgainResponse>({
-        tracks: shuffle(liked).slice(0, 12),
-        seeded: true,
-      });
+      let tracks: MusicTrack[] = [];
+      try {
+        tracks = await buildShelf([], { limit: SHELF_CAP, coldStart: shuffle(liked) });
+      } catch (err) {
+        console.error("[yt/plays] cold-start build failed:", (err as Error)?.message ?? err);
+      }
+      // Only if every source failed do we fall back to showing the import.
+      if (tracks.length === 0) tracks = shuffle(liked).slice(0, 12);
+      return NextResponse.json<ListenAgainResponse>({ tracks, seeded: true });
     }
   }
   return NextResponse.json<ListenAgainResponse>({ tracks: [], seeded: false });

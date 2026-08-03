@@ -34,6 +34,21 @@ import type { Candidate } from "./types";
  * appeared in, and similarity is the cosine between those vectors.
  *
  * The vectors are free: we already fetch those queues for candidate generation.
+ *
+ * ── DO NOT ADD TIME DECAY HERE ──────────────────────────────────────────────
+ * It is tempting to age-weight this graph so it "follows taste changes". Don't.
+ * Koren's temporal-dynamics work (the Netflix Prize solution) tested exactly
+ * that and found quality improved as decay was moderated, and was best with no
+ * decay at all — underweighting old actions loses signal along with the noise,
+ * which bites hardest when data per user is scarce (which is our situation).
+ * His reconciliation: two items are related if users treated them similarly in
+ * a short window, "even if this happened long ago".
+ *
+ * So the layers are split deliberately:
+ *   · THIS FILE — how tracks relate to each other      → never decays
+ *   · ranking.ts — what the listener wants right now   → decays (recency term)
+ * Taste change is tracked by which seeds get chosen and how candidates are
+ * ranked, not by corroding the relationship graph.
  */
 
 /** Position discount — rank 0 counts most, with a long tail. */

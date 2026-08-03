@@ -2,7 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildRadio, continueRadio } from "@/lib/music/recommend";
-import { loadHistory, loadTransitionBias } from "@/lib/music/store";
+import {
+  loadHistory,
+  loadLikes,
+  loadSuppressions,
+  loadTransitionBias,
+} from "@/lib/music/store";
 import type { MusicTrack } from "@/types/music";
 
 export const runtime = "nodejs";
@@ -63,12 +68,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json<RadioResponse>(page);
     }
 
-    const [history, transitionBias] = await Promise.all([
+    const [history, transitionBias, likes, suppressions] = await Promise.all([
       loadHistory(supabase, user.id),
       loadTransitionBias(supabase, user.id),
+      loadLikes(supabase, user.id),
+      loadSuppressions(supabase, user.id),
     ]);
 
-    const station = await buildRadio(seed!, history, { limit, exclude, transitionBias });
+    const station = await buildRadio(seed!, history, {
+      limit,
+      exclude,
+      transitionBias,
+      likes: new Set(likes.map((l) => l.videoId)),
+      suppressed: new Set([
+        ...suppressions.notInterested,
+        ...suppressions.snoozedUntil.keys(),
+      ]),
+    });
     return NextResponse.json<RadioResponse>(station);
   } catch (err) {
     // Autoplay failing must be silent — the player just stops, as it did before.

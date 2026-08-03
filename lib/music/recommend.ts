@@ -8,7 +8,13 @@ import {
 } from "./sources";
 import { assemble, pickSeeds, score, type ScoreContext } from "./ranking";
 import { sequence } from "./similarity";
-import type { Candidate, CandidateOrigin, HistoryEntry, Occurrence } from "./types";
+import type {
+  Candidate,
+  CandidateOrigin,
+  HistoryEntry,
+  LikedTrack,
+  Occurrence,
+} from "./types";
 
 /**
  * The recommender pipeline. Mirrors the two-stage architecture both Spotify and
@@ -79,6 +85,44 @@ export interface ShelfOptions {
   random?: () => number;
   /** Learned per-transition preferences (see `store.loadTransitionBias`). */
   transitionBias?: Map<string, number>;
+  /** Explicitly liked tracks — strongest confidence signal, and strong seeds. */
+  likes?: LikedTrack[];
+  /** Tracks to remove entirely (not-interested / active snooze). */
+  suppressed?: Set<string>;
+  /**
+   * Cold-start prior: the listener's imported YouTube "Liked Music".
+   *
+   * Used ONLY to seed neighbourhoods when there is no in-app behaviour yet, and
+   * never as a confidence signal — an import is not the same statement as a
+   * heart tapped here, and it may be years stale. Without this, a brand-new
+   * listener with a large imported library got their own liked songs shuffled
+   * back at them, which is precisely the loop this recommender exists to break.
+   */
+  coldStart?: MusicTrack[];
+}
+
+/**
+ * Liked tracks that were never played still deserve to seed a neighbourhood —
+ * a like on a shelf row is a clear statement of taste even with zero plays.
+ * Merge them in as synthetic history so seed selection can see them.
+ */
+function mergeLikesIntoHistory(history: HistoryEntry[], likes: LikedTrack[]): HistoryEntry[] {
+  const known = new Set(history.map((h) => h.videoId));
+  const extra: HistoryEntry[] = [];
+  for (const like of likes) {
+    if (known.has(like.videoId)) continue;
+    extra.push({
+      videoId: like.videoId,
+      title: like.title,
+      channel: like.channel,
+      thumbnail: like.thumbnail,
+      playCount: 1,
+      lastPlayedAt: like.likedAt,
+      skipCount: 0,
+      completeCount: 0,
+    });
+  }
+  return [...history, ...extra];
 }
 
 /**
@@ -95,10 +139,37 @@ export async function buildShelf(
   history: HistoryEntry[],
   options: ShelfOptions = {},
 ): Promise<MusicTrack[]> {
-  const { limit = 40, now = Date.now(), random = Math.random, transitionBias } = options;
-  if (history.length === 0) return [];
+  const {
+    limit = 40,
+    now = Date.now(),
+    random = Math.random,
+    transitionBias,
+    likes = [],
+    suppressed = new Set<string>(),
+    coldStart = [],
+  } = options;
+  if (history.length === 0 && likes.length === 0 && coldStart.length === 0) return [];
 
-  const seeds = pickSeeds(history, SEED_COUNT, now, random);
+  const likeIds = new Set(likes.map((l) => l.videoId));
+  let seedPool = mergeLikesIntoHistory(history, likes);
+
+  // Cold start only: borrow the imported library to find a starting
+  // neighbourhood. Once any real in-app behaviour exists this contributes
+  // nothing, so the prior fades on its own rather than needing to be expired.
+  if (seedPool.length === 0) {
+    seedPool = coldStart.slice(0, 30).map((track) => ({
+      videoId: track.videoId,
+      title: track.title,
+      channel: track.channel,
+      thumbnail: track.thumbnail,
+      playCount: 1,
+      lastPlayedAt: new Date(now).toISOString(),
+      skipCount: 0,
+      completeCount: 0,
+    }));
+  }
+
+  const seeds = pickSeeds(seedPool, SEED_COUNT, now, random, likeIds);
   if (seeds.length === 0) return [];
 
   const pool = new CandidatePool();
@@ -144,10 +215,15 @@ export async function buildShelf(
   if (pool.size === 0) return [];
 
   // --- Stage 2: rank and assemble -------------------------------------------
-  const context: ScoreContext = { history: toHistoryMap(history), now };
+  // Suppressed tracks are DROPPED, not down-ranked: a listener who said "not
+  // this" should not have to keep saying it.
+  const context: ScoreContext = { history: toHistoryMap(seedPool), likes: likeIds, now };
   const scored = pool
     .values()
+    .filter((candidate) => !suppressed.has(candidate.track.videoId))
     .map((candidate) => ({ candidate, value: score(candidate, context) }));
+
+  if (scored.length === 0) return [];
 
   // Position-aware: open on the track the listener played most recently, so the
   // shelf starts on something trusted before it asks them to explore.
@@ -174,6 +250,10 @@ export interface RadioOptions {
   exclude?: string[];
   /** Learned per-transition preferences (see `store.loadTransitionBias`). */
   transitionBias?: Map<string, number>;
+  /** Explicitly liked tracks — raises confidence in the ranking. */
+  likes?: Set<string>;
+  /** Tracks to remove entirely (not-interested / active snooze). */
+  suppressed?: Set<string>;
 }
 
 /**
@@ -190,7 +270,14 @@ export async function buildRadio(
   history: HistoryEntry[],
   options: RadioOptions = {},
 ): Promise<{ tracks: MusicTrack[]; continuation: string | null }> {
-  const { limit = 25, now = Date.now(), exclude = [], transitionBias } = options;
+  const {
+    limit = 25,
+    now = Date.now(),
+    exclude = [],
+    transitionBias,
+    likes = new Set<string>(),
+    suppressed = new Set<string>(),
+  } = options;
 
   const radio = await fetchRadio(seedVideoId);
   if (radio.tracks.length === 0) return { tracks: [], continuation: null };
@@ -201,12 +288,17 @@ export async function buildRadio(
   const pool = new CandidatePool();
   pool.addMany(radio.tracks, radio.seedId, "radio", 1);
 
-  const context: ScoreContext = { history: historyMap, now };
+  const context: ScoreContext = { history: historyMap, likes, now };
   const scored = pool
     .values()
     .filter((candidate) => !excluded.has(candidate.track.videoId))
-    // Never autoplay something the listener has explicitly skipped before.
-    .filter((candidate) => (historyMap.get(candidate.track.videoId)?.skipCount ?? 0) === 0)
+    .filter((candidate) => !suppressed.has(candidate.track.videoId))
+    // Never autoplay something previously skipped — unless it was later liked,
+    // which supersedes an old skip (people do come back to a song).
+    .filter((candidate) => {
+      const skips = historyMap.get(candidate.track.videoId)?.skipCount ?? 0;
+      return skips === 0 || likes.has(candidate.track.videoId);
+    })
     .map((candidate) => ({ candidate, value: score(candidate, context) }));
 
   if (scored.length === 0) return { tracks: [], continuation: radio.continuation };

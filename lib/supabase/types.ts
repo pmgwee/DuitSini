@@ -230,6 +230,57 @@ export type Database = {
         }
         Relationships: []
       }
+      music_likes: {
+        Row: {
+          channel: string
+          liked_at: string
+          thumbnail: string | null
+          title: string
+          user_id: string
+          video_id: string
+        }
+        Insert: {
+          channel?: string
+          liked_at?: string
+          thumbnail?: string | null
+          title: string
+          user_id: string
+          video_id: string
+        }
+        Update: {
+          channel?: string
+          liked_at?: string
+          thumbnail?: string | null
+          title?: string
+          user_id?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
+      music_suppressions: {
+        Row: {
+          created_at: string
+          kind: string
+          until: string | null
+          user_id: string
+          video_id: string
+        }
+        Insert: {
+          created_at?: string
+          kind: string
+          until?: string | null
+          user_id: string
+          video_id: string
+        }
+        Update: {
+          created_at?: string
+          kind?: string
+          until?: string | null
+          user_id?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
       music_transitions: {
         Row: {
           completions: number
