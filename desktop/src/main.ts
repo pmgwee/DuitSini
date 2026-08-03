@@ -12,6 +12,7 @@ import {
 } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
@@ -799,6 +800,28 @@ ipcMain.on("duitsini:update-open-popup", () => openUpdatePopup());
  * completes sign-in, and the next collection cycle picks up the new credentials
  * via ClaudeCliRenewalManager.externalReloginDetected — no restart needed.
  */
+/** Active post-renewal credential watcher; replaced on each new request. */
+let renewalWatch: NodeJS.Timeout | null = null;
+
+/** Best-effort fingerprint of the on-disk Claude OAuth entry (access + refresh). */
+function claudeCredsFingerprint(path: string): string | null {
+  try {
+    const creds = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const oauth = (creds.claudeAiOauth ?? creds["claude.ai_oauth"] ?? null) as
+      | { accessToken?: string; refreshToken?: string }
+      | null;
+    if (!oauth) return null;
+    return createHash("sha256")
+      .update(oauth.accessToken || "")
+      .update("\0")
+      .update(oauth.refreshToken || "")
+      .digest("hex")
+      .slice(0, 20);
+  } catch {
+    return null;
+  }
+}
+
 async function renewClaudeSignin(): Promise<{
   ok: boolean;
   reason?: string;
@@ -843,6 +866,32 @@ async function renewClaudeSignin(): Promise<{
       usageTracker.event("claude_renew_signin_error", { message: e.message }),
     );
     child.unref();
+
+    // Watch for the new credentials so the dashboard updates within seconds of
+    // the user completing sign-in, instead of waiting up to a full push cadence
+    // for the next tick. Best-effort; the regular cadence is the backstop.
+    if (renewalWatch) {
+      clearInterval(renewalWatch);
+      renewalWatch = null;
+    }
+    const before = claudeCredsFingerprint(target);
+    let polls = 0;
+    renewalWatch = setInterval(() => {
+      polls += 1;
+      const fp = claudeCredsFingerprint(target);
+      const detected = before !== null && fp !== null && fp !== before;
+      if (detected) {
+        if (renewalWatch) clearInterval(renewalWatch);
+        renewalWatch = null;
+        usageTracker.event("claude_renew_signin_detected", {});
+        void scheduler?.pullNow();
+      } else if (polls >= 40) {
+        // ~10 minutes at 15s — the regular cadence takes over from here.
+        if (renewalWatch) clearInterval(renewalWatch);
+        renewalWatch = null;
+      }
+    }, 15_000);
+    renewalWatch.unref();
     return { ok: true, configDir };
   } catch (e) {
     usageTracker.event("claude_renew_signin_error", { message: (e as Error).message });
