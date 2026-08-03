@@ -152,6 +152,28 @@ function notifyUpdateAvailable(version: string): void {
   }
 }
 
+/**
+ * Toast for the Renew sign-in outcome. Without it, a successful renew left the
+ * dashboard on "Sign-in stale" until the next push and the user reasonably
+ * concluded the login had failed. Fired the moment the credential watcher
+ * confirms a new login, or when it gives up.
+ */
+function notifyRenewalResult(success: boolean): void {
+  const body = success
+    ? "Claude Pro sign-in renewed — usage tracking has resumed."
+    : "Claude sign-in didn't complete. Click 'Renew sign-in' again.";
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({ title: "DuitSini", body });
+      n.on("click", () => (win ? (win.show(), win.focus()) : createWindow()));
+      n.show();
+      usageTracker.event("claude_renew_signin_notify", { result: success ? "success" : "timeout" });
+    }
+  } catch (e) {
+    usageTracker.event("claude_renew_signin_notify_error", { message: (e as Error).message });
+  }
+}
+
 const store = new Store(Store.pathFor(app.getPath("userData")));
 const tokens = new TokenHolder(() => win, appOriginOf());
 
@@ -884,11 +906,13 @@ async function renewClaudeSignin(): Promise<{
         if (renewalWatch) clearInterval(renewalWatch);
         renewalWatch = null;
         usageTracker.event("claude_renew_signin_detected", {});
+        notifyRenewalResult(true);
         void scheduler?.pullNow();
       } else if (polls >= 40) {
         // ~10 minutes at 15s — the regular cadence takes over from here.
         if (renewalWatch) clearInterval(renewalWatch);
         renewalWatch = null;
+        notifyRenewalResult(false);
       }
     }, 15_000);
     renewalWatch.unref();
