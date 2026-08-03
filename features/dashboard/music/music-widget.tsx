@@ -495,48 +495,52 @@ export function MusicWidget() {
       <div className="flex min-h-[9rem] flex-1 flex-col lg:min-h-0">
         {shelf === "listen" &&
           (connected ? (
-            <div className="flex flex-1 flex-col gap-2">
-              {listenAgain.isLoading ? (
-                <ShelfNote>Loading your listens…</ShelfNote>
-              ) : visibleListenAgain.length > 0 ? (
-                <>
-                  {/* The list is deliberately frozen while you're using it. This
-                      is the only in-session way to rebuild — and it only offers
-                      itself once your likes/skips would actually change the
-                      result, so it never nags. Sits at the top of the shelf so
-                      it's reachable without scrolling past the tracks. */}
-                  {pendingSignals && (
-                    <button
-                      type="button"
-                      onClick={refreshShelf}
-                      disabled={listenAgain.isFetching}
-                      className="mb-1.5 flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                    >
-                      <RefreshCw
-                        className={cn("size-3", listenAgain.isFetching && "animate-spin")}
-                      />
-                      {listenAgain.isFetching ? "Rebuilding…" : "Update with your new likes"}
-                    </button>
-                  )}
-                  {listenAgain.data?.seeded && (
-                    <p className="mb-1.5 text-[11px] text-muted-foreground/80">
-                      Seeded from your Liked Music — plays in this app take over from here.
-                    </p>
-                  )}
-                  <TrackList
-                    tracks={visibleListenAgain}
-                    activeId={player.current?.videoId}
-                    onPlay={(i) => void player.playQueue(visibleListenAgain, i)}
-                    likedIds={likedIds}
-                    onToggleLike={(t) => void toggleLike(t)}
-                    onSuppress={(t) => void suppressTrack(t)}
-                    calmRows
-                  />
-                </>
-              ) : (
-                <ShelfNote>Play something — this shelf builds itself from your listens.</ShelfNote>
-              )}
-            </div>
+            listenAgain.isLoading ? (
+              <ShelfNote>Loading your listens…</ShelfNote>
+            ) : visibleListenAgain.length > 0 ? (
+              <>
+                {/* Rendered as DIRECT children of the shelf content (no wrapper
+                    div) so TrackList's <ul> is a true flex child of the
+                    min-h-0 shelf content and scrolls on overflow — the same
+                    shape as the playlists/liked/search shelves. A wrapper with
+                    flex-1 but no min-h-0 capped the list at its full content
+                    height and let it overflow the card (stuck, non-scrollable). */}
+                {/* The list is deliberately frozen while you're using it. This
+                    is the only in-session way to rebuild — and it only offers
+                    itself once your likes/skips would actually change the
+                    result, so it never nags. Sits at the top of the shelf so
+                    it's reachable without scrolling past the tracks. */}
+                {pendingSignals && (
+                  <button
+                    type="button"
+                    onClick={refreshShelf}
+                    disabled={listenAgain.isFetching}
+                    className="mb-1.5 flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={cn("size-3", listenAgain.isFetching && "animate-spin")}
+                    />
+                    {listenAgain.isFetching ? "Rebuilding…" : "Update with your new likes"}
+                  </button>
+                )}
+                {listenAgain.data?.seeded && (
+                  <p className="mb-1.5 text-[11px] text-muted-foreground/80">
+                    Seeded from your Liked Music — plays in this app take over from here.
+                  </p>
+                )}
+                <TrackList
+                  tracks={visibleListenAgain}
+                  activeId={player.current?.videoId}
+                  onPlay={(i) => void player.playQueue(visibleListenAgain, i)}
+                  likedIds={likedIds}
+                  onToggleLike={(t) => void toggleLike(t)}
+                  onSuppress={(t) => void suppressTrack(t)}
+                  calmRows
+                />
+              </>
+            ) : (
+              <ShelfNote>Play something — this shelf builds itself from your listens.</ShelfNote>
+            )
           ) : (
             connectHint
           ))}
