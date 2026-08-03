@@ -136,3 +136,14 @@ expose("duitsiniUpdater", () => ({
     ipcRenderer.send("duitsini:update-install");
   },
 }));
+
+/**
+ * `window.duitsiniClaudeRenewal` — one-click renewal of a dead Claude Pro
+ * dedicated sign-in (F4). Present only in the desktop shell; the dashboard gates
+ * the "Renew sign-in" button on its existence. No capability beyond spawning
+ * the same official-CLI browser flow a terminal could.
+ */
+expose("duitsiniClaudeRenewal", () => ({
+  renewSignin: (): Promise<{ ok: boolean; reason?: string; configDir?: string }> =>
+    ipcRenderer.invoke("duitsini:renew-claude-signin"),
+}));

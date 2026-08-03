@@ -117,6 +117,17 @@ export class Scheduler {
     await this.tick(true);
   }
 
+  /**
+   * Path of the dedicated Claude profile whose login is currently dead (renewal
+   * exhausted the streak), if any. Powers the one-click "Renew sign-in" action:
+   * the main process spawns the official CLI's full browser flow against this
+   * profile's config dir, and the next cycle picks up the new credentials via
+   * `externalReloginDetected`. Returns null when the login is healthy.
+   */
+  claudeProRenewalTarget(): string | null {
+    return this.renewal.terminalPath() ?? null;
+  }
+
   private async refreshLocal(): Promise<void> {
     await this.local.refresh();
     this.lastLocalAt = Date.now();
@@ -224,6 +235,22 @@ export class Scheduler {
       this.deps.onStatus({ kind: "estimate", at: Date.now(), reason });
       return asStream(est, "Claude Pro (estimate)", "cached", reason);
     };
+
+    // A dedicated profile whose login is dead (renewal exhausted the streak)
+    // must NOT keep spending usage-endpoint calls on a token that cannot be
+    // refreshed — that volume is the account-keyed 429 risk. Poll the cheap
+    // local credentials file so a fresh sign-in is detected promptly, but skip
+    // the network call entirely until then.
+    const deadPath = this.renewal.terminalPath();
+    if (deadPath && !(await this.renewal.externalReloginDetected(deadPath))) {
+      this.deps.onStatus({ kind: "error", reason: "Claude Pro sign-in needs renewing." });
+      return (
+        lastKnownStream(
+          "auth_stale",
+          "Automatic renewal can't restore this sign-in. Renew your Claude Pro sign-in to resume live tracking.",
+        ) ?? estimateStream("sign-in stale; showing local estimate")
+      );
+    }
 
     if (now < st.nextAt) {
       const mins = Math.max(1, Math.ceil((st.nextAt - now) / 60_000));

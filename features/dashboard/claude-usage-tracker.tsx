@@ -255,6 +255,46 @@ function LiveView({
   );
 }
 
+/**
+ * One-click renewal of a dead Claude Pro dedicated sign-in (desktop shell only).
+ * The capability is injected by the desktop's preload as `window.duitsiniClaudeRenewal`;
+ * absent in a browser, the button simply doesn't render. SSR-safe: `window` is
+ * touched only inside the effect.
+ */
+function ClaudeRenewButton() {
+  const [cap, setCap] = useState<{
+    renewSignin: () => Promise<{ ok: boolean; reason?: string }>;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    const w = window as unknown as {
+      duitsiniClaudeRenewal?: { renewSignin: () => Promise<{ ok: boolean; reason?: string }> };
+    };
+    if (w.duitsiniClaudeRenewal) setCap(w.duitsiniClaudeRenewal);
+  }, []);
+  if (!cap) return null;
+  return (
+    <button
+      type="button"
+      disabled={busy || opened}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const r = await cap.renewSignin();
+          if (r.ok) setOpened(true);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      title="Open the Claude sign-in flow to renew your dedicated Claude Pro profile. Tracking resumes automatically once sign-in completes."
+      className="cursor-pointer rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-medium text-warning transition hover:bg-warning/25 disabled:cursor-default disabled:opacity-70"
+    >
+      {busy ? "Opening…" : opened ? "Complete sign-in in browser" : "Renew sign-in"}
+    </button>
+  );
+}
+
 /** One usage stream rendered as a labeled group of ring gauges. */
 function StreamSection({ stream, now, divided }: { stream: UsageStream; now: number; divided: boolean }) {
   const gauges = streamGauges(stream);
@@ -280,6 +320,9 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
           >
             {state.label}
           </span>
+        ) : null}
+        {stream.source === "claude_pro" && stream.state === "auth_stale" ? (
+          <ClaudeRenewButton />
         ) : null}
       </div>
       {gauges.length === 0 ? (
