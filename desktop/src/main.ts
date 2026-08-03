@@ -804,12 +804,15 @@ async function renewClaudeSignin(): Promise<{
   reason?: string;
   configDir?: string;
 }> {
-  const target = scheduler?.claudeProRenewalTarget();
-  if (!target) return { ok: false, reason: "no-dead-login" };
+  const target = scheduler?.claudeProRenewalTarget() ?? null;
+  // Log every click so a silent no-op is diagnosable — the prior bug was a
+  // gated target that returned before this line, so clicks vanished.
+  usageTracker.event("claude_renew_signin", { target });
+  if (!target) return { ok: false, reason: "no-dedicated-profile" };
   const configDir = dirname(target);
   const env: NodeJS.ProcessEnv = { ...process.env };
-  // A dead login cannot be headless-refreshed — strip every credential env so
-  // the CLI falls back to its full browser authorization flow.
+  // A dead/empty login cannot be headless-refreshed — strip every credential
+  // env so the CLI falls back to its full browser authorization flow.
   delete env.CLAUDE_CODE_OAUTH_REFRESH_TOKEN;
   delete env.CLAUDE_CODE_OAUTH_TOKEN;
   delete env.CLAUDE_CODE_OAUTH_SCOPES;
@@ -817,13 +820,25 @@ async function renewClaudeSignin(): Promise<{
   delete env.ANTHROPIC_AUTH_TOKEN;
   delete env.ANTHROPIC_BASE_URL;
   env.CLAUDE_CONFIG_DIR = configDir;
-  usageTracker.event("claude_renew_signin", { configDir });
+
   try {
-    const child = spawn(
-      process.platform === "win32" ? "claude.cmd" : "claude",
-      ["auth", "login", "--claudeai"],
-      { env, detached: true, stdio: "ignore", shell: process.platform === "win32" },
-    );
+    // `claude auth login --claudeai` is INTERACTIVE: it opens a browser and
+    // waits for the OAuth callback. It must run in a VISIBLE console window
+    // (a detached stdio:"ignore" child has no TTY and silently does nothing).
+    // On Windows, `cmd /c start "title" cmd /k <cmd>` pops a new window that
+    // inherits this env and stays open so the user sees the URL / any error.
+    const child =
+      process.platform === "win32"
+        ? spawn(
+            "cmd.exe",
+            ["/c", "start", "DuitSini — Claude sign-in", "cmd.exe", "/k", "claude auth login --claudeai"],
+            { env, detached: true, shell: false, stdio: "ignore" },
+          )
+        : spawn("claude", ["auth", "login", "--claudeai"], {
+            env,
+            detached: true,
+            stdio: "ignore",
+          });
     child.on("error", (e) =>
       usageTracker.event("claude_renew_signin_error", { message: e.message }),
     );

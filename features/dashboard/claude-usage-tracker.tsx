@@ -267,6 +267,7 @@ function ClaudeRenewButton() {
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [opened, setOpened] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const w = window as unknown as {
       duitsiniClaudeRenewal?: { renewSignin: () => Promise<{ ok: boolean; reason?: string }> };
@@ -274,23 +275,35 @@ function ClaudeRenewButton() {
     if (w.duitsiniClaudeRenewal) setCap(w.duitsiniClaudeRenewal);
   }, []);
   if (!cap) return null;
+  const label = busy
+    ? "Opening sign-in…"
+    : opened
+      ? "Complete sign-in in the window"
+      : error
+        ? "Couldn't open — retry"
+        : "Renew sign-in";
   return (
     <button
       type="button"
       disabled={busy || opened}
       onClick={async () => {
         setBusy(true);
+        setError(null);
         try {
           const r = await cap.renewSignin();
           if (r.ok) setOpened(true);
+          else setError(r.reason ?? "failed");
+        } catch (e) {
+          setError((e as Error).message);
         } finally {
           setBusy(false);
         }
       }}
-      title="Open the Claude sign-in flow to renew your dedicated Claude Pro profile. Tracking resumes automatically once sign-in completes."
-      className="cursor-pointer rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-medium text-warning transition hover:bg-warning/25 disabled:cursor-default disabled:opacity-70"
+      title="Open the Claude sign-in flow to renew your dedicated Claude Pro profile. A window opens — complete sign-in in your browser; tracking resumes automatically once it finishes."
+      className="inline-flex items-center gap-1 rounded-md border border-warning/60 bg-background px-2 py-0.5 text-[10px] font-semibold text-warning shadow-sm transition hover:border-warning hover:bg-warning/10 active:scale-[0.98] disabled:cursor-default disabled:opacity-70"
     >
-      {busy ? "Opening…" : opened ? "Complete sign-in in browser" : "Renew sign-in"}
+      <RefreshCw className={cn("h-3 w-3", busy && "animate-spin")} />
+      {label}
     </button>
   );
 }

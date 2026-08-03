@@ -10,7 +10,9 @@ import {
   DEFAULT_PUSH_MS,
   LOCAL_ESTIMATE_MS,
   MIN_GAP_MS,
+  claudeCredCandidates,
   clampPushMs,
+  generalTailStart,
 } from "./config";
 import { AllRejectedError, NoCredentialsError, fetchProSnapshot } from "./collectors/claude-oauth";
 import { ClaudeCliRenewalManager } from "./collectors/claude-cli-renewal";
@@ -125,7 +127,17 @@ export class Scheduler {
    * `externalReloginDetected`. Returns null when the login is healthy.
    */
   claudeProRenewalTarget(): string | null {
-    return this.renewal.terminalPath() ?? null;
+    // Prefer a profile the scheduler already knows is dead. Otherwise target
+    // the first dedicated profile — the "Renew sign-in" button exists to
+    // re-sign-in the dedicated Claude Pro profile whether it is streak-dead,
+    // rejected, or simply EMPTY (no creds at all → NoCredentialsError →
+    // auth_stale, but the streak never accrues because there was no token to
+    // attempt). Without this fallback the button silently no-ops on the most
+    // common stale situation.
+    const dead = this.renewal.terminalPath();
+    if (dead) return dead;
+    const paths = claudeCredCandidates();
+    return paths.slice(0, generalTailStart(paths))[0] ?? null;
   }
 
   private async refreshLocal(): Promise<void> {
