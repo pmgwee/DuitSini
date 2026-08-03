@@ -388,7 +388,7 @@ export function MusicWidget() {
               be here — both Spotify and Apple Music put it in Now Playing (and
               on the lock screen) for exactly this reason. Without it, liking
               means hunting for the track in a list afterwards. */}
-          <div className="flex flex-1 items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <button
               type="button"
               disabled={!player.current}
@@ -405,7 +405,7 @@ export function MusicWidget() {
               }
               onClick={() => player.current && void toggleLike(player.current)}
               className={cn(
-                "grid size-9 place-items-center rounded-full transition-colors hover:bg-accent disabled:opacity-30",
+                "grid size-9 shrink-0 place-items-center rounded-full transition-colors hover:bg-accent disabled:opacity-30",
                 player.current && likedIds.has(player.current.videoId)
                   ? "text-primary"
                   : "text-muted-foreground hover:text-foreground",
@@ -431,7 +431,7 @@ export function MusicWidget() {
                 void suppressTrack(t);
                 player.next();
               }}
-              className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-30"
+              className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-30"
             >
               <X className="size-4" />
             </button>
@@ -441,7 +441,7 @@ export function MusicWidget() {
             aria-label="Previous"
             onClick={player.prev}
             disabled={!player.hasPrev}
-            className="grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            className="grid size-10 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
           >
             <ChevronLeft className="size-5" />
           </button>
@@ -450,7 +450,7 @@ export function MusicWidget() {
             aria-label={player.isPlaying ? "Pause" : "Play"}
             onClick={player.toggle}
             className={cn(
-              "grid size-12 place-items-center rounded-full bg-primary text-primary-foreground card-elevated transition-transform hover:brightness-110 active:scale-95",
+              "grid size-12 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground card-elevated transition-transform hover:brightness-110 active:scale-95",
               !player.current && "opacity-50",
             )}
           >
@@ -465,16 +465,16 @@ export function MusicWidget() {
             aria-label="Next"
             onClick={player.next}
             disabled={!player.hasNext}
-            className="grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            className="grid size-10 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
           >
             <ChevronRight className="size-5" />
           </button>
-          <div className="flex flex-1 items-center justify-end gap-1">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
             <button
               type="button"
               aria-label={player.muted ? "Unmute" : "Mute"}
               onClick={player.toggleMute}
-              className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <VolIcon className="size-4" />
             </button>
@@ -486,7 +486,7 @@ export function MusicWidget() {
               aria-label="Volume"
               value={player.muted ? 0 : player.volume}
               onChange={(e) => player.setVolume(Number(e.target.value))}
-              className="vol-slider h-1 w-20 cursor-pointer accent-primary sm:w-24"
+              className="vol-slider h-1 w-20 min-w-0 cursor-pointer accent-primary sm:w-24"
             />
           </div>
         </div>
@@ -537,6 +537,7 @@ export function MusicWidget() {
                     likedIds={likedIds}
                     onToggleLike={(t) => void toggleLike(t)}
                     onSuppress={(t) => void suppressTrack(t)}
+                    likeLikedOnly
                   />
                   {/* The list is deliberately frozen while you're using it. This
                       is the only in-session way to rebuild — and it only offers
@@ -753,6 +754,7 @@ function TrackList({
   likedIds,
   onToggleLike,
   onSuppress,
+  likeLikedOnly,
 }: {
   tracks: MusicTrack[];
   activeId?: string;
@@ -762,6 +764,15 @@ function TrackList({
   onToggleLike?: (track: MusicTrack) => void;
   /** Omitted on shelves where "not interested" is meaningless (e.g. Liked). */
   onSuppress?: (track: MusicTrack) => void;
+  /**
+   * Recommendation-shelf calmness: render the heart ONLY on rows the listener
+   * has already liked. An unset heart on every row is the single most-reported
+   * flaw in Spotify's own lists (accidental un-likes mid-scroll), and touch
+   * devices have no hover to keep it hidden — so on Listen again the heart is
+   * not rendered at all until a like exists. Liking a new track happens from
+   * Now Playing; the heart here is the "you liked this" marker + its undo path.
+   */
+  likeLikedOnly?: boolean;
 }) {
   return (
     // Shared by every shelf so the cap is identical across all of them. Rows
@@ -812,7 +823,7 @@ function TrackList({
             {/* One button, one job — this ONLY likes. Spotify's equivalent also
                 opens a playlist picker depending on state, which is their
                 most-complained-about interaction. */}
-            {onToggleLike && (
+            {onToggleLike && (!likeLikedOnly || liked) && (
               <button
                 type="button"
                 onClick={() => onToggleLike(t)}
