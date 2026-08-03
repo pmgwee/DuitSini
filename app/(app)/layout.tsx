@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
+import { ToastProvider } from "@/components/layout/toast-provider";
 import { MusicPlayerProvider } from "@/features/dashboard/music/player-context";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
@@ -20,7 +21,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // outlives navigation between app pages.
   return (
     <MusicPlayerProvider>
-      <AppShell user={{ email: user.email ?? null, fullName }}>{children}</AppShell>
+      <ToastProvider>
+        <AppShell user={{ email: user.email ?? null, fullName }}>{children}</AppShell>
+      </ToastProvider>
     </MusicPlayerProvider>
   );
 }
