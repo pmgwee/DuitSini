@@ -13,13 +13,13 @@ import {
   Play,
   RefreshCw,
   Search,
-  Undo2,
   Volume1,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/layout/toast-provider";
 import type { MusicPlaylist, MusicTrack } from "@/types/music";
 import { useMusicPlayer } from "./player-context";
 
@@ -42,23 +42,6 @@ interface ListenAgainResponse {
 }
 interface LikesResponse {
   tracks: MusicTrack[];
-}
-
-/**
- * A transient confirmation with an escape hatch.
- *
- * Every like, unlike and suppression raises one. This is the fix for the single
- * most-reported flaw in Spotify's own liked list: a heart rendered on every row
- * means people un-like tracks by accident while scrolling, and with no undo the
- * track is effectively gone. Making the action reversible costs one state
- * variable and removes the entire class of complaint.
- */
-interface ToastState {
-  message: string;
-  /** Primary escape hatch — always present. */
-  undo: () => void;
-  /** Optional softer alternative (e.g. "Snooze instead" after a hard block). */
-  alt?: { label: string; run: () => void };
 }
 
 async function getJSON<T>(url: string, fallback: T): Promise<T> {
@@ -88,18 +71,10 @@ export function MusicWidget() {
   const [searchResults, setSearchResults] = useState<MusicTrack[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchConfigured, setSearchConfigured] = useState<boolean | null>(null);
-  const [toast, setToast] = useState<ToastState | null>(null);
 
   const player = useMusicPlayer();
   const queryClient = useQueryClient();
-
-  // Auto-dismiss. 6s is long enough to read and reach the undo, short enough
-  // that it never feels like it's in the way.
-  useEffect(() => {
-    if (!toast) return;
-    const id = window.setTimeout(() => setToast(null), 6000);
-    return () => window.clearTimeout(id);
-  }, [toast]);
+  const { showToast } = useToast();
 
   // Register the inline slot so the fixed video portal glues itself over it.
   // The layout effect's cleanup runs before the slot detaches on unmount, so
@@ -224,19 +199,19 @@ export function MusicWidget() {
       const wasLiked = likedIds.has(track.videoId);
       if (wasLiked) {
         await unlikeTrack(track.videoId);
-        setToast({
+        showToast({
           message: `Removed “${track.title}” from Liked`,
           undo: () => void likeTrack(track),
         });
       } else {
         await likeTrack(track);
-        setToast({
+        showToast({
           message: `Added “${track.title}” to Liked`,
           undo: () => void unlikeTrack(track.videoId),
         });
       }
     },
-    [likedIds, likeTrack, unlikeTrack],
+    [likedIds, likeTrack, unlikeTrack, showToast],
   );
 
   /** Push a track away. Hard block by default, with snooze offered as the softer option. */
@@ -254,7 +229,7 @@ export function MusicWidget() {
       // Hide just this row, immediately. The rest of the list is untouched.
       setHiddenIds((prev) => new Set(prev).add(track.videoId));
       await send("not_interested");
-      setToast({
+      showToast({
         message: `Won’t suggest “${track.title}” again`,
         undo: () => {
           setHiddenIds((prev) => {
@@ -273,7 +248,7 @@ export function MusicWidget() {
         alt: { label: "Snooze 30d instead", run: () => void send("snooze") },
       });
     },
-    [invalidateTaste],
+    [invalidateTaste, showToast],
   );
 
   const playlistId = shelf === "liked" ? "LM" : openPlaylist?.id ?? null;
@@ -591,7 +566,7 @@ export function MusicWidget() {
           ) : library.isLoading ? (
             <ShelfNote>Loading playlists…</ShelfNote>
           ) : (
-            <ul className="flex max-h-83 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+            <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
               {library.data?.playlists.map((p) => (
                 <li key={p.id}>
                   <button
@@ -704,39 +679,6 @@ export function MusicWidget() {
         )}
       </div>
 
-      {toast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex items-center gap-2 rounded-xl border border-border/60 bg-surface-2 px-3 py-2 text-xs shadow-lg"
-        >
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">{toast.message}</span>
-          {toast.alt && (
-            <button
-              type="button"
-              onClick={() => {
-                toast.alt!.run();
-                setToast(null);
-              }}
-              className="shrink-0 rounded-lg px-2 py-1 font-medium text-muted-foreground hover:bg-accent"
-            >
-              {toast.alt.label}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              toast.undo();
-              setToast(null);
-            }}
-            className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-primary hover:bg-accent"
-          >
-            <Undo2 className="size-3.5" />
-            Undo
-          </button>
-        </div>
-      )}
-
       <p className="text-center text-[11px] text-muted-foreground/70">
         Powered by YouTube · official Data &amp; IFrame APIs · keeps playing across pages
       </p>
@@ -781,12 +723,12 @@ function TrackList({
   calmRows?: boolean;
 }) {
   return (
-    // Shared by every shelf so the cap is identical across all of them. Rows
-    // are compact (py-1 + 40px thumb ≈ 48px) so 6 rows + gaps (~308px) sit
-    // comfortably under the max-h-83 cap with buffer — the 6th row is never
-    // clipped, even in the Playlists shelf where the back-button trims the
-    // list's available height. Anything beyond 6 scrolls into view.
-    <ul className="flex max-h-83 min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+    // The list grows to fill the card's height (flex-1) and scrolls once rows
+    // exceed it, so the shelf reaches the footer with no dead gap on tall cards
+    // (iPad / a non-fullscreen desktop window) while short cards simply show
+    // fewer rows. min-h-0 lets it shrink within the flex column; rows stay
+    // compact (py-1 + 40px thumb ≈ 48px).
+    <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
       {tracks.map((t, i) => {
         const liked = likedIds?.has(t.videoId) ?? false;
         return (
@@ -855,7 +797,7 @@ function TrackList({
               </button>
             )}
 
-            {onSuppress && (
+            {onSuppress && !(calmRows && liked) && (
               <button
                 type="button"
                 onClick={() => onSuppress(t)}
