@@ -34,8 +34,9 @@ export interface ToastAction {
 }
 export interface ToastInput {
   message: string;
-  /** Primary escape hatch — always present. */
-  undo: () => void;
+  /** Primary escape hatch. Optional — absent for purely informational toasts
+   *  (e.g. "sign-in renewed"), which render message-only. */
+  undo?: () => void;
   /** Optional softer alternative (e.g. "Snooze instead" after a hard block). */
   alt?: ToastAction;
 }
@@ -102,17 +103,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 {toast.alt.label}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                toast.undo();
-                setToast(null);
-              }}
-              className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-primary hover:bg-accent"
-            >
-              <Undo2 className="size-3.5" />
-              Undo
-            </button>
+            {toast.undo && (
+              <button
+                type="button"
+                onClick={() => {
+                  toast.undo?.();
+                  setToast(null);
+                }}
+                className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-semibold text-primary hover:bg-accent"
+              >
+                <Undo2 className="size-3.5" />
+                Undo
+              </button>
+            )}
           </div>
         )}
       </div>
