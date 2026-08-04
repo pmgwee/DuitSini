@@ -8,6 +8,8 @@ import {
 } from "./sources";
 import { assemble, pickSeeds, score, type ScoreContext } from "./ranking";
 import { sequence } from "./similarity";
+import { ensureTagVectors } from "./tags";
+import { createDbTagStore } from "./tags-store";
 import type {
   Candidate,
   CandidateOrigin,
@@ -240,7 +242,15 @@ export async function buildShelf(
   const slate = assemble(scored, { limit, opener, random });
 
   // --- Stage 3: sequence for smooth transitions ------------------------------
-  return sequence(slate, 0, { transitionBias }).map((candidate) => candidate.track);
+  // Tag the final SLATE (not the whole pool) so cold tracks — pairs that share
+  // no co-occurrence source — can still be placed beside taste-neighbours via
+  // the LLM tag prior. Cached per track, so only the first build pays the GLM
+  // cost; a missing/failed tag just falls back to pure co-occurrence.
+  const tagVectors = await ensureTagVectors(
+    slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
+    createDbTagStore(),
+  );
+  return sequence(slate, 0, { transitionBias, tagVectors }).map((candidate) => candidate.track);
 }
 
 export interface RadioOptions {
@@ -306,7 +316,11 @@ export async function buildRadio(
   // Lower epsilon than the shelf: autoplay should feel like a continuation of
   // what's playing, not a jump somewhere new.
   const slate = assemble(scored, { limit, epsilon: 0.05, maxPerArtist: 2 });
-  const ordered = sequence(slate, 0, { transitionBias });
+  const tagVectors = await ensureTagVectors(
+    slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
+    createDbTagStore(),
+  );
+  const ordered = sequence(slate, 0, { transitionBias, tagVectors });
 
   return {
     tracks: ordered.map((candidate) => candidate.track),

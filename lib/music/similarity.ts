@@ -89,6 +89,21 @@ export function cosine(a: Map<string, number>, b: Map<string, number>): number {
   return denominator === 0 ? 0 : dot / denominator;
 }
 
+/** Number of sources two co-occurrence vectors share — the "evidence" count. */
+function sharedSources(a: Map<string, number>, b: Map<string, number>): number {
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  let n = 0;
+  for (const key of small.keys()) if (large.has(key)) n++;
+  return n;
+}
+
+/**
+ * Sparse tag vector (genre/mood/era from `tags.ts`). Not imported from there
+ * because this file stays pure (no `server-only`); the two types are
+ * structurally identical (`Map<string, number>`) and interchangeable.
+ */
+export type TagVector = Map<string, number>;
+
 /** Primary artist, lowercased — the unit we cap for diversity. */
 function primaryArtist(channel: string): string {
   return channel.split(",")[0]!.trim().toLowerCase();
@@ -108,6 +123,16 @@ export interface SequenceOptions {
    * Spotify learned its local-sequential model, from logged behaviour.
    */
   transitionBias?: Map<string, number>;
+  /**
+   * LLM tag vectors (genre/mood/era) per videoId — the cold-start prior. When
+   * two tracks share NO co-occurrence source, their tag cosine fills in so the
+   * sequencer can still place them next to taste-neighbours. The instant any
+   * co-occurrence overlap exists the behavioural signal takes over (it is the
+   * asset, never decayed). Omit to run pure co-occurrence (the original path).
+   */
+  tagVectors?: Map<string, TagVector>;
+  /** Scale applied to the tag term (default 1). Lower ⇒ trust the prior less. */
+  priorScale?: number;
 }
 
 /**
@@ -128,9 +153,27 @@ export function sequence(
 ): Candidate[] {
   if (candidates.length <= 2) return [...candidates];
 
-  const { sameArtistPenalty = 0.35, transitionBias } = options;
-  const vectors = candidates.map(vectorOf);
+  const { sameArtistPenalty = 0.35, transitionBias, tagVectors, priorScale = 1 } = options;
+  const coVectors = candidates.map(vectorOf);
   const artists = candidates.map((c) => primaryArtist(c.track.channel));
+
+  // Behavioural (co-occurrence) similarity blended with the LLM tag prior. The
+  // prior fills in ONLY where co-occurrence is silent (two tracks sharing no
+  // source) and fades the instant any overlap exists — the learned graph is the
+  // asset and must stay ascendant (see the no-decay note atop this file).
+  const tagOf = (i: number): TagVector | undefined =>
+    tagVectors?.get(candidates[i]!.track.videoId);
+  const pairSimilarity = (i: number, j: number): number => {
+    const co = cosine(coVectors[i]!, coVectors[j]!);
+    const ta = tagOf(i);
+    const tb = tagOf(j);
+    if (!ta || ta.size === 0 || !tb || tb.size === 0) return co; // no prior available
+    const tsim = cosine(ta, tb);
+    if (tsim === 0) return co;
+    const evidence = sharedSources(coVectors[i]!, coVectors[j]!);
+    const wPrior = evidence === 0 ? 1 : 1 / (1 + evidence);
+    return (1 - wPrior) * co + wPrior * tsim * priorScale;
+  };
 
   const remaining = new Set(candidates.map((_, i) => i));
   const start = openerIndex >= 0 && openerIndex < candidates.length ? openerIndex : 0;
@@ -143,7 +186,7 @@ export function sequence(
     let bestScore = -Infinity;
 
     for (const candidateIndex of remaining) {
-      let score = cosine(vectors[currentIndex]!, vectors[candidateIndex]!);
+      let score = pairSimilarity(currentIndex, candidateIndex);
       if (artists[currentIndex] && artists[currentIndex] === artists[candidateIndex]) {
         score -= sameArtistPenalty;
       }
