@@ -14,6 +14,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Sparkles,
   Volume1,
   Volume2,
   VolumeX,
@@ -24,13 +25,14 @@ import { useToast } from "@/components/layout/toast-provider";
 import type { MusicPlaylist, MusicTrack } from "@/types/music";
 import { useMusicPlayer } from "./player-context";
 
-type Shelf = "listen" | "playlists" | "liked" | "search";
+type Shelf = "listen" | "playlists" | "liked" | "search" | "vibe";
 
 const SHELVES: Array<{ id: Shelf; label: string; icon: typeof History }> = [
   { id: "listen", label: "Listen again", icon: History },
   { id: "playlists", label: "Playlists", icon: ListMusic },
   { id: "liked", label: "Liked", icon: Heart },
   { id: "search", label: "Search", icon: Search },
+  { id: "vibe", label: "Vibe", icon: Sparkles },
 ];
 
 interface LibraryResponse {
@@ -72,6 +74,13 @@ export function MusicWidget() {
   const [searchResults, setSearchResults] = useState<MusicTrack[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchConfigured, setSearchConfigured] = useState<boolean | null>(null);
+  // Vibe surface: a free-text prompt → the LLM picks a seed, the existing
+  // behavioural radio fulfils it (see app/api/yt/vibe). The LLM never picks
+  // songs here; it only captures intent.
+  const [vibePrompt, setVibePrompt] = useState("");
+  const [vibeResults, setVibeResults] = useState<MusicTrack[]>([]);
+  const [vibing, setVibing] = useState(false);
+  const [vibeConfigured, setVibeConfigured] = useState<boolean | null>(null);
 
   const player = useMusicPlayer();
   const queryClient = useQueryClient();
@@ -285,6 +294,28 @@ export function MusicWidget() {
       setSearchResults([]);
     } finally {
       setSearching(false);
+    }
+  };
+
+  const runVibe = async () => {
+    const p = vibePrompt.trim();
+    if (!p) return;
+    setVibing(true);
+    try {
+      const r = await fetch(`/api/yt/vibe?prompt=${encodeURIComponent(p)}`);
+      if (r.status === 503) {
+        // GLM not configured on the server — surface the same as search's 503.
+        setVibeConfigured(false);
+        setVibeResults([]);
+      } else {
+        const json = (await r.json()) as { tracks?: MusicTrack[]; configured?: boolean };
+        setVibeConfigured(json.configured !== false);
+        setVibeResults(json.tracks ?? []);
+      }
+    } catch {
+      setVibeResults([]);
+    } finally {
+      setVibing(false);
     }
   };
 
@@ -690,6 +721,66 @@ export function MusicWidget() {
                 onToggleLike={(t) => void toggleLike(t)}
               />
             )}
+          </div>
+        )}
+
+        {shelf === "vibe" && (
+          <div className="flex flex-col gap-2">
+            {vibeConfigured === false && (
+              <div className="rounded-xl border border-warning/30 bg-warning/6 px-3 py-2 text-xs text-warning">
+                Set <code className="font-mono">ZAI_API_KEY</code> (server env) to enable Vibe.
+              </div>
+            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Sparkles className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-primary" />
+                <input
+                  aria-label="Describe a vibe"
+                  value={vibePrompt}
+                  onChange={(e) => setVibePrompt(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && runVibe()}
+                  placeholder="Describe a vibe — e.g. rainy-day indie folk, no EDM"
+                  className="h-10 w-full rounded-xl border border-border/60 bg-input/50 pl-9 pr-3 text-sm outline-none focus:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/40"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={runVibe}
+                disabled={vibing}
+                className="rounded-xl border border-border/60 bg-surface-2 px-3 text-sm font-medium hover:bg-accent disabled:opacity-50"
+              >
+                {vibing ? "…" : "Generate"}
+              </button>
+            </div>
+            {/* Vibe recs are strongest for genre/mood/artist/decade prompts (per the
+                field-test literature), so seed the box with that shape. */}
+            {vibeResults.length === 0 && !vibing && vibeConfigured !== false && (
+              <div className="flex flex-wrap gap-1.5">
+                {["Focus indie folk", "Upbeat 2000s rock", "Chill late-night jazz", "Energetic pop for a drive"].map(
+                  (s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setVibePrompt(s)}
+                      className="rounded-full border border-border/60 bg-surface-2 px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      {s}
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
+            {vibing ? (
+              <ShelfLoading />
+            ) : vibeResults.length > 0 ? (
+              <TrackList
+                tracks={vibeResults}
+                activeId={player.current?.videoId}
+                onPlay={(i) => void player.playQueue(vibeResults, i)}
+                likedIds={likedIds}
+                onToggleLike={(t) => void toggleLike(t)}
+              />
+            ) : null}
           </div>
         )}
       </div>
