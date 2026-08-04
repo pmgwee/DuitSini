@@ -162,6 +162,14 @@ function notifyRenewalResult(success: boolean): void {
   const body = success
     ? "Claude Pro sign-in renewed — usage tracking has resumed."
     : "Claude sign-in didn't complete. Click 'Renew sign-in' again.";
+  // Surface to the in-app toast (the web app's toast provider) via the
+  // renderer, so the user sees the result in the dashboard even when the OS
+  // notification is suppressed by Windows / focus-assist.
+  try {
+    win?.webContents.send("duitsini:claude-renew-result", { ok: success });
+  } catch {
+    /* window may be closed */
+  }
   try {
     if (Notification.isSupported()) {
       const n = new Notification({ title: "DuitSini", body });

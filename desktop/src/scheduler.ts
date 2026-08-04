@@ -122,7 +122,9 @@ export class Scheduler {
     this.timer = null;
   }
 
-  /** Manual refresh from the UI. Still respects MIN_GAP_MS and any cooldown. */
+  /** Manual refresh from the UI (Renew button / "Refresh now"). Bypasses the
+   *  provider cooldown (the user explicitly asked) but still respects the
+   *  MIN_GAP_MS floor and the broker's own 429 gates. */
   async pullNow(): Promise<void> {
     await this.tick(true);
   }
@@ -173,7 +175,7 @@ export class Scheduler {
       );
 
       const streams: UsageStream[] = [];
-      const claude = await this.collectClaude(claudeIsOfficial);
+      const claude = await this.collectClaude(claudeIsOfficial, manual);
       if (claude) streams.push(claude);
       const glm = await this.collectGlm(provider);
       if (glm) streams.push(glm);
@@ -209,7 +211,7 @@ export class Scheduler {
    * a 429 cooldown is in force, which is exactly when the offline path earns its
    * keep.
    */
-  private async collectClaude(claudeIsOfficial: boolean): Promise<UsageStream | null> {
+  private async collectClaude(claudeIsOfficial: boolean, manual = false): Promise<UsageStream | null> {
     const st = this.deps.store.source("pro");
     const now = Date.now();
 
@@ -262,17 +264,32 @@ export class Scheduler {
     // local credentials file so a fresh sign-in is detected promptly, but skip
     // the network call entirely until then.
     const deadPath = this.renewal?.terminalPath();
-    if (deadPath && !(await this.renewal?.externalReloginDetected(deadPath))) {
-      this.deps.onStatus({ kind: "error", reason: "Claude Pro sign-in needs renewing." });
-      return (
-        lastKnownStream(
-          "auth_stale",
-          "Automatic renewal can't restore this sign-in. Renew your Claude Pro sign-in to resume live tracking.",
-        ) ?? estimateStream("sign-in stale; showing local estimate")
-      );
+    if (deadPath) {
+      const recovered = await this.renewal?.externalReloginDetected(deadPath);
+      if (recovered) {
+        // A fresh sign-in landed. Clear the dead-token cooldown so the very
+        // next tick fetches instead of sitting in the AllRejected 10-min hold
+        // left over from the previous (dead) token — otherwise a recovery
+        // detected right after an AllRejected looks "still stale" for 10 min.
+        st.nextAt = 0;
+        st.streak = 0;
+        st.message = undefined;
+      } else {
+        this.deps.onStatus({ kind: "error", reason: "Claude Pro sign-in needs renewing." });
+        return (
+          lastKnownStream(
+            "auth_stale",
+            "Automatic renewal can't restore this sign-in. Renew your Claude Pro sign-in to resume live tracking.",
+          ) ?? estimateStream("sign-in stale; showing local estimate")
+        );
+      }
     }
 
-    if (now < st.nextAt) {
+    // A manual refresh (Renew button / "Refresh now") bypasses the provider
+    // cooldown — the user explicitly asked, and the cooldown was armed against
+    // the (now possibly replaced) prior token. The underlying 429 gates inside
+    // the broker still apply.
+    if (!manual && now < st.nextAt) {
       const mins = Math.max(1, Math.ceil((st.nextAt - now) / 60_000));
       this.deps.log(`[Claude] cooling down ${mins}m (${st.message || "rate limit"})`);
       return (

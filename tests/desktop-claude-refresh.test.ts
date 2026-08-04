@@ -136,6 +136,35 @@ describe("RefreshManager (F5 direct-POST broker)", () => {
     expect(state.blockedUntil).toBeGreaterThan(NOW);
   });
 
+  it("sustained 429s past the threshold go terminal (stop hammering so the flag clears)", async () => {
+    let clock = NOW;
+    const expired = credentials("access-old", NOW - 1);
+    const fetcher = vi.fn(async () => response(429, {}, { "retry-after": "60" }));
+    const { value } = manager({
+      now: () => clock,
+      fetcher,
+      files: new Map([[PATH, JSON.stringify(expired)]]),
+    });
+
+    // Four consecutive 429s, advancing the clock past each ladder hold
+    // (15m → 30m → 60m → 120m, with margin for the jitter). A transient 429
+    // stays non-terminal; only a sustained one escalates to "stop hammering".
+    await value.renewIfNeeded(expired, PATH); // streak 1
+    expect(value.terminalPath()).toBeUndefined();
+    clock = NOW + 25 * 60_000;
+    await value.renewIfNeeded(expired, PATH); // streak 2
+    expect(value.terminalPath()).toBeUndefined();
+    clock = NOW + 65 * 60_000;
+    await value.renewIfNeeded(expired, PATH); // streak 3
+    expect(value.terminalPath()).toBeUndefined();
+    clock = NOW + 140 * 60_000;
+    await value.renewIfNeeded(expired, PATH); // streak 4 → terminal
+    expect(value.terminalPath()).toBe(PATH);
+
+    // It stays terminal until a fresh sign-in lands on disk.
+    await expect(value.externalReloginDetected(PATH)).resolves.toBe(false);
+  });
+
   it("force (a real 401) spends a refresh before real expiry, but the success floor still applies", async () => {
     // Token still has ~1h of life — well outside the 5-min on-demand window.
     const current = credentials("access-old", NOW + 60 * 60_000);
