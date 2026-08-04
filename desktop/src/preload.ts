@@ -146,4 +146,10 @@ expose("duitsiniUpdater", () => ({
 expose("duitsiniClaudeRenewal", () => ({
   renewSignin: (): Promise<{ ok: boolean; reason?: string; configDir?: string }> =>
     ipcRenderer.invoke("duitsini:renew-claude-signin"),
+  /** Subscribe to the renew flow's outcome (drives the in-app toast). */
+  onResult: (cb: (result: { ok: boolean }) => void): (() => void) => {
+    const listener = (_event: unknown, result: { ok: boolean }) => cb(result);
+    ipcRenderer.on("duitsini:claude-renew-result", listener);
+    return () => ipcRenderer.removeListener("duitsini:claude-renew-result", listener);
+  },
 }));

@@ -8,6 +8,7 @@ import {
   Heart,
   History,
   ListMusic,
+  Loader2,
   Music4,
   Pause,
   Play,
@@ -134,6 +135,14 @@ export function MusicWidget() {
   );
   /** True once a signal has landed that the next rebuild will act on. */
   const [pendingSignals, setPendingSignals] = useState(false);
+  /**
+   * A user-initiated rebuild is in flight. `staleTime: Infinity` + no
+   * background refetch means `isFetching` only ever flips true here via the
+   * "Update with your new likes" button — so this is exactly the window we
+   * want covered by a spinner (the old list is stale data react-query keeps
+   * painting otherwise). `!isLoading` keeps it off the first paint.
+   */
+  const refreshing = listenAgain.isFetching && !listenAgain.isLoading;
 
   // Local likes — the taste signal we own. Distinct from the imported YouTube
   // "Liked Music" list below, which is read-only and only a cold-start prior.
@@ -497,6 +506,8 @@ export function MusicWidget() {
           (connected ? (
             listenAgain.isLoading ? (
               <ShelfNote>Loading your listens…</ShelfNote>
+            ) : refreshing ? (
+              <ShelfLoading />
             ) : visibleListenAgain.length > 0 ? (
               <>
                 {/* Rendered as DIRECT children of the shelf content (no wrapper
@@ -692,6 +703,16 @@ export function MusicWidget() {
 
 function ShelfNote({ children }: { children: React.ReactNode }) {
   return <p className="px-1 py-4 text-center text-xs text-muted-foreground">{children}</p>;
+}
+
+/** Centered spinner shown while a user-initiated rebuild of the shelf is running. */
+function ShelfLoading() {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-muted-foreground">
+      <Loader2 className="size-5 animate-spin text-primary" />
+      <span className="text-xs">Loading your shelf…</span>
+    </div>
+  );
 }
 
 function TrackList({

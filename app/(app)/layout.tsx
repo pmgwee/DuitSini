@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/layout/app-shell";
 import { ToastProvider } from "@/components/layout/toast-provider";
+import { DesktopRenewalToast } from "@/components/layout/desktop-renewal-toast";
 import { MusicPlayerProvider } from "@/features/dashboard/music/player-context";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
@@ -23,6 +24,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <MusicPlayerProvider>
       <ToastProvider>
         <AppShell user={{ email: user.email ?? null, fullName }}>{children}</AppShell>
+        <DesktopRenewalToast />
       </ToastProvider>
     </MusicPlayerProvider>
   );

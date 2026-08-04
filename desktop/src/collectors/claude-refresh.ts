@@ -54,6 +54,14 @@ const EXPIRY_BUFFER_MS = 300_000;
 const REFRESH_MIN_MS = 45_000;
 /** Floor after a SUCCESSFUL refresh. Caps a fresh-token-still-401s loop. */
 const REFRESH_MIN_OK_GAP_MS = 900_000;
+/**
+ * After this many consecutive refresh-429s, treat the login as terminal. A
+ * flagged endpoint only clears with hours of SILENCE (project journal), but the
+ * 429 ladder caps at 2h — so retrying forever keeps the flag warm and never
+ * recovers. Past the threshold, stop spending refresh POSTs (give the account
+ * silence) and surface for one-click re-login; a fresh sign-in clears it.
+ */
+const SUSTAINED_429_TERMINAL_STREAK = 4;
 
 export interface RefreshState {
   blockedUntil?: number;
@@ -243,11 +251,23 @@ export class RefreshManager implements RenewalBroker {
       st.streak = streak;
       st.blockedUntil =
         this.now() + refresh429Hold(streak, e.retryMs, Math.floor(Math.random() * 180_000));
-      this.log(
-        `[Claude] refresh rate-limited; holding ${Math.round(
-          (st.blockedUntil - this.now()) / 60_000,
-        )}m (ladder ${streak}/${REFRESH_COOLDOWNS_MS.length})`,
-      );
+      if (streak >= SUSTAINED_429_TERMINAL_STREAK) {
+        // Sustained 429 (no recovery between attempts) = the account is
+        // refresh-flagged. The 2h-capped ladder would just keep the flag warm,
+        // so go terminal: stop spending refresh POSTs and let the account sit
+        // silent (the only thing that clears a refresh flag, per the journal)
+        // until a fresh sign-in lands (F4) — externalReloginDetected clears it.
+        st.requiresRelogin = true;
+        this.log(
+          "[Claude] refresh rate-limited too many times — pausing renewal so the account can recover; use Renew sign-in.",
+        );
+      } else {
+        this.log(
+          `[Claude] refresh rate-limited; holding ${Math.round(
+            (st.blockedUntil - this.now()) / 60_000,
+          )}m (ladder ${streak}/${REFRESH_COOLDOWNS_MS.length})`,
+        );
+      }
     } else if (e.code === "reauth") {
       st.blockedUntil = this.now() + reauthHold();
       // F3: a dead refresh token only clears via a fresh login. Mark it dead so
