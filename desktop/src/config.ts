@@ -46,26 +46,34 @@ export const CC_SWITCH_JSON = join(CC_SWITCH_DIR, "config.json");
  * How a dedicated Claude profile (~/.claude-pro) is kept alive. A switch, not a
  * layer — only one mode is ever active on a given credentials file.
  *
- *   direct-post (default) — a single direct `grant_type=refresh_token` POST,
- *                           the v7 discipline. A serialized single-poster
- *                           refresh avoids the rotation/concurrency breakage
- *                           that plagues `auth login` (#25609/#24317).
- *   cli-renew             — delegate to `claude auth login --claudeai` (the
- *                           Aug 1 path; F1–F4 harden it). The revert valve: set
- *                           DUITSINI_RENEWAL_MODE=cli-renew if direct-post ever
- *                           misbehaves for a given install.
+ *   cli-renew (default)   — delegate to `claude auth login --claudeai` (the
+ *                           Aug 1 path; F1–F4 harden it). On a chronically
+ *                           refresh-flagged account this is the only primitive
+ *                           that has rotated the token at all in the field
+ *                           (usage-log/5-8-2026: 2 cli_renew_ok vs 0 refresh_ok,
+ *                           20x refresh_429). Reverted to default in v1.4.9 after
+ *                           direct-post (v1.4.7) proved strictly worse here.
+ *   direct-post           — a single direct `grant_type=refresh_token` POST,
+ *                           the v7 discipline. A serialized single-poster that
+ *                           avoids the rotation/concurrency breakage plaguing
+ *                           `auth login` (#25609/#24317) -- but on this account
+ *                           every POST returns refresh_429. Opt in only with
+ *                           DUITSINI_RENEWAL_MODE=direct-post (e.g. on a clean,
+ *                           unflagged account to retry the F5 uptime trial).
  *   off                   — pure read-only (cc-switch behaviour). No refresh
  *                           attempts at all; F4 one-click re-login is the only
  *                           recovery.
  *
  * F3 (dead-login stop) + F4 (one-click recovery) are the floor under every mode.
+ * On a flagged account NO mode achieves >~8h uptime -- only a long silence plus
+ * a browser /login clears the flag; F4 is the real ceiling.
  */
 export type RenewalMode = "cli-renew" | "direct-post" | "off";
 
 export function renewalMode(): RenewalMode {
-  const m = (process.env.DUITSINI_RENEWAL_MODE ?? "direct-post").trim();
-  if (m === "cli-renew" || m === "off") return m;
-  return "direct-post";
+  const m = (process.env.DUITSINI_RENEWAL_MODE ?? "cli-renew").trim();
+  if (m === "direct-post" || m === "off") return m;
+  return "cli-renew";
 }
 
 /** Claude Code session transcripts — the zero-network estimate's input. */
