@@ -684,14 +684,17 @@ export function MusicWidget() {
           ))}
 
         {shelf === "search" && (
-          <div className="flex flex-col gap-2">
+          <>
+            {/* Direct children of the min-h-0 shelf content so TrackList's <ul>
+                scrolls on overflow — same shape as listen-again / vibe / liked /
+                playlists (commit 0c74d29). */}
             {searchConfigured === false && (
-              <div className="rounded-xl border border-warning/30 bg-warning/6 px-3 py-2 text-xs text-warning">
+              <div className="mb-2 rounded-xl border border-warning/30 bg-warning/6 px-3 py-2 text-xs text-warning">
                 Set <code className="font-mono">YOUTUBE_API_KEY</code> (server env) to enable
                 search.
               </div>
             )}
-            <div className="flex gap-2">
+            <div className="mb-2 flex gap-2">
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -721,17 +724,24 @@ export function MusicWidget() {
                 onToggleLike={(t) => void toggleLike(t)}
               />
             )}
-          </div>
+          </>
         )}
 
         {shelf === "vibe" && (
-          <div className="flex flex-col gap-2">
+          <>
+            {/* Rendered as DIRECT children of the min-h-0 shelf content (no
+                wrapper div) so TrackList's <ul> is a true flex child of the
+                shelf and scrolls on overflow — same shape as listen-again /
+                liked / playlists. A flex-col wrapper with no min-h-0 capped the
+                list at its full content height and let it overflow the card
+                (stuck, non-scrollable) — the same bug the Listen Again shelf
+                used to have (commit 0c74d29). */}
             {vibeConfigured === false && (
-              <div className="rounded-xl border border-warning/30 bg-warning/6 px-3 py-2 text-xs text-warning">
+              <div className="mb-2 rounded-xl border border-warning/30 bg-warning/6 px-3 py-2 text-xs text-warning">
                 Set <code className="font-mono">ZAI_API_KEY</code> (server env) to enable Vibe.
               </div>
             )}
-            <div className="flex gap-2">
+            <div className="mb-2 flex gap-2">
               <div className="relative flex-1">
                 <Sparkles className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-primary" />
                 <input
@@ -755,7 +765,7 @@ export function MusicWidget() {
             {/* Vibe recs are strongest for genre/mood/artist/decade prompts (per the
                 field-test literature), so seed the box with that shape. */}
             {vibeResults.length === 0 && !vibing && vibeConfigured !== false && (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="mb-2 flex flex-wrap gap-1.5">
                 {["Focus indie folk", "Upbeat 2000s rock", "Chill late-night jazz", "Energetic pop for a drive"].map(
                   (s) => (
                     <button
@@ -781,7 +791,7 @@ export function MusicWidget() {
                 onToggleLike={(t) => void toggleLike(t)}
               />
             ) : null}
-          </div>
+          </>
         )}
       </div>
 
