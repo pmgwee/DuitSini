@@ -26,6 +26,11 @@ import {
   fetchCodexSnapshot,
 } from "./collectors/codex";
 import {
+  AllGeminiCredentialsRejectedError,
+  NoGeminiCredentialsError,
+  fetchGeminiSnapshot,
+} from "./collectors/gemini";
+import {
   detectProvider,
   fetchGlmUsage,
   safeProvider,
@@ -67,6 +72,8 @@ export interface SchedulerDeps {
   log: (line: string) => void;
   /** Durable forensic journal for usage/refresh events. */
   tracker: UsageTracker;
+  /** Reads active Google cookies from Electron session if available. */
+  getGoogleCookies?: () => Promise<string | null>;
 }
 
 const jitter = (n: number) => Math.floor(Math.random() * n);
@@ -83,6 +90,8 @@ export class Scheduler {
   private activeSourceLabel: string | null = null;
   private lastCodexSnapshot: Snapshot | null = null;
   private lastCodexAt = 0;
+  private lastGeminiSnapshot: Snapshot | null = null;
+  private lastGeminiAt = 0;
   private running = false;
 
   constructor(private readonly deps: SchedulerDeps) {
@@ -110,6 +119,11 @@ export class Scheduler {
     if (codex) {
       this.lastCodexSnapshot = this.snapshotOf(codex.stream);
       this.lastCodexAt = codex.observedAt;
+    }
+    const gemini = this.deps.store.snapshot("gemini");
+    if (gemini) {
+      this.lastGeminiSnapshot = this.snapshotOf(gemini.stream);
+      this.lastGeminiAt = gemini.observedAt;
     }
     // Prime the offline estimate immediately so the first paint is never empty.
     await this.refreshLocal();
@@ -181,7 +195,9 @@ export class Scheduler {
       if (glm) streams.push(glm);
       const codex = await this.collectCodex();
       if (codex) streams.push(codex);
-      this.deps.log(`collected: claude=${!!claude} glm=${!!glm} codex=${!!codex}`);
+      const gemini = await this.collectGemini();
+      if (gemini) streams.push(gemini);
+      this.deps.log(`collected: claude=${!!claude} glm=${!!glm} codex=${!!codex} gemini=${!!gemini}`);
 
       if (streams.length === 0) {
         this.deps.log("no usage streams this cycle — nothing to push");
@@ -583,6 +599,96 @@ export class Scheduler {
         error instanceof NoCodexCredentialsError
           ? "Codex sign-in is unavailable; showing the last reading."
           : "Codex is temporarily unreachable; showing the last reading.",
+      );
+    }
+  }
+
+  /**
+   * Google Gemini subscription stream. Auto-refreshes token in-memory if expired,
+   * queries Cloud Code APIs, and returns model quota buckets as limits.
+   */
+  private async collectGemini(): Promise<UsageStream | null> {
+    const state = this.deps.store.source("gemini");
+    const now = Date.now();
+    const streamFromLast = (
+      streamState: UsageStream["state"],
+      message?: string,
+    ): UsageStream | null => {
+      if (!this.lastGeminiSnapshot) return null;
+      return {
+        source: "gemini",
+        label: "Gemini",
+        five_hour: this.lastGeminiSnapshot.five_hour,
+        seven_day: this.lastGeminiSnapshot.seven_day,
+        limits: this.lastGeminiSnapshot.limits,
+        provider: { name: "Google", gateway_host: "cloudcode-pa.googleapis.com", official: true },
+        cached: streamState !== "live",
+        observed_at: new Date(this.lastGeminiAt).toISOString(),
+        state: streamState,
+        status_message: message ?? null,
+      };
+    };
+
+    if (now < state.nextAt) {
+      const mins = Math.max(1, Math.ceil((state.nextAt - now) / 60_000));
+      this.deps.log(`[Gemini] cooling down ${mins}m (${state.message || "rate limit"})`);
+      return streamFromLast(
+        state.message?.includes("sign-in") ? "auth_stale" : "rate_limited",
+        state.message || "Waiting for the provider cooldown before checking again.",
+      );
+    }
+
+    if (this.lastGeminiSnapshot && now - this.lastGeminiAt < API_CACHE_MS) {
+      return streamFromLast("live");
+    }
+
+    try {
+      const result = await fetchGeminiSnapshot({
+        getGoogleCookies: this.deps.getGoogleCookies,
+      });
+      this.lastGeminiSnapshot = result.snapshot;
+      this.lastGeminiAt = Date.now();
+      state.nextAt = 0;
+      state.streak = 0;
+      state.message = undefined;
+      this.deps.log(`[Gemini] quota ok via ${result.sourceLabel}`);
+      const stream: UsageStream = {
+        source: "gemini",
+        label: "Gemini",
+        five_hour: result.snapshot.five_hour,
+        seven_day: result.snapshot.seven_day,
+        limits: result.snapshot.limits,
+        provider: { name: "Google", gateway_host: "cloudcode-pa.googleapis.com", official: true },
+        cached: false,
+        observed_at: new Date(this.lastGeminiAt).toISOString(),
+        state: "live",
+        status_message: null,
+      };
+      this.deps.store.setSnapshot(stream.source, stream, this.lastGeminiAt);
+      return stream;
+    } catch (error) {
+      const err = error as { code?: number | string; retryMs?: number; message: string };
+
+      if (err.code === 429) {
+        state.streak += 1;
+        const hold = codexUsage429Hold(state.streak, err.retryMs, jitter(30_000));
+        state.nextAt = Date.now() + hold;
+        state.message = "cooling down after a rate limit";
+        this.deps.log(`[Gemini] rate-limited; quiet for ${Math.round(hold / 60_000)}m`);
+        return streamFromLast("rate_limited", "Provider rate limit; showing the last exact reading.");
+      }
+      if (error instanceof AllGeminiCredentialsRejectedError) {
+        state.nextAt = Date.now() + 10 * 60_000;
+        state.message = "Gemini sign-in needs refreshing";
+        return streamFromLast("auth_stale", "Gemini sign-in is stale; showing the last reading.");
+      } else if (!(error instanceof NoGeminiCredentialsError)) {
+        this.deps.log(`[Gemini] ${err.message}`);
+      }
+      return streamFromLast(
+        error instanceof NoGeminiCredentialsError ? "auth_stale" : "offline",
+        error instanceof NoGeminiCredentialsError
+          ? "Gemini sign-in is unavailable; showing the last reading."
+          : "Gemini is temporarily unreachable; showing the last reading.",
       );
     }
   }

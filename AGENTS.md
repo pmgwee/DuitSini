@@ -105,6 +105,10 @@ If `handoff/00-MANIFEST.md` exists (first line `handoff-plan v1`), a plan is liv
 
 Issues live in GitHub Issues (`github.com/pmgwee/subscription-agent`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
+### Triage labels
+
+Canonical triage roles mapped to GitHub issue labels. See `docs/agents/triage-labels.md`.
+
 ### Domain docs
 
 Single-context — one root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.

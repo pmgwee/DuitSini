@@ -25,6 +25,10 @@ const MASCOTS: Record<string, MascotDefinition> = {
     src: "/mascots/codex-mascot.gif",
     wrapperClass: "bg-blue-50/80 dark:bg-blue-950/30",
   },
+  gemini: {
+    src: "/mascots/gemini-mascot.gif",
+    wrapperClass: "bg-amber-50/80 dark:bg-amber-950/30",
+  },
 };
 
 /** Decorative animated companion for a provider's weekly usage limit. */

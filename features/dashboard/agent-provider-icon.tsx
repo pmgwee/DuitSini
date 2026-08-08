@@ -19,10 +19,20 @@ const MARKS = {
     color: "#10a37f",
     domain: "openai.com",
   },
+  google: {
+    name: "Gemini",
+    color: "#8e75ff",
+    logoUrl: "/logos/gemini.svg",
+    slug: "googlegemini",
+    domain: "gemini.google.com",
+  },
 } as const;
 
 function markFor(source: string) {
   const normalized = source.toLowerCase();
+  if (normalized === "gemini" || normalized.includes("gemini") || normalized.includes("google")) {
+    return MARKS.google;
+  }
   if (normalized === "codex" || normalized.includes("openai")) return MARKS.openai;
   if (normalized === "glm" || normalized.includes("zai") || normalized.includes("z.ai")) {
     return MARKS.glm;
@@ -44,6 +54,7 @@ export function AgentProviderIcon({
     <ProviderMark
       name={mark.name}
       color={mark.color}
+      logoUrl={"logoUrl" in mark ? mark.logoUrl : undefined}
       slug={"slug" in mark ? mark.slug : undefined}
       domain={mark.domain}
       size={size}

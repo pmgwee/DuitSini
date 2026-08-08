@@ -561,6 +561,20 @@ async function startCollection(): Promise<void> {
     getToken: () => tokens.get(),
     ingestUrl: () => `${appOrigin}/api/claude-usage/ingest`,
     tracker: usageTracker,
+    getGoogleCookies: async () => {
+      try {
+        const cookies = await session.defaultSession.cookies.get({ domain: ".google.com" });
+        if (!cookies || cookies.length === 0) return null;
+        const psid = cookies.find((c) => c.name === "__Secure-1PSID")?.value;
+        const sid = cookies.find((c) => c.name === "SID")?.value;
+        if (psid) {
+          return `__Secure-1PSID=${psid}${sid ? `; SID=${sid}` : ""}`;
+        }
+        return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+      } catch {
+        return null;
+      }
+    },
     onStatus: (s) => {
       lastStatus = s;
       buildTrayMenu();

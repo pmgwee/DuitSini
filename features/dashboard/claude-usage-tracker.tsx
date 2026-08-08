@@ -160,7 +160,7 @@ function normalizeStreams(data: LiveUsage): UsageStream[] {
             provider: data.provider ?? null,
           },
         ];
-  const order: Record<string, number> = { claude_pro: 0, claude: 0, glm: 1, codex: 2 };
+  const order: Record<string, number> = { claude_pro: 0, claude: 0, glm: 1, codex: 2, gemini: 3 };
   return streams
     .map((stream, index) => ({ stream, index }))
     .sort(
