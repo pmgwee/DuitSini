@@ -74,15 +74,24 @@ export function parseGeminiWebUsageHtml(html: string, nowMs: number = Date.now()
   }
 
   // 1. Current usage (5-hour window)
+  // Handles both DOM orderings: "Current usage ... 1% used ... Resets at 17:27"
+  // and "Current usage ... Resets at 17:27 ... 1% used"
   let sessionPercent: number | null = null;
   let sessionResetsAtRaw: string | null = null;
 
-  const sessionMatch = html.match(
+  const sessionMatchA = html.match(
     /Current usage[\s\S]*?(\d+)%\s*used[\s\S]*?Resets\s*at\s*([0-9]{1,2}:[0-9]{2})/i,
   );
-  if (sessionMatch) {
-    sessionPercent = parseInt(sessionMatch[1], 10);
-    sessionResetsAtRaw = sessionMatch[2];
+  const sessionMatchB = html.match(
+    /Current usage[\s\S]*?Resets\s*at\s*([0-9]{1,2}:[0-9]{2})[\s\S]*?(\d+)%\s*used/i,
+  );
+
+  if (sessionMatchA) {
+    sessionPercent = parseInt(sessionMatchA[1], 10);
+    sessionResetsAtRaw = sessionMatchA[2];
+  } else if (sessionMatchB) {
+    sessionResetsAtRaw = sessionMatchB[1];
+    sessionPercent = parseInt(sessionMatchB[2], 10);
   } else {
     const curPctMatch = html.match(/Current usage[\s\S]*?(\d+)%\s*used/i);
     if (curPctMatch) {
@@ -91,15 +100,24 @@ export function parseGeminiWebUsageHtml(html: string, nowMs: number = Date.now()
   }
 
   // 2. Weekly limit (7-day window)
+  // Handles both DOM orderings: "Weekly limit ... Resets on 11 Aug at 16:27 ... 0% used"
+  // and "Weekly limit ... 0% used ... Resets on 11 Aug at 16:27"
   let weeklyPercent: number | null = null;
   let weeklyResetsAtRaw: string | null = null;
 
-  const weeklyMatch = html.match(
+  const weeklyMatchA = html.match(
+    /Weekly limit[\s\S]*?Resets\s*(?:on|at)\s*([0-9A-Za-z\s:]+?)[\s\S]*?(\d+)%\s*used/i,
+  );
+  const weeklyMatchB = html.match(
     /Weekly limit[\s\S]*?(\d+)%\s*used[\s\S]*?Resets\s*(?:on|at)\s*([^<"\n]+)/i,
   );
-  if (weeklyMatch) {
-    weeklyPercent = parseInt(weeklyMatch[1], 10);
-    weeklyResetsAtRaw = weeklyMatch[2].trim();
+
+  if (weeklyMatchA) {
+    weeklyResetsAtRaw = weeklyMatchA[1].trim();
+    weeklyPercent = parseInt(weeklyMatchA[2], 10);
+  } else if (weeklyMatchB) {
+    weeklyPercent = parseInt(weeklyMatchB[1], 10);
+    weeklyResetsAtRaw = weeklyMatchB[2].trim();
   } else {
     const wPctMatch = html.match(/Weekly limit[\s\S]*?(\d+)%\s*used/i);
     if (wPctMatch) {
