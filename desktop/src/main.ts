@@ -967,10 +967,16 @@ async function openGeminiWebWindow(): Promise<{ ok: boolean }> {
     },
   });
 
-  geminiWin.webContents.on("did-navigate", (_event, url) => {
-    if (url.includes("gemini.google.com/usage") || url.includes("gemini.google.com/app")) {
+  const notifyPull = (url: string) => {
+    if (url.includes("gemini.google.com")) {
       setTimeout(() => void scheduler?.pullNow(), 1000);
     }
+  };
+
+  geminiWin.webContents.on("did-navigate", (_event, url) => notifyPull(url));
+  geminiWin.webContents.on("did-navigate-in-page", (_event, url) => notifyPull(url));
+  geminiWin.webContents.on("did-finish-load", () => {
+    notifyPull(geminiWin.webContents.getURL());
   });
 
   await geminiWin.loadURL("https://gemini.google.com/usage");
