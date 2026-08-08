@@ -563,14 +563,22 @@ async function startCollection(): Promise<void> {
     tracker: usageTracker,
     getGoogleCookies: async () => {
       try {
-        const cookies = await session.defaultSession.cookies.get({ domain: ".google.com" });
-        if (!cookies || cookies.length === 0) return null;
-        const psid = cookies.find((c) => c.name === "__Secure-1PSID")?.value;
-        const sid = cookies.find((c) => c.name === "SID")?.value;
+        const c1 = await session.defaultSession.cookies.get({ url: "https://gemini.google.com" });
+        const c2 = await session.defaultSession.cookies.get({ domain: ".google.com" });
+        const c3 = await session.defaultSession.cookies.get({ domain: "google.com" });
+        const map = new Map<string, string>();
+        for (const c of [...c1, ...c2, ...c3]) {
+          if (c.name && c.value) map.set(c.name, c.value);
+        }
+        if (map.size === 0) return null;
+        const psid = map.get("__Secure-1PSID");
+        const sid = map.get("SID");
         if (psid) {
           return `__Secure-1PSID=${psid}${sid ? `; SID=${sid}` : ""}`;
         }
-        return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+        return Array.from(map.entries())
+          .map(([k, v]) => `${k}=${v}`)
+          .join("; ");
       } catch {
         return null;
       }
@@ -945,6 +953,31 @@ async function renewClaudeSignin(): Promise<{
   }
 }
 ipcMain.handle("duitsini:renew-claude-signin", () => renewClaudeSignin());
+
+async function openGeminiWebWindow(): Promise<{ ok: boolean }> {
+  const geminiWin = new BrowserWindow({
+    width: 680,
+    height: 760,
+    title: "DuitSini — Sign in to Gemini",
+    autoHideMenuBar: true,
+    backgroundColor: "#0b0b0f",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  geminiWin.webContents.on("did-navigate", (_event, url) => {
+    if (url.includes("gemini.google.com/usage") || url.includes("gemini.google.com/app")) {
+      setTimeout(() => void scheduler?.pullNow(), 1000);
+    }
+  });
+
+  await geminiWin.loadURL("https://gemini.google.com/usage");
+  return { ok: true };
+}
+
+ipcMain.handle("duitsini:open-gemini-web-login", () => openGeminiWebWindow());
 
 // Tray app: closing every window must not quit on Windows/Linux either.
 app.on("window-all-closed", () => {

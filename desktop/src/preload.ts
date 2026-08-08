@@ -153,3 +153,11 @@ expose("duitsiniClaudeRenewal", () => ({
     return () => ipcRenderer.removeListener("duitsini:claude-renew-result", listener);
   },
 }));
+
+/**
+ * `window.duitsiniGeminiWeb` — opens a window to sign in to gemini.google.com/usage
+ * so Electron captures the session cookie for live Gemini Pro subscription tracking.
+ */
+expose("duitsiniGeminiWeb", () => ({
+  openLogin: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("duitsini:open-gemini-web-login"),
+}));

@@ -308,6 +308,42 @@ function ClaudeRenewButton() {
   );
 }
 
+function GeminiWebConnectButton() {
+  const [cap, setCap] = useState<{
+    openLogin: () => Promise<{ ok: boolean }>;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const w = window as unknown as {
+      duitsiniGeminiWeb?: { openLogin: () => Promise<{ ok: boolean }> };
+    };
+    if (w.duitsiniGeminiWeb) setCap(w.duitsiniGeminiWeb);
+  }, []);
+
+  if (!cap) return null;
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await cap.openLogin();
+        } finally {
+          setBusy(false);
+        }
+      }}
+      title="Open Gemini Web sign-in window to capture your session cookie for live Gemini Pro subscription tracking."
+      className="inline-flex items-center gap-1 rounded-md border border-primary/60 bg-background px-2 py-0.5 text-[10px] font-semibold text-primary shadow-sm transition hover:border-primary hover:bg-primary/10 active:scale-[0.98] disabled:cursor-default disabled:opacity-70"
+    >
+      <RefreshCw className={cn("h-3 w-3", busy && "animate-spin")} />
+      Connect Gemini Web
+    </button>
+  );
+}
+
 /** One usage stream rendered as a labeled group of ring gauges. */
 function StreamSection({ stream, now, divided }: { stream: UsageStream; now: number; divided: boolean }) {
   const gauges = streamGauges(stream);
@@ -320,6 +356,7 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
         <AgentProviderIcon source={stream.source} />
         <span className="text-xs font-medium text-foreground">{stream.label}</span>
         <ProviderBadge provider={stream.provider} />
+        {stream.source === "gemini" ? <GeminiWebConnectButton /> : null}
         {state ? (
           <span
             title={`${stream.status_message || state.fallbackDescription} Observed ${formatAgo(stream.observed_at, now)}.`}
