@@ -7,30 +7,83 @@ export interface GeminiWebUsageSnapshot {
 }
 
 /**
+ * Parse a civil reset time string from gemini.google.com/usage into an ISO 8601 string.
+ * Supports:
+ * - "17:27" -> Today (or tomorrow) at 17:27 local time
+ * - "11 Aug at 16:27" or "11 Aug 16:27" -> ISO timestamp for 11 Aug 16:27
+ */
+export function parseResetsAtToISO(rawReset: string | null | undefined, nowMs: number = Date.now()): string | null {
+  if (!rawReset) return null;
+  const trimmed = rawReset.trim();
+
+  // Pattern 1: HH:MM (e.g. "17:27")
+  const hhmmMatch = trimmed.match(/^([0-9]{1,2}):([0-9]{2})$/);
+  if (hhmmMatch) {
+    const hours = parseInt(hhmmMatch[1], 10);
+    const mins = parseInt(hhmmMatch[2], 10);
+    const d = new Date(nowMs);
+    d.setHours(hours, mins, 0, 0);
+    if (d.getTime() < nowMs - 60_000) {
+      d.setDate(d.getDate() + 1);
+    }
+    return d.toISOString();
+  }
+
+  // Pattern 2: "D MMM at HH:MM" or "D MMM HH:MM" (e.g. "11 Aug at 16:27")
+  const dateMatch = trimmed.match(/^(\d{1,2})\s+([A-Za-z]+)(?:\s+at)?\s+(\d{1,2}):(\d{2})/i);
+  if (dateMatch) {
+    const day = parseInt(dateMatch[1], 10);
+    const monthStr = dateMatch[2];
+    const hours = parseInt(dateMatch[3], 10);
+    const mins = parseInt(dateMatch[4], 10);
+    const year = new Date(nowMs).getFullYear();
+
+    const months: Record<string, number> = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    };
+    const month = months[monthStr.slice(0, 3).toLowerCase()];
+    if (month !== undefined) {
+      const d = new Date(year, month, day, hours, mins, 0, 0);
+      if (d.getTime() < nowMs - 86_400_000) {
+        d.setFullYear(year + 1);
+      }
+      return d.toISOString();
+    }
+  }
+
+  // If already ISO string or parseable by Date constructor
+  const parsedDate = new Date(trimmed);
+  if (!isNaN(parsedDate.getTime())) {
+    return parsedDate.toISOString();
+  }
+
+  return null;
+}
+
+/**
  * Parse the HTML or embedded JSON data from `https://gemini.google.com/usage`.
  *
  * Extracts:
  * - Current usage (5-hour window): percentage used (0-100) + reset time
  * - Weekly limit (7-day window): percentage used (0-100) + reset time
  */
-export function parseGeminiWebUsageHtml(html: string): GeminiWebUsageSnapshot | null {
-  if (!html || !html.includes("Usage limits")) {
+export function parseGeminiWebUsageHtml(html: string, nowMs: number = Date.now()): GeminiWebUsageSnapshot | null {
+  if (!html || (!html.includes("Usage limits") && !html.includes("Current usage"))) {
     return null;
   }
 
   // 1. Current usage (5-hour window)
-  // Pattern: "Current usage" ... "X% used" ... "Resets at HH:MM"
   let sessionPercent: number | null = null;
-  let sessionResetsAt: string | null = null;
+  let sessionResetsAtRaw: string | null = null;
 
   const sessionMatch = html.match(
     /Current usage[\s\S]*?(\d+)%\s*used[\s\S]*?Resets\s*at\s*([0-9]{1,2}:[0-9]{2})/i,
   );
   if (sessionMatch) {
     sessionPercent = parseInt(sessionMatch[1], 10);
-    sessionResetsAt = sessionMatch[2];
+    sessionResetsAtRaw = sessionMatch[2];
   } else {
-    // Fallback: simple match for Current usage percentage
     const curPctMatch = html.match(/Current usage[\s\S]*?(\d+)%\s*used/i);
     if (curPctMatch) {
       sessionPercent = parseInt(curPctMatch[1], 10);
@@ -38,16 +91,15 @@ export function parseGeminiWebUsageHtml(html: string): GeminiWebUsageSnapshot | 
   }
 
   // 2. Weekly limit (7-day window)
-  // Pattern: "Weekly limit" ... "X% used" ... "Resets on [Date] at HH:MM"
   let weeklyPercent: number | null = null;
-  let weeklyResetsAt: string | null = null;
+  let weeklyResetsAtRaw: string | null = null;
 
   const weeklyMatch = html.match(
     /Weekly limit[\s\S]*?(\d+)%\s*used[\s\S]*?Resets\s*(?:on|at)\s*([^<"\n]+)/i,
   );
   if (weeklyMatch) {
     weeklyPercent = parseInt(weeklyMatch[1], 10);
-    weeklyResetsAt = weeklyMatch[2].trim();
+    weeklyResetsAtRaw = weeklyMatch[2].trim();
   } else {
     const wPctMatch = html.match(/Weekly limit[\s\S]*?(\d+)%\s*used/i);
     if (wPctMatch) {
@@ -59,11 +111,14 @@ export function parseGeminiWebUsageHtml(html: string): GeminiWebUsageSnapshot | 
     return null;
   }
 
+  const sessionResetsAt = parseResetsAtToISO(sessionResetsAtRaw, nowMs);
+  const weeklyResetsAt = parseResetsAtToISO(weeklyResetsAtRaw, nowMs);
+
   const limits: UsageLimit[] = [];
 
   if (sessionPercent !== null) {
     limits.push({
-      key: "session",
+      key: "current_usage",
       label: "Current usage",
       group: "session",
       percent: sessionPercent,
@@ -74,7 +129,7 @@ export function parseGeminiWebUsageHtml(html: string): GeminiWebUsageSnapshot | 
 
   if (weeklyPercent !== null) {
     limits.push({
-      key: "weekly_all",
+      key: "weekly_limit",
       label: "Weekly limit",
       group: "weekly",
       percent: weeklyPercent,

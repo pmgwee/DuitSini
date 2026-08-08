@@ -78,7 +78,10 @@ function fileCookieSource(path: string): GeminiWebCookieSource {
 }
 
 export function geminiWebCookieSources(
-  getGoogleCookies?: () => Promise<string | null>,
+  options: {
+    getGoogleCookies?: () => Promise<string | null>;
+    persistedCookie?: string | null;
+  } = {},
 ): GeminiWebCookieSource[] {
   const sources: GeminiWebCookieSource[] = geminiCookieFilePaths().map(fileCookieSource);
 
@@ -89,10 +92,17 @@ export function geminiWebCookieSources(
     });
   }
 
-  if (getGoogleCookies) {
+  if (options.persistedCookie) {
+    sources.unshift({
+      label: "desktop-store.geminiWebCookie",
+      readCookie: async () => options.persistedCookie ?? null,
+    });
+  }
+
+  if (options.getGoogleCookies) {
     sources.unshift({
       label: "electron.session.cookies",
-      readCookie: getGoogleCookies,
+      readCookie: options.getGoogleCookies,
     });
   }
 
@@ -115,9 +125,16 @@ export async function fetchGeminiWebSnapshot(
     sources?: GeminiWebCookieSource[];
     fetcher?: typeof safeFetch;
     getGoogleCookies?: () => Promise<string | null>;
+    persistedCookie?: string | null;
+    onCookieFound?: (cookie: string) => void;
   } = {},
 ): Promise<GeminiWebResult> {
-  const sources = options.sources ?? geminiWebCookieSources(options.getGoogleCookies);
+  const sources =
+    options.sources ??
+    geminiWebCookieSources({
+      getGoogleCookies: options.getGoogleCookies,
+      persistedCookie: options.persistedCookie,
+    });
   const fetcher = options.fetcher ?? safeFetch;
   const rejected: string[] = [];
   let sawCookies = false;
@@ -155,6 +172,10 @@ export async function fetchGeminiWebSnapshot(
       // If we got 200 OK but HTML couldn't be parsed, try fallback check
       rejected.push(`${source.label} (unparseable HTML / sign-in redirect)`);
       continue;
+    }
+
+    if (options.onCookieFound) {
+      options.onCookieFound(cookie);
     }
 
     return {

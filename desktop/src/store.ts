@@ -48,6 +48,8 @@ export interface PersistedState {
    * guard used to be a plain variable, so someone who declined an update got
    * toasted again on every single launch.
    */
+  /** Captured Gemini Web session cookie (__Secure-1PSID). */
+  geminiWebCookie?: string;
   dismissedUpdateVersion?: string;
 }
 
@@ -112,6 +114,15 @@ export class Store {
   setDismissedUpdateVersion(version: string | null): void {
     if (version) this.data.dismissedUpdateVersion = version;
     else delete this.data.dismissedUpdateVersion;
+  }
+
+  geminiWebCookie(): string | null {
+    return this.data.geminiWebCookie ?? null;
+  }
+
+  setGeminiWebCookie(cookie: string | null): void {
+    if (cookie) this.data.geminiWebCookie = cookie;
+    else delete this.data.geminiWebCookie;
   }
 
   /**

@@ -26,6 +26,8 @@ export interface FetchGeminiOptions {
   sources?: GeminiCredentialSource[];
   fetcher?: Fetcher;
   getGoogleCookies?: () => Promise<string | null>;
+  persistedCookie?: string | null;
+  onCookieFound?: (cookie: string) => void;
 }
 
 export interface GeminiResult {
@@ -156,6 +158,8 @@ export async function fetchGeminiSnapshot(
     const webResult = await fetchGeminiWebSnapshot({
       fetcher,
       getGoogleCookies: options.getGoogleCookies,
+      persistedCookie: options.persistedCookie,
+      onCookieFound: options.onCookieFound,
     });
     return webResult;
   } catch {

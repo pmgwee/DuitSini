@@ -645,6 +645,11 @@ export class Scheduler {
     try {
       const result = await fetchGeminiSnapshot({
         getGoogleCookies: this.deps.getGoogleCookies,
+        persistedCookie: this.deps.store.geminiWebCookie(),
+        onCookieFound: (cookie) => {
+          this.deps.store.setGeminiWebCookie(cookie);
+          void this.deps.store.save();
+        },
       });
       this.lastGeminiSnapshot = result.snapshot;
       this.lastGeminiAt = Date.now();
