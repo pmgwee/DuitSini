@@ -56,9 +56,23 @@ const W_LIKE = 1; // one like ≈ five completed plays of certainty
 const W_COMPLETE = 0.2;
 const W_PLAY = 0.06;
 const W_SKIP = 0.55; // subtracted — a skip actively lowers confidence
-const PLAY_CAP = 12; // beyond this, extra plays say little we don't know
+const PLAY_CAP = 12; // the LINEAR portion of the play term (not a flat ceiling)
+const W_PLAY_TAIL = 0.1; // slow log growth beyond PLAY_CAP so heavy repetition keeps rising
 /** Confidence can go negative; clamp so a buried track can still be explored. */
 const MIN_CONFIDENCE = 0.05;
+
+/**
+ * How much a track's play count contributes to evidence. Linear up to PLAY_CAP
+ * (identical to the original flat term there), then a slow log tail so a track
+ * played 50× outranks one played 12× — heavy repetition is a real taste signal
+ * that a flat cap used to flatten. Never decays (decay is recency's job, below).
+ */
+function playEvidence(playCount: number): number {
+  if (playCount <= 0) return 0;
+  const linear = Math.min(playCount, PLAY_CAP) * W_PLAY;
+  if (playCount <= PLAY_CAP) return linear;
+  return linear + Math.log2(playCount - PLAY_CAP + 1) * W_PLAY_TAIL;
+}
 
 export interface ScoreContext {
   /** Everything the listener has played, keyed by videoId. */
@@ -87,7 +101,7 @@ export function confidence(
   if (context.likes.has(videoId)) evidence += W_LIKE;
   if (entry) {
     evidence += entry.completeCount * W_COMPLETE;
-    evidence += Math.min(entry.playCount, PLAY_CAP) * W_PLAY;
+    evidence += playEvidence(entry.playCount);
     evidence -= entry.skipCount * W_SKIP;
   }
 
@@ -150,13 +164,22 @@ export interface AssembleOptions {
   epsilon?: number;
   /** Max tracks per primary artist, so one artist can't dominate the slate. */
   maxPerArtist?: number;
+  /**
+   * Primary artists the listener has explicitly liked. The per-artist cap is
+   * relaxed for these (see `endorsedCap`): an artist the listener asked for more
+   * of is endorsed taste, not the clumping the cap exists to prevent. Derived
+   * from the listener's own likes at the call site — never a static list.
+   */
+  endorsedArtists?: Set<string>;
+  /** Per-artist cap for endorsed artists (defaults to 2× `maxPerArtist`). */
+  endorsedCap?: number;
   /** Pinned first entry — position-aware sequencing wants a familiar opener. */
   opener?: MusicTrack | null;
   /** Injectable RNG so assembly can be tested deterministically. */
   random?: () => number;
 }
 
-function primaryArtist(channel: string): string {
+export function primaryArtist(channel: string): string {
   return channel.split(",")[0]!.trim().toLowerCase();
 }
 
@@ -176,6 +199,8 @@ export function assemble(
     limit,
     epsilon = 0.12,
     maxPerArtist = 3,
+    endorsedArtists = new Set<string>(),
+    endorsedCap = maxPerArtist * 2,
     opener = null,
     random = Math.random,
   } = options;
@@ -195,7 +220,8 @@ export function assemble(
     const { track } = entry.candidate;
     if (usedIds.has(track.videoId)) return false;
     const artist = primaryArtist(track.channel);
-    if (artist && (artistCounts.get(artist) ?? 0) >= maxPerArtist) return false;
+    const cap = artist && endorsedArtists.has(artist) ? endorsedCap : maxPerArtist;
+    if (artist && (artistCounts.get(artist) ?? 0) >= cap) return false;
     chosen.push(entry.candidate);
     usedIds.add(track.videoId);
     if (artist) artistCounts.set(artist, (artistCounts.get(artist) ?? 0) + 1);

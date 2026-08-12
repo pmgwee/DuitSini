@@ -6,7 +6,7 @@ import {
   fetchRelated,
   extendRadio,
 } from "./sources";
-import { assemble, pickSeeds, score, type ScoreContext } from "./ranking";
+import { assemble, pickSeeds, primaryArtist, score, type ScoreContext } from "./ranking";
 import { sequence } from "./similarity";
 import { ensureTagVectors } from "./tags";
 import { createDbTagStore } from "./tags-store";
@@ -36,6 +36,10 @@ const SEED_COUNT = 4;
 /** Extra one-hop sources — an adjacent artist and an editorial playlist. */
 const SIMILAR_ARTIST_FANOUT = 2;
 const EDITORIAL_FANOUT = 1;
+/** Liked-track neighbourhoods to fetch per build (taste-signal fidelity). */
+const LIKE_FANOUT = 2;
+/** A like carries ~this many plays of seed-trust (cf. W_LIKE "≈ five completed plays"). */
+const LIKE_SEED_WEIGHT = 3;
 
 class CandidatePool {
   private readonly byId = new Map<string, Candidate>();
@@ -237,6 +241,33 @@ export async function buildShelf(
     pool.addMany(batch.tracks, `playlist:${batch.id}`, "editorial", 1);
   }
 
+  // --- Stage 1d: liked-track fanout (taste-signal fidelity) ------------------
+  // A like is the clearest taste statement, but until now it only biased seed
+  // selection and the confidence term — it never GUARANTEED its neighbourhood
+  // entered the pool. So a freshly-liked discovery (e.g. a track liked from a
+  // previous shelf) rarely surfaced similar tracks. Fetch radio around a few
+  // liked tracks that weren't picked as seeds. Most-recent-first with a rotating
+  // start, so different liked neighbourhoods are explored across builds and the
+  // listener's most recent taste leads.
+  const seededIds = new Set(seeds.map((s) => s.videoId));
+  const likedCandidates = likes
+    .filter((l) => !seededIds.has(l.videoId))
+    .sort((a, b) => Date.parse(b.likedAt) - Date.parse(a.likedAt));
+  if (likedCandidates.length > 0) {
+    const start =
+      likedCandidates.length > LIKE_FANOUT
+        ? Math.floor(random() * likedCandidates.length)
+        : 0;
+    const picks: string[] = [];
+    for (let i = 0; i < LIKE_FANOUT && i < likedCandidates.length; i++) {
+      picks.push(likedCandidates[(start + i) % likedCandidates.length]!.videoId);
+    }
+    const likeRadios = await settle(picks.map((id) => fetchRadio(id)));
+    for (const radio of likeRadios) {
+      pool.addMany(radio.tracks, `liked:${radio.seedId}`, "radio", LIKE_SEED_WEIGHT);
+    }
+  }
+
   if (pool.size === 0) return [];
 
   // --- Stage 2: rank and assemble -------------------------------------------
@@ -262,7 +293,11 @@ export async function buildShelf(
       }
     : null;
 
-  const slate = assemble(scored, { limit, opener, random });
+  // Artists the listener has explicitly liked get a relaxed per-artist cap — an
+  // endorsed artist is taste the listener asked for more of, not the clumping the
+  // cap exists to prevent. Derived from the listener's own likes, never a list.
+  const endorsedArtists = new Set(likes.map((l) => primaryArtist(l.channel)));
+  const slate = assemble(scored, { limit, opener, random, endorsedArtists });
 
   // --- Stage 3: sequence for smooth transitions ------------------------------
   // Tag the final SLATE (not the whole pool) so cold tracks — pairs that share
