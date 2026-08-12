@@ -29,9 +29,32 @@ export interface ListenAgainResponse {
   tracks: MusicTrack[];
   /** True when the shelf is seeded from Liked Music (no in-app plays yet). */
   seeded: boolean;
+  /** Set when the server returned the cached shelf within the cooldown window
+   *  instead of re-running the fan-out — the client surfaces this as "once a
+   *  minute" rather than wiping the list. */
+  throttled?: boolean;
+  retry_after_s?: number;
 }
 
 const SHELF_CAP = 40;
+
+/**
+ * Per-refresh cooldown (seconds). One rebuild fires ~19 parallel InnerTube
+ * fan-out calls (song radios, related shelves, artist catalogs, liked radios);
+ * the shelf is frozen by design anyway, so cooling the fan-out to once a minute
+ * caps spam at +60/h while an identical slate is the correct within-window
+ * result. Mirrors the bridge pull route's 60s server-side throttle. In-memory
+ * (like /api/yt/search's query cache): the GET and its client are the only
+ * parties, and the worst case under multi-instance is a per-instance window.
+ */
+const SHELF_COOLDOWN_S = 60;
+const shelfCache = new Map<string, { at: number; body: ListenAgainResponse }>();
+
+function pruneShelfCache(now: number): void {
+  for (const [k, v] of shelfCache) {
+    if (now - v.at > SHELF_COOLDOWN_S * 1000) shelfCache.delete(k);
+  }
+}
 
 /** Fisher–Yates shuffle returning a new array (leaves the input untouched). */
 function shuffle<T>(items: T[]): T[] {
@@ -62,6 +85,19 @@ export async function GET() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ tracks: [], seeded: false }, { status: 401 });
+
+  // Within the cooldown, hand back the last shelf unchanged. The shelf is frozen
+  // by design, so an identical slate is the correct result; this just skips the
+  // expensive fan-out and keeps a hammering refresh from IP-flagging the path.
+  const now = Date.now();
+  const cached = shelfCache.get(user.id);
+  if (cached && now - cached.at < SHELF_COOLDOWN_S * 1000) {
+    return NextResponse.json<ListenAgainResponse>({
+      ...cached.body,
+      throttled: true,
+      retry_after_s: Math.ceil((cached.at + SHELF_COOLDOWN_S * 1000 - now) / 1000),
+    });
+  }
 
   const [history, likes, suppressions] = await Promise.all([
     loadHistory(supabase, user.id),
@@ -102,7 +138,10 @@ export async function GET() {
       }));
     }
 
-    return NextResponse.json<ListenAgainResponse>({ tracks, seeded: false });
+    pruneShelfCache(now);
+    const body: ListenAgainResponse = { tracks, seeded: false };
+    shelfCache.set(user.id, { at: now, body });
+    return NextResponse.json<ListenAgainResponse>(body);
   }
 
   // Cold start: nothing in-app yet. Use the imported YouTube "Liked Music" as a
@@ -125,7 +164,10 @@ export async function GET() {
       }
       // Only if every source failed do we fall back to showing the import.
       if (tracks.length === 0) tracks = shuffle(liked).slice(0, 12);
-      return NextResponse.json<ListenAgainResponse>({ tracks, seeded: true });
+      pruneShelfCache(now);
+      const body: ListenAgainResponse = { tracks, seeded: true };
+      shelfCache.set(user.id, { at: now, body });
+      return NextResponse.json<ListenAgainResponse>(body);
     }
   }
   return NextResponse.json<ListenAgainResponse>({ tracks: [], seeded: false });

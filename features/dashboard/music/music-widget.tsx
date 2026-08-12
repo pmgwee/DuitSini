@@ -42,6 +42,9 @@ interface LibraryResponse {
 interface ListenAgainResponse {
   tracks: MusicTrack[];
   seeded: boolean;
+  /** Server skipped the fan-out and returned the cached shelf (cooldown). */
+  throttled?: boolean;
+  retry_after_s?: number;
 }
 interface LikesResponse {
   tracks: MusicTrack[];
@@ -113,13 +116,25 @@ export function MusicWidget() {
    * their listening-history API "will not update in real time". Their stated
    * reason: a list that does not change under your feet feels trustworthy.
    *
-   * So this shelf recomputes at session boundaries ONLY — a fresh page load,
-   * or the listener explicitly asking. Liking, playing, or blocking a track
-   * records the signal immediately and is reflected in the NEXT build. Nothing
-   * a listener does mid-session may reorder the list they are reading.
+   * So this shelf recomputes only when the listener EXPLICITLY asks — never
+   * automatically. Liking, playing, or blocking a track records the signal
+   * immediately and is reflected in the NEXT build. Nothing a listener does
+   * mid-session may reorder the list they are reading.
    *
-   * `staleTime: Infinity` + no refetch-on-focus is what enforces that: within a
-   * session the only way to rebuild is `listenAgain.refetch()`.
+   * "Explicitly asking" used to include a fresh page load, but a full reload
+   * tears down the persistent YT IFrame too — MusicPlayerProvider survives
+   * route changes, not page reloads (see player-context.tsx) — killing whatever
+   * is playing. So the explicit-ask path is now the ONLY player-preserving
+   * trigger, surfaced two ways: a quiet, always-on RefreshCw icon in the shelf
+   * header (the escape hatch — "always available, never insistent", like the
+   * incumbents' kebab refresh on their Made-For-You hubs), and the contextual
+   * "Update with your new likes" button below, which only appears once a
+   * like/skip would actually change the result. Both call `refreshShelf`.
+   *
+   * `staleTime: Infinity` + no refetch-on-focus enforces the freeze: within a
+   * session the only way to rebuild is `listenAgain.refetch()` (and the GET
+   * route cools the ~19-call InnerTube fan-out to once a minute, returning the
+   * last shelf unchanged within the window).
    */
   const listenAgain = useQuery({
     queryKey: ["yt", "listen-again"],
@@ -176,12 +191,25 @@ export function MusicWidget() {
     setPendingSignals(true);
   }, [queryClient]);
 
-  /** Explicit, user-initiated rebuild — the only in-session refresh path. */
-  const refreshShelf = useCallback(() => {
+  /**
+   * Explicit, user-initiated rebuild — the only player-preserving in-session
+   * refresh path (a full page reload would rebuild the shelf but kills the YT
+   * IFrame — see the policy comment above). The GET route cools the fan-out to
+   * once a minute; within the window it returns the last shelf unchanged with a
+   * `throttled` flag, so we surface that instead of clearing session rows for a
+   * rebuild that didn't happen.
+   */
+  const refreshShelf = useCallback(async () => {
+    const res = await listenAgain.refetch();
+    if (res.data?.throttled) {
+      showToast({
+        message: `Listen Again rebuilds once a minute — try again in ${res.data.retry_after_s ?? 60}s`,
+      });
+      return;
+    }
     setHiddenIds(new Set());
     setPendingSignals(false);
-    void listenAgain.refetch();
-  }, [listenAgain]);
+  }, [listenAgain, showToast]);
 
   const likeTrack = useCallback(
     async (track: MusicTrack) => {
@@ -547,15 +575,36 @@ export function MusicWidget() {
                     shape as the playlists/liked/search shelves. A wrapper with
                     flex-1 but no min-h-0 capped the list at its full content
                     height and let it overflow the card (stuck, non-scrollable). */}
-                {/* The list is deliberately frozen while you're using it. This
-                    is the only in-session way to rebuild — and it only offers
-                    itself once your likes/skips would actually change the
-                    result, so it never nags. Sits at the top of the shelf so
-                    it's reachable without scrolling past the tracks. */}
+                {/* Quiet, always-on rebuild affordance. The shelf is frozen
+                    while you use it; a full page reload would rebuild it but
+                    tears down the persistent IFrame (killing playback), so this
+                    icon is the player-preserving escape hatch — "always
+                    available, never insistent", like the incumbents' kebab
+                    refresh on their Made-For-You hubs. Server cools the fan-out
+                    to once a minute; refreshShelf surfaces that as a toast. */}
+                <div className="mb-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void refreshShelf()}
+                    disabled={listenAgain.isFetching}
+                    aria-label="Rebuild Listen Again"
+                    title="Rebuild Listen Again"
+                    className="grid size-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={cn("size-3.5", listenAgain.isFetching && "animate-spin")}
+                    />
+                  </button>
+                </div>
+                {/* The contextual prompt — only offers itself once your
+                    likes/skips would actually change the result, so it never
+                    nags. The header icon above is the always-on escape hatch;
+                    both rebuild via refreshShelf. Sits at the top of the shelf
+                    so it's reachable without scrolling past the tracks. */}
                 {pendingSignals && (
                   <button
                     type="button"
-                    onClick={refreshShelf}
+                    onClick={() => void refreshShelf()}
                     disabled={listenAgain.isFetching}
                     className="mb-1.5 flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                   >
