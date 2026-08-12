@@ -5,6 +5,7 @@ export type CandidateOrigin =
   | "radio" // song radio for a seed the user actually played
   | "also-like" // "You might also like" shelf
   | "similar-artist" // top songs of an artist adjacent to the user's taste
+  | "artist-catalog" // the named artist's own Songs shelf, popularity-ordered (vibe "top songs by X")
   | "editorial" // YouTube's recommended-playlist shelf
   | "history"; // the user's own play history
 

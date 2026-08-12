@@ -328,6 +328,82 @@ export async function buildRadio(
   };
 }
 
+export interface ArtistCatalogOptions {
+  limit?: number;
+  now?: number;
+  /** Learned per-transition preferences (see `store.loadTransitionBias`). */
+  transitionBias?: Map<string, number>;
+  /** Explicitly liked videoIds — raises confidence in the ranking. */
+  likes?: Set<string>;
+  /** Tracks to remove entirely (not-interested / active snooze). */
+  suppressed?: Set<string>;
+  /** Video ids to exclude (e.g. already-queued). */
+  exclude?: string[];
+}
+
+/**
+ * The "top songs by ARTIST" path (vibe surface). The named artist's own Songs
+ * shelf — which YouTube Music already orders by popularity/recognition — is the
+ * candidate set. Unlike `buildRadio`, neighbours are NOT mixed in: the listener
+ * asked for that artist, so the per-artist diversity cap is lifted (the whole
+ * slate is one artist by intent) and `rankWeight(rank)` over the shelf's natural
+ * order yields top-down recognition with no view-count fetch. The learned-taste
+ * ranker still runs on top: a catalog song the listener skipped sinks, a liked
+ * one rises, recent repeats weigh in via the confidence + recency terms.
+ */
+export async function buildArtistCatalog(
+  artistId: string,
+  history: HistoryEntry[],
+  options: ArtistCatalogOptions = {},
+): Promise<{ tracks: MusicTrack[] }> {
+  const {
+    limit = 25,
+    now = Date.now(),
+    transitionBias,
+    likes = new Set<string>(),
+    suppressed = new Set<string>(),
+    exclude = [],
+  } = options;
+
+  // Pull a shelf larger than the slate so dropped skips still leave a full list.
+  const catalog = await fetchArtistSongs(artistId, Math.max(limit * 2, limit + 10));
+  if (catalog.length === 0) return { tracks: [] };
+
+  const historyMap = toHistoryMap(history);
+  const excluded = new Set(exclude);
+
+  const pool = new CandidatePool();
+  pool.addMany(catalog, `artist:${artistId}`, "artist-catalog", 1);
+
+  const context: ScoreContext = { history: historyMap, likes, now };
+  const scored = pool
+    .values()
+    .filter((candidate) => !excluded.has(candidate.track.videoId))
+    .filter((candidate) => !suppressed.has(candidate.track.videoId))
+    // A skip normally sinks a track; a later like supersedes an old skip.
+    .filter((candidate) => {
+      const skips = historyMap.get(candidate.track.videoId)?.skipCount ?? 0;
+      return skips === 0 || likes.has(candidate.track.videoId);
+    })
+    .map((candidate) => ({ candidate, value: score(candidate, context) }));
+
+  if (scored.length === 0) return { tracks: [] };
+
+  // Pure exploitation (epsilon 0) — the listener wants the TOP songs, not deep
+  // cuts — and no per-artist cap, since one artist is the whole point.
+  const slate = assemble(scored, {
+    limit,
+    maxPerArtist: Number.POSITIVE_INFINITY,
+    epsilon: 0,
+  });
+  const tagVectors = await ensureTagVectors(
+    slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
+    createDbTagStore(),
+  );
+  const ordered = sequence(slate, 0, { transitionBias, tagVectors });
+  return { tracks: ordered.map((candidate) => candidate.track) };
+}
+
 /**
  * Extend an in-flight radio queue by one page. Used when a long session
  * exhausts the first 50 tracks — the queue is genuinely unbounded.

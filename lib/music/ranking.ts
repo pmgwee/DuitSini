@@ -18,6 +18,7 @@ import type { Candidate, CandidateOrigin, HistoryEntry } from "./types";
 /** How much to trust each source. Personal signals outrank broad ones. */
 const ORIGIN_WEIGHT: Record<CandidateOrigin, number> = {
   radio: 1, // seeded by a track the listener actually played
+  "artist-catalog": 0.95, // the named artist's own Songs shelf (vibe "top songs by X")
   "also-like": 0.85, // YouTube's own "more like this"
   "similar-artist": 0.6, // one hop out — adjacent taste
   editorial: 0.45, // broad curation, least personal

@@ -320,3 +320,36 @@ export async function fetchArtistSongs(artistId: string, limit = 10): Promise<Mu
     return [];
   }
 }
+
+/**
+ * Resolve an artist name to its YouTube Music channel id (UC…), or null.
+ *
+ * The vibe surface's "top songs by X" path needs the artist's browse id — the
+ * popularity-ordered Songs shelf lives there, which `fetchArtistSongs` reads.
+ * The name is searched (signed-out) and the first artist channel id is returned.
+ * Null on any miss/failure → the caller falls back to song-radio.
+ */
+export async function resolveArtistId(query: string): Promise<string | null> {
+  if (!query) return null;
+  try {
+    const yt = await getClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: any = await yt.music.search(query, { type: "artist" });
+    // youtubei.js returns either `contents` (flat) or `categories[].contents`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buckets: any[] = Array.isArray(result?.contents)
+      ? result.contents
+      : Array.isArray(result?.categories)
+        ? result.categories.flatMap((c: any) => c?.contents ?? [])
+        : [];
+    for (const item of buckets) {
+      const id: string | undefined =
+        item?.id ?? item?.endpoint?.payload?.browseId ?? item?.browseId;
+      if (typeof id === "string" && id.startsWith("UC")) return id;
+    }
+    return null;
+  } catch (err) {
+    console.error("[music/sources] artist resolve failed:", query, (err as Error)?.message ?? err);
+    return null;
+  }
+}

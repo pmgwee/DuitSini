@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { buildRadio } from "@/lib/music/recommend";
+import { buildRadio, buildArtistCatalog } from "@/lib/music/recommend";
 import { parseVibe, synthSeedQuery, type VibeConstraints } from "@/lib/music/vibe";
+import { resolveArtistId } from "@/lib/music/sources";
 import {
   loadHistory,
   loadLikes,
@@ -85,8 +86,54 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 2. Grounding: resolve a real seed videoId. Prefer named seeds; fall back to
-  //    a query synthesised from the requested tags.
+  // The listener's signals are needed by every fulfilment path, so load once.
+  const [history, likes, suppressions] = await Promise.all([
+    loadHistory(supabase, user.id),
+    loadLikes(supabase, user.id),
+    loadSuppressions(supabase, user.id),
+  ]);
+  const transitionBias = await loadTransitionBias(supabase, user.id);
+  const likeIds = new Set(likes.map((l) => l.videoId));
+  const suppressed = new Set([...suppressions.notInterested, ...suppressions.snoozedUntil.keys()]);
+
+  const applyExclude = (tracks: MusicTrack[]): MusicTrack[] =>
+    constraints.exclude.length === 0
+      ? tracks
+      : tracks.filter((t) => !constraints.exclude.some((w) => t.title.toLowerCase().includes(w)));
+
+  // 2a. Artist-catalog path — "top songs by X". parseVibe separates a named
+  //     ARTIST from a named song; when an artist is named we resolve it to a
+  //     channel id and read its own popularity-ordered Songs shelf (NOT a
+  //     similar-track radio). Falls through to song-radio if unresolved.
+  const artistQuery = constraints.artists?.[0];
+  if (artistQuery) {
+    const artistId = await resolveArtistId(artistQuery);
+    if (artistId) {
+      let tracks: MusicTrack[] = [];
+      try {
+        const catalog = await buildArtistCatalog(artistId, history, {
+          limit: constraints.length,
+          transitionBias,
+          likes: likeIds,
+          suppressed,
+        });
+        tracks = catalog.tracks;
+      } catch (err) {
+        console.error("[yt/vibe] artist catalog build failed:", (err as Error)?.message ?? err);
+      }
+      return NextResponse.json<VibeResponse>({
+        tracks: applyExclude(tracks),
+        constraints,
+        configured: true,
+        seedQuery: artistQuery,
+      });
+    }
+    // Unresolved artist: use the name as a radio seed below rather than failing.
+    if (constraints.seedNames.length === 0) constraints.seedNames = [artistQuery];
+  }
+
+  // 2b. Song-radio path. Resolve a real seed videoId via search (grounding — no
+  //     hallucinated ids), then personalize around it.
   const queries = constraints.seedNames.length > 0 ? constraints.seedNames : [synthSeedQuery(constraints)];
   let seedVideoId: string | null = null;
   let seedQuery: string | null = null;
@@ -105,16 +152,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 3. Fulfil via the existing behavioural radio — personalized to this listener.
-  const [history, likes, suppressions] = await Promise.all([
-    loadHistory(supabase, user.id),
-    loadLikes(supabase, user.id),
-    loadSuppressions(supabase, user.id),
-  ]);
-  const transitionBias = await loadTransitionBias(supabase, user.id);
-  const likeIds = new Set(likes.map((l) => l.videoId));
-  const suppressed = new Set([...suppressions.notInterested, ...suppressions.snoozedUntil.keys()]);
-
+  // 3. Fulfil via the behavioural radio — personalized to this listener.
   let tracks: MusicTrack[] = [];
   try {
     const radio = await buildRadio(seedVideoId, history, {
@@ -128,12 +166,10 @@ export async function GET(req: NextRequest) {
     console.error("[yt/vibe] radio build failed:", (err as Error)?.message ?? err);
   }
 
-  // 4. Apply the exclude words the user asked to avoid (title-level, soft).
-  if (constraints.exclude.length > 0 && tracks.length > 0) {
-    tracks = tracks.filter(
-      (t) => !constraints.exclude.some((w) => t.title.toLowerCase().includes(w)),
-    );
-  }
-
-  return NextResponse.json<VibeResponse>({ tracks, constraints, configured: true, seedQuery });
+  return NextResponse.json<VibeResponse>({
+    tracks: applyExclude(tracks),
+    constraints,
+    configured: true,
+    seedQuery,
+  });
 }
