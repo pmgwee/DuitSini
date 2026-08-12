@@ -149,7 +149,9 @@ export async function GET(req: NextRequest) {
     let tracks: MusicTrack[] = [];
     try {
       const catalog = await buildArtistCatalog(resolvedArtist.id, history, {
-        limit: constraints.length,
+        // A "top songs" catalog is naturally ~20+; floor it so a radio-style
+        // length (the LLM occasionally low-balls to 5) doesn't truncate it.
+        limit: Math.max(constraints.length, 20),
         transitionBias,
         likes: likeIds,
         suppressed,

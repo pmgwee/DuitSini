@@ -305,19 +305,35 @@ export async function fetchPlaylistTracks(playlistId: string, limit = 25): Promi
   }
 }
 
-/** Top songs for an artist channel id (drawn from "Similar artists"). */
+/**
+ * Top songs for an artist channel id — the artist's own catalog, popularity-
+ * ordered. Used two ways: the vibe "top songs by X" path (a fuller catalog) and
+ * the shelf's similar-artist fanout (a short top-N). The artist page's "Top
+ * songs" preview shows only ~5; `getAllSongs()` returns the full list (101+,
+ * with a continuation for more), so the catalog is not capped at the preview.
+ */
 export async function fetchArtistSongs(artistId: string, limit = 10): Promise<MusicTrack[]> {
   if (!artistId) return [];
   try {
     const yt = await getClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const artist: any = await yt.music.getArtist(artistId);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const all: any = await artist.getAllSongs();
+      const tracks = tracksFrom(all?.contents);
+      if (tracks.length > 0) return tracks.slice(0, limit);
+    } catch {
+      // getAllSongs unavailable for this artist (rare) → fall back to the preview shelf.
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sections: any[] = artist?.sections ?? [];
-    // Prefer the explicit "Songs" shelf; otherwise take whatever shelf yields
-    // playable video ids (artist pages vary by region and catalog).
+    // Prefer the explicit "Songs"/"Top songs" shelf; otherwise take whatever
+    // shelf yields playable video ids (artist pages vary by region and catalog).
     const songShelf =
-      sections.find((s) => /songs/i.test(s?.header?.title?.toString?.() ?? "")) ?? null;
+      sections.find((s) => /songs/i.test(s?.header?.title?.toString?.() ?? s?.title?.toString?.() ?? "")) ??
+      sections[0] ??
+      null;
     const fromShelf = tracksFrom(songShelf?.contents);
     if (fromShelf.length > 0) return fromShelf.slice(0, limit);
     for (const section of sections) {

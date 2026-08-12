@@ -32,12 +32,12 @@ import type {
  */
 
 /** Seeds per shelf build. Each is one HTTP call; the pool grows ~50/seed. */
-const SEED_COUNT = 4;
+const SEED_COUNT = 6;
 /** Extra one-hop sources — an adjacent artist and an editorial playlist. */
 const SIMILAR_ARTIST_FANOUT = 2;
 const EDITORIAL_FANOUT = 1;
 /** Liked-track neighbourhoods to fetch per build (taste-signal fidelity). */
-const LIKE_FANOUT = 2;
+const LIKE_FANOUT = 4;
 /** A like carries ~this many plays of seed-trust (cf. W_LIKE "≈ five completed plays"). */
 const LIKE_SEED_WEIGHT = 3;
 /** How often the liked-fanout rotation advances (cycles through all likes over time). */
