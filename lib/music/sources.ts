@@ -87,6 +87,16 @@ function getClient(): Promise<Innertube> {
     clientPromise = Innertube.create({
       retrieve_player: false,
       enable_session_cache: false,
+      // Region/language for the InnerTube session. The library defaults to
+      // hl='en' / gl='US'; a deployment serving a non-US audience overrides via
+      // env so the region-sensitive candidate shelves (also-like / similar-
+      // artist / editorial) reflect the local market instead of a US one. This
+      // app is MYR-home for a Malaysia-based audience → YTM_LOCATION=MY in prod.
+      // This is a REGION correction, NOT a language quota: it changes which
+      // market YouTube curates for, not the script of titles nor the mix of the
+      // recommendation output (the listener's taste still decides that).
+      lang: process.env.YTM_LANG || undefined,
+      location: process.env.YTM_LOCATION || undefined,
     }).catch((err) => {
       // Let the next call retry instead of caching a rejected promise forever.
       clientPromise = null;

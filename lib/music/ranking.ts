@@ -238,9 +238,13 @@ export function assemble(
  *
  * Weighted by play count and recency, but deliberately spread: taking the top-N
  * most-played tracks would keep regenerating the same neighbourhood, which is
- * the loop we're trying to break. So we sample proportional to weight and force
- * one seed from the tail of the history — a cheap stand-in for the contextual
- * diversity Spotify gets from its session embeddings.
+ * the loop we're trying to break. So each slot samples proportional to weight
+ * but preferentially among entries whose primary artist isn't yet represented
+ * (coverage-biased), plus one oldest-played tail pick — a cheap stand-in for
+ * the contextual diversity Spotify gets from its session embeddings. The
+ * coverage bias is what makes a minority taste cluster (e.g. a Chinese cluster
+ * inside an English-majority history) actually contribute seeds instead of
+ * being outvoted by the mode.
  */
 export function pickSeeds(
   history: HistoryEntry[],
@@ -262,21 +266,37 @@ export function pickSeeds(
     return Math.max(0.01, entry.playCount * recency * skipPenalty * likeBoost);
   };
 
-  const pool = history.map((entry) => ({ entry, weight: weightOf(entry) }));
+  const pool = history.map((entry) => ({
+    entry,
+    weight: weightOf(entry),
+    artist: primaryArtist(entry.channel),
+  }));
   const picked: HistoryEntry[] = [];
+  const pickedArtists = new Set<string>();
 
-  // Reserve the last slot for a deliberate long-tail pick.
+  // Coverage-biased sampling. Each weighted slot samples proportional to
+  // importance, but preferentially among entries whose primary artist isn't
+  // represented yet — so a draw SPANS taste clusters (an English-majority
+  // history with a Chinese minority yields seeds from BOTH) instead of
+  // weighted-proportional sampling landing most slots in the mode. Stays
+  // stochastic so variety across builds is preserved; falls back to the full
+  // pool once every visible artist is already covered. The last slot is held
+  // back for a deliberate long-tail pick below.
   const weightedSlots = Math.max(1, count - 1);
   for (let i = 0; i < weightedSlots && pool.length > 0; i++) {
-    const total = pool.reduce((sum, p) => sum + p.weight, 0);
+    const uncovered = pool.filter((p) => !pickedArtists.has(p.artist));
+    const field = uncovered.length > 0 ? uncovered : pool;
+    const total = field.reduce((sum, p) => sum + p.weight, 0);
     let threshold = random() * total;
     let index = 0;
-    for (; index < pool.length - 1; index++) {
-      threshold -= pool[index]!.weight;
+    for (; index < field.length - 1; index++) {
+      threshold -= field[index]!.weight;
       if (threshold <= 0) break;
     }
-    picked.push(pool[index]!.entry);
-    pool.splice(index, 1);
+    const choice = field[index]!;
+    picked.push(choice.entry);
+    pickedArtists.add(choice.artist);
+    pool.splice(pool.indexOf(choice), 1);
   }
 
   // The tail pick: least-recently-played survivor, to break out of the bubble.

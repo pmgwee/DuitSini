@@ -183,26 +183,49 @@ export async function buildShelf(
     pool.addMany(radio.tracks, radio.seedId, "radio", seed?.playCount ?? 1);
   });
 
-  // --- Stage 1b: the related page of the strongest seed ----------------------
-  // One call yields three more shelves: "You might also like" (playable),
-  // "Similar artists" (Spotify's removed /related-artists), and YouTube's
-  // editorial playlists (Apple's curated layer).
-  const strongest = seeds[0];
-  const related = strongest
-    ? await fetchRelated(strongest.videoId)
-    : { alsoLike: [], similarArtistIds: [], playlistIds: [] };
-
-  pool.addMany(related.alsoLike, `also:${strongest?.videoId ?? ""}`, "also-like", strongest?.playCount ?? 1);
+  // --- Stage 1b: the related page across ALL seeds (not just the strongest) --
+  // Fetching related per seed (one call each, parallel) means the similar-artist
+  // and editorial layers see the FULL seed diversity rather than only the single
+  // highest-weight seed's neighbourhood — so a minority-taste seed's similar
+  // artists reach the pool too. Shelves are merged and deduped across seeds.
+  const relatedPages = await settle(seeds.map((s) => fetchRelated(s.videoId)));
+  const mergedAlsoLike: MusicTrack[] = [];
+  const similarArtistIds: string[] = [];
+  const playlistIds: string[] = [];
+  const seenAlso = new Set<string>();
+  const seenArtist = new Set<string>();
+  const seenPlaylist = new Set<string>();
+  for (const page of relatedPages) {
+    for (const t of page.alsoLike) {
+      if (!seenAlso.has(t.videoId)) {
+        seenAlso.add(t.videoId);
+        mergedAlsoLike.push(t);
+      }
+    }
+    for (const id of page.similarArtistIds) {
+      if (!seenArtist.has(id)) {
+        seenArtist.add(id);
+        similarArtistIds.push(id);
+      }
+    }
+    for (const id of page.playlistIds) {
+      if (!seenPlaylist.has(id)) {
+        seenPlaylist.add(id);
+        playlistIds.push(id);
+      }
+    }
+  }
+  pool.addMany(mergedAlsoLike, "also:multi", "also-like", seeds[0]?.playCount ?? 1);
 
   // --- Stage 1c: one hop out — adjacent artists and editorial curation -------
   const [artistBatches, playlistBatches] = await Promise.all([
     settle(
-      related.similarArtistIds
+      similarArtistIds
         .slice(0, SIMILAR_ARTIST_FANOUT)
         .map(async (id) => ({ id, tracks: await fetchArtistSongs(id) })),
     ),
     settle(
-      related.playlistIds
+      playlistIds
         .slice(0, EDITORIAL_FANOUT)
         .map(async (id) => ({ id, tracks: await fetchPlaylistTracks(id) })),
     ),
