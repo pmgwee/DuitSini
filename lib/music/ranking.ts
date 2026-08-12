@@ -18,6 +18,7 @@ import type { Candidate, CandidateOrigin, HistoryEntry } from "./types";
 /** How much to trust each source. Personal signals outrank broad ones. */
 const ORIGIN_WEIGHT: Record<CandidateOrigin, number> = {
   radio: 1, // seeded by a track the listener actually played
+  "artist-catalog": 0.95, // the named artist's own Songs shelf (vibe "top songs by X")
   "also-like": 0.85, // YouTube's own "more like this"
   "similar-artist": 0.6, // one hop out — adjacent taste
   editorial: 0.45, // broad curation, least personal
@@ -55,9 +56,23 @@ const W_LIKE = 1; // one like ≈ five completed plays of certainty
 const W_COMPLETE = 0.2;
 const W_PLAY = 0.06;
 const W_SKIP = 0.55; // subtracted — a skip actively lowers confidence
-const PLAY_CAP = 12; // beyond this, extra plays say little we don't know
+const PLAY_CAP = 12; // the LINEAR portion of the play term (not a flat ceiling)
+const W_PLAY_TAIL = 0.1; // slow log growth beyond PLAY_CAP so heavy repetition keeps rising
 /** Confidence can go negative; clamp so a buried track can still be explored. */
 const MIN_CONFIDENCE = 0.05;
+
+/**
+ * How much a track's play count contributes to evidence. Linear up to PLAY_CAP
+ * (identical to the original flat term there), then a slow log tail so a track
+ * played 50× outranks one played 12× — heavy repetition is a real taste signal
+ * that a flat cap used to flatten. Never decays (decay is recency's job, below).
+ */
+function playEvidence(playCount: number): number {
+  if (playCount <= 0) return 0;
+  const linear = Math.min(playCount, PLAY_CAP) * W_PLAY;
+  if (playCount <= PLAY_CAP) return linear;
+  return linear + Math.log2(playCount - PLAY_CAP + 1) * W_PLAY_TAIL;
+}
 
 export interface ScoreContext {
   /** Everything the listener has played, keyed by videoId. */
@@ -86,7 +101,7 @@ export function confidence(
   if (context.likes.has(videoId)) evidence += W_LIKE;
   if (entry) {
     evidence += entry.completeCount * W_COMPLETE;
-    evidence += Math.min(entry.playCount, PLAY_CAP) * W_PLAY;
+    evidence += playEvidence(entry.playCount);
     evidence -= entry.skipCount * W_SKIP;
   }
 
@@ -149,13 +164,22 @@ export interface AssembleOptions {
   epsilon?: number;
   /** Max tracks per primary artist, so one artist can't dominate the slate. */
   maxPerArtist?: number;
+  /**
+   * Primary artists the listener has explicitly liked. The per-artist cap is
+   * relaxed for these (see `endorsedCap`): an artist the listener asked for more
+   * of is endorsed taste, not the clumping the cap exists to prevent. Derived
+   * from the listener's own likes at the call site — never a static list.
+   */
+  endorsedArtists?: Set<string>;
+  /** Per-artist cap for endorsed artists (defaults to 2× `maxPerArtist`). */
+  endorsedCap?: number;
   /** Pinned first entry — position-aware sequencing wants a familiar opener. */
   opener?: MusicTrack | null;
   /** Injectable RNG so assembly can be tested deterministically. */
   random?: () => number;
 }
 
-function primaryArtist(channel: string): string {
+export function primaryArtist(channel: string): string {
   return channel.split(",")[0]!.trim().toLowerCase();
 }
 
@@ -175,6 +199,8 @@ export function assemble(
     limit,
     epsilon = 0.12,
     maxPerArtist = 3,
+    endorsedArtists = new Set<string>(),
+    endorsedCap = maxPerArtist * 2,
     opener = null,
     random = Math.random,
   } = options;
@@ -194,7 +220,8 @@ export function assemble(
     const { track } = entry.candidate;
     if (usedIds.has(track.videoId)) return false;
     const artist = primaryArtist(track.channel);
-    if (artist && (artistCounts.get(artist) ?? 0) >= maxPerArtist) return false;
+    const cap = artist && endorsedArtists.has(artist) ? endorsedCap : maxPerArtist;
+    if (artist && (artistCounts.get(artist) ?? 0) >= cap) return false;
     chosen.push(entry.candidate);
     usedIds.add(track.videoId);
     if (artist) artistCounts.set(artist, (artistCounts.get(artist) ?? 0) + 1);
@@ -237,9 +264,13 @@ export function assemble(
  *
  * Weighted by play count and recency, but deliberately spread: taking the top-N
  * most-played tracks would keep regenerating the same neighbourhood, which is
- * the loop we're trying to break. So we sample proportional to weight and force
- * one seed from the tail of the history — a cheap stand-in for the contextual
- * diversity Spotify gets from its session embeddings.
+ * the loop we're trying to break. So each slot samples proportional to weight
+ * but preferentially among entries whose primary artist isn't yet represented
+ * (coverage-biased), plus one oldest-played tail pick — a cheap stand-in for
+ * the contextual diversity Spotify gets from its session embeddings. The
+ * coverage bias is what makes a minority taste cluster (e.g. a Chinese cluster
+ * inside an English-majority history) actually contribute seeds instead of
+ * being outvoted by the mode.
  */
 export function pickSeeds(
   history: HistoryEntry[],
@@ -252,30 +283,51 @@ export function pickSeeds(
   if (history.length <= count) return [...history];
 
   const weightOf = (entry: HistoryEntry): number => {
-    const daysSince = (now - Date.parse(entry.lastPlayedAt)) / DAY_MS;
-    const recency = Number.isFinite(daysSince) ? 1 / (1 + Math.max(0, daysSince) / 7) : 0.5;
     const skipPenalty = Math.pow(0.4, entry.skipCount);
     // A liked track is the clearest statement of taste we have, so it is a
-    // disproportionately good place to start a neighbourhood from.
-    const likeBoost = likes.has(entry.videoId) ? 3 : 1;
-    return Math.max(0.01, entry.playCount * recency * skipPenalty * likeBoost);
+    // disproportionately good place to start a neighbourhood from. Likes do not
+    // decay (a heart is a permanent statement), so a liked track's seed weight
+    // does NOT decay with recency either — otherwise older liked minority-taste
+    // tracks get buried under recent majority plays and stop surfacing.
+    if (likes.has(entry.videoId)) {
+      return Math.max(0.01, entry.playCount * skipPenalty * 3);
+    }
+    const daysSince = (now - Date.parse(entry.lastPlayedAt)) / DAY_MS;
+    const recency = Number.isFinite(daysSince) ? 1 / (1 + Math.max(0, daysSince) / 7) : 0.5;
+    return Math.max(0.01, entry.playCount * recency * skipPenalty);
   };
 
-  const pool = history.map((entry) => ({ entry, weight: weightOf(entry) }));
+  const pool = history.map((entry) => ({
+    entry,
+    weight: weightOf(entry),
+    artist: primaryArtist(entry.channel),
+  }));
   const picked: HistoryEntry[] = [];
+  const pickedArtists = new Set<string>();
 
-  // Reserve the last slot for a deliberate long-tail pick.
+  // Coverage-biased sampling. Each weighted slot samples proportional to
+  // importance, but preferentially among entries whose primary artist isn't
+  // represented yet — so a draw SPANS taste clusters (an English-majority
+  // history with a Chinese minority yields seeds from BOTH) instead of
+  // weighted-proportional sampling landing most slots in the mode. Stays
+  // stochastic so variety across builds is preserved; falls back to the full
+  // pool once every visible artist is already covered. The last slot is held
+  // back for a deliberate long-tail pick below.
   const weightedSlots = Math.max(1, count - 1);
   for (let i = 0; i < weightedSlots && pool.length > 0; i++) {
-    const total = pool.reduce((sum, p) => sum + p.weight, 0);
+    const uncovered = pool.filter((p) => !pickedArtists.has(p.artist));
+    const field = uncovered.length > 0 ? uncovered : pool;
+    const total = field.reduce((sum, p) => sum + p.weight, 0);
     let threshold = random() * total;
     let index = 0;
-    for (; index < pool.length - 1; index++) {
-      threshold -= pool[index]!.weight;
+    for (; index < field.length - 1; index++) {
+      threshold -= field[index]!.weight;
       if (threshold <= 0) break;
     }
-    picked.push(pool[index]!.entry);
-    pool.splice(index, 1);
+    const choice = field[index]!;
+    picked.push(choice.entry);
+    pickedArtists.add(choice.artist);
+    pool.splice(pool.indexOf(choice), 1);
   }
 
   // The tail pick: least-recently-played survivor, to break out of the bubble.

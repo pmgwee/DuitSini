@@ -87,6 +87,16 @@ function getClient(): Promise<Innertube> {
     clientPromise = Innertube.create({
       retrieve_player: false,
       enable_session_cache: false,
+      // Region/language for the InnerTube session. The library defaults to
+      // hl='en' / gl='US'; a deployment serving a non-US audience overrides via
+      // env so the region-sensitive candidate shelves (also-like / similar-
+      // artist / editorial) reflect the local market instead of a US one. This
+      // app is MYR-home for a Malaysia-based audience → YTM_LOCATION=MY in prod.
+      // This is a REGION correction, NOT a language quota: it changes which
+      // market YouTube curates for, not the script of titles nor the mix of the
+      // recommendation output (the listener's taste still decides that).
+      lang: process.env.YTM_LANG || undefined,
+      location: process.env.YTM_LOCATION || undefined,
     }).catch((err) => {
       // Let the next call retry instead of caching a rejected promise forever.
       clientPromise = null;
@@ -295,19 +305,35 @@ export async function fetchPlaylistTracks(playlistId: string, limit = 25): Promi
   }
 }
 
-/** Top songs for an artist channel id (drawn from "Similar artists"). */
+/**
+ * Top songs for an artist channel id — the artist's own catalog, popularity-
+ * ordered. Used two ways: the vibe "top songs by X" path (a fuller catalog) and
+ * the shelf's similar-artist fanout (a short top-N). The artist page's "Top
+ * songs" preview shows only ~5; `getAllSongs()` returns the full list (101+,
+ * with a continuation for more), so the catalog is not capped at the preview.
+ */
 export async function fetchArtistSongs(artistId: string, limit = 10): Promise<MusicTrack[]> {
   if (!artistId) return [];
   try {
     const yt = await getClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const artist: any = await yt.music.getArtist(artistId);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const all: any = await artist.getAllSongs();
+      const tracks = tracksFrom(all?.contents);
+      if (tracks.length > 0) return tracks.slice(0, limit);
+    } catch {
+      // getAllSongs unavailable for this artist (rare) → fall back to the preview shelf.
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sections: any[] = artist?.sections ?? [];
-    // Prefer the explicit "Songs" shelf; otherwise take whatever shelf yields
-    // playable video ids (artist pages vary by region and catalog).
+    // Prefer the explicit "Songs"/"Top songs" shelf; otherwise take whatever
+    // shelf yields playable video ids (artist pages vary by region and catalog).
     const songShelf =
-      sections.find((s) => /songs/i.test(s?.header?.title?.toString?.() ?? "")) ?? null;
+      sections.find((s) => /songs/i.test(s?.header?.title?.toString?.() ?? s?.title?.toString?.() ?? "")) ??
+      sections[0] ??
+      null;
     const fromShelf = tracksFrom(songShelf?.contents);
     if (fromShelf.length > 0) return fromShelf.slice(0, limit);
     for (const section of sections) {
@@ -318,5 +344,44 @@ export async function fetchArtistSongs(artistId: string, limit = 10): Promise<Mu
   } catch (err) {
     console.error("[music/sources] artist failed:", artistId, (err as Error)?.message ?? err);
     return [];
+  }
+}
+
+/**
+ * Resolve an artist name to its YouTube Music channel id (UC…), or null.
+ *
+ * The vibe surface's "top songs by X" path needs the artist's browse id — the
+ * popularity-ordered Songs shelf lives there, which `fetchArtistSongs` reads.
+ * The name is searched (signed-out) and the first artist channel id is returned.
+ * Null on any miss/failure → the caller falls back to song-radio.
+ */
+export async function resolveArtistId(query: string): Promise<string | null> {
+  if (!query) return null;
+  try {
+    const yt = await getClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result: any = await yt.music.search(query, { type: "artist" });
+    // Artist results come back as shelf SECTIONS in `result.contents`
+    // (MusicShelf), each section's `.contents` holding the artist items
+    // (MusicResponsiveListItem whose `.id` / `.endpoint.payload.browseId` is the
+    // UC channel id). A top-result card may also carry the browseId on the
+    // section itself. Iterate both levels; the `UC` prefix filters out video
+    // ids (which are 11-char, not channel ids).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sections: any[] = Array.isArray(result?.contents) ? result.contents : [];
+    for (const section of sections) {
+      const sectionId: unknown = section?.endpoint?.payload?.browseId ?? section?.id;
+      if (typeof sectionId === "string" && sectionId.startsWith("UC")) return sectionId;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const items: any[] = Array.isArray(section?.contents) ? section.contents : [];
+      for (const item of items) {
+        const id: unknown = item?.id ?? item?.endpoint?.payload?.browseId ?? item?.browseId;
+        if (typeof id === "string" && id.startsWith("UC")) return id;
+      }
+    }
+    return null;
+  } catch (err) {
+    console.error("[music/sources] artist resolve failed:", query, (err as Error)?.message ?? err);
+    return null;
   }
 }

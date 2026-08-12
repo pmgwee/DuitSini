@@ -6,7 +6,7 @@ import {
   fetchRelated,
   extendRadio,
 } from "./sources";
-import { assemble, pickSeeds, score, type ScoreContext } from "./ranking";
+import { assemble, pickSeeds, primaryArtist, score, type ScoreContext } from "./ranking";
 import { sequence } from "./similarity";
 import { ensureTagVectors } from "./tags";
 import { createDbTagStore } from "./tags-store";
@@ -32,10 +32,16 @@ import type {
  */
 
 /** Seeds per shelf build. Each is one HTTP call; the pool grows ~50/seed. */
-const SEED_COUNT = 4;
+const SEED_COUNT = 6;
 /** Extra one-hop sources — an adjacent artist and an editorial playlist. */
 const SIMILAR_ARTIST_FANOUT = 2;
 const EDITORIAL_FANOUT = 1;
+/** Liked-track neighbourhoods to fetch per build (taste-signal fidelity). */
+const LIKE_FANOUT = 4;
+/** A like carries ~this many plays of seed-trust (cf. W_LIKE "≈ five completed plays"). */
+const LIKE_SEED_WEIGHT = 3;
+/** How often the liked-fanout rotation advances (cycles through all likes over time). */
+const LIKE_ROTATION_MS = 2 * 60_000;
 
 class CandidatePool {
   private readonly byId = new Map<string, Candidate>();
@@ -183,26 +189,49 @@ export async function buildShelf(
     pool.addMany(radio.tracks, radio.seedId, "radio", seed?.playCount ?? 1);
   });
 
-  // --- Stage 1b: the related page of the strongest seed ----------------------
-  // One call yields three more shelves: "You might also like" (playable),
-  // "Similar artists" (Spotify's removed /related-artists), and YouTube's
-  // editorial playlists (Apple's curated layer).
-  const strongest = seeds[0];
-  const related = strongest
-    ? await fetchRelated(strongest.videoId)
-    : { alsoLike: [], similarArtistIds: [], playlistIds: [] };
-
-  pool.addMany(related.alsoLike, `also:${strongest?.videoId ?? ""}`, "also-like", strongest?.playCount ?? 1);
+  // --- Stage 1b: the related page across ALL seeds (not just the strongest) --
+  // Fetching related per seed (one call each, parallel) means the similar-artist
+  // and editorial layers see the FULL seed diversity rather than only the single
+  // highest-weight seed's neighbourhood — so a minority-taste seed's similar
+  // artists reach the pool too. Shelves are merged and deduped across seeds.
+  const relatedPages = await settle(seeds.map((s) => fetchRelated(s.videoId)));
+  const mergedAlsoLike: MusicTrack[] = [];
+  const similarArtistIds: string[] = [];
+  const playlistIds: string[] = [];
+  const seenAlso = new Set<string>();
+  const seenArtist = new Set<string>();
+  const seenPlaylist = new Set<string>();
+  for (const page of relatedPages) {
+    for (const t of page.alsoLike) {
+      if (!seenAlso.has(t.videoId)) {
+        seenAlso.add(t.videoId);
+        mergedAlsoLike.push(t);
+      }
+    }
+    for (const id of page.similarArtistIds) {
+      if (!seenArtist.has(id)) {
+        seenArtist.add(id);
+        similarArtistIds.push(id);
+      }
+    }
+    for (const id of page.playlistIds) {
+      if (!seenPlaylist.has(id)) {
+        seenPlaylist.add(id);
+        playlistIds.push(id);
+      }
+    }
+  }
+  pool.addMany(mergedAlsoLike, "also:multi", "also-like", seeds[0]?.playCount ?? 1);
 
   // --- Stage 1c: one hop out — adjacent artists and editorial curation -------
   const [artistBatches, playlistBatches] = await Promise.all([
     settle(
-      related.similarArtistIds
+      similarArtistIds
         .slice(0, SIMILAR_ARTIST_FANOUT)
         .map(async (id) => ({ id, tracks: await fetchArtistSongs(id) })),
     ),
     settle(
-      related.playlistIds
+      playlistIds
         .slice(0, EDITORIAL_FANOUT)
         .map(async (id) => ({ id, tracks: await fetchPlaylistTracks(id) })),
     ),
@@ -212,6 +241,33 @@ export async function buildShelf(
   }
   for (const batch of playlistBatches) {
     pool.addMany(batch.tracks, `playlist:${batch.id}`, "editorial", 1);
+  }
+
+  // --- Stage 1d: liked-track fanout (taste-signal fidelity) ------------------
+  // A like is the clearest taste statement, but until now it only biased seed
+  // selection and the confidence term — it never GUARANTEED its neighbourhood
+  // entered the pool. So a freshly-liked discovery (e.g. a track liked from a
+  // previous shelf) rarely surfaced similar tracks. Fetch radio around a few
+  // liked tracks that weren't picked as seeds. Coverage is a DETERMINISTIC
+  // round-robin over the whole liked set (stable within a short window, then
+  // rotates) — not a recency-biased sample — because likes don't decay: this is
+  // the mechanism that surfaces an older minority-taste cluster (e.g. Chinese
+  // likes played long ago) that recency-based seed selection buries.
+  const seededIds = new Set(seeds.map((s) => s.videoId));
+  const likedCandidates = likes.filter((l) => !seededIds.has(l.videoId));
+  if (likedCandidates.length > 0) {
+    const start =
+      likedCandidates.length > LIKE_FANOUT
+        ? Math.floor(now / LIKE_ROTATION_MS) % likedCandidates.length
+        : 0;
+    const picks: string[] = [];
+    for (let i = 0; i < LIKE_FANOUT && i < likedCandidates.length; i++) {
+      picks.push(likedCandidates[(start + i) % likedCandidates.length]!.videoId);
+    }
+    const likeRadios = await settle(picks.map((id) => fetchRadio(id)));
+    for (const radio of likeRadios) {
+      pool.addMany(radio.tracks, `liked:${radio.seedId}`, "radio", LIKE_SEED_WEIGHT);
+    }
   }
 
   if (pool.size === 0) return [];
@@ -239,7 +295,11 @@ export async function buildShelf(
       }
     : null;
 
-  const slate = assemble(scored, { limit, opener, random });
+  // Artists the listener has explicitly liked get a relaxed per-artist cap — an
+  // endorsed artist is taste the listener asked for more of, not the clumping the
+  // cap exists to prevent. Derived from the listener's own likes, never a list.
+  const endorsedArtists = new Set(likes.map((l) => primaryArtist(l.channel)));
+  const slate = assemble(scored, { limit, opener, random, endorsedArtists });
 
   // --- Stage 3: sequence for smooth transitions ------------------------------
   // Tag the final SLATE (not the whole pool) so cold tracks — pairs that share
@@ -326,6 +386,82 @@ export async function buildRadio(
     tracks: ordered.map((candidate) => candidate.track),
     continuation: radio.continuation,
   };
+}
+
+export interface ArtistCatalogOptions {
+  limit?: number;
+  now?: number;
+  /** Learned per-transition preferences (see `store.loadTransitionBias`). */
+  transitionBias?: Map<string, number>;
+  /** Explicitly liked videoIds — raises confidence in the ranking. */
+  likes?: Set<string>;
+  /** Tracks to remove entirely (not-interested / active snooze). */
+  suppressed?: Set<string>;
+  /** Video ids to exclude (e.g. already-queued). */
+  exclude?: string[];
+}
+
+/**
+ * The "top songs by ARTIST" path (vibe surface). The named artist's own Songs
+ * shelf — which YouTube Music already orders by popularity/recognition — is the
+ * candidate set. Unlike `buildRadio`, neighbours are NOT mixed in: the listener
+ * asked for that artist, so the per-artist diversity cap is lifted (the whole
+ * slate is one artist by intent) and `rankWeight(rank)` over the shelf's natural
+ * order yields top-down recognition with no view-count fetch. The learned-taste
+ * ranker still runs on top: a catalog song the listener skipped sinks, a liked
+ * one rises, recent repeats weigh in via the confidence + recency terms.
+ */
+export async function buildArtistCatalog(
+  artistId: string,
+  history: HistoryEntry[],
+  options: ArtistCatalogOptions = {},
+): Promise<{ tracks: MusicTrack[] }> {
+  const {
+    limit = 25,
+    now = Date.now(),
+    transitionBias,
+    likes = new Set<string>(),
+    suppressed = new Set<string>(),
+    exclude = [],
+  } = options;
+
+  // Pull a shelf larger than the slate so dropped skips still leave a full list.
+  const catalog = await fetchArtistSongs(artistId, Math.max(limit * 2, limit + 10));
+  if (catalog.length === 0) return { tracks: [] };
+
+  const historyMap = toHistoryMap(history);
+  const excluded = new Set(exclude);
+
+  const pool = new CandidatePool();
+  pool.addMany(catalog, `artist:${artistId}`, "artist-catalog", 1);
+
+  const context: ScoreContext = { history: historyMap, likes, now };
+  const scored = pool
+    .values()
+    .filter((candidate) => !excluded.has(candidate.track.videoId))
+    .filter((candidate) => !suppressed.has(candidate.track.videoId))
+    // A skip normally sinks a track; a later like supersedes an old skip.
+    .filter((candidate) => {
+      const skips = historyMap.get(candidate.track.videoId)?.skipCount ?? 0;
+      return skips === 0 || likes.has(candidate.track.videoId);
+    })
+    .map((candidate) => ({ candidate, value: score(candidate, context) }));
+
+  if (scored.length === 0) return { tracks: [] };
+
+  // Pure exploitation (epsilon 0) — the listener wants the TOP songs, not deep
+  // cuts — and no per-artist cap, since one artist is the whole point.
+  const slate = assemble(scored, {
+    limit,
+    maxPerArtist: Number.POSITIVE_INFINITY,
+    epsilon: 0,
+  });
+  const tagVectors = await ensureTagVectors(
+    slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
+    createDbTagStore(),
+  );
+  const ordered = sequence(slate, 0, { transitionBias, tagVectors });
+  return { tracks: ordered.map((candidate) => candidate.track) };
 }
 
 /**
