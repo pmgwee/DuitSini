@@ -46,6 +46,32 @@ async function resolveFirstVideoId(query: string): Promise<string | null> {
 }
 
 /**
+ * Structural fallback for artist intent: catch the common "top songs by X" /
+ * "best of X" / "X greatest hits" phrasings the LLM occasionally mis-files as a
+ * song seed. Returns the named artist(s), if any. Classifies PHRASING only —
+ * never taste — so it stays on the intent-parsing side of the rule.
+ */
+function extractArtistIntent(prompt: string): string[] {
+  const out: string[] = [];
+  const push = (raw?: string) => {
+    if (!raw) return;
+    const name = raw
+      .trim()
+      .replace(/[,;].*$/, "")
+      .replace(/\s+(?:ranked|sorted|in\s+\w+|please).*$/i, "")
+      .trim();
+    if (name && !out.includes(name)) out.push(name);
+  };
+  const byMatch = prompt.match(
+    /\b(?:top\s+songs?|songs?|hits?|tracks?|music|best\s+(?:of|songs?|hits?)|greatest\s+hits?|top\s+\d+)\s+by\s+(.+)$/i,
+  );
+  push(byMatch?.[1]);
+  const ofMatch = prompt.match(/\bbest\s+(?:of|songs?|hits?)\s+(.+)$/i);
+  push(ofMatch?.[1]);
+  return out;
+}
+
+/**
  * GET — the "vibe" surface: describe what you want to hear in plain language,
  * get a personalized radio that matches.
  *
@@ -102,34 +128,50 @@ export async function GET(req: NextRequest) {
       : tracks.filter((t) => !constraints.exclude.some((w) => t.title.toLowerCase().includes(w)));
 
   // 2a. Artist-catalog path — "top songs by X". parseVibe separates a named
-  //     ARTIST from a named song; when an artist is named we resolve it to a
-  //     channel id and read its own popularity-ordered Songs shelf (NOT a
-  //     similar-track radio). Falls through to song-radio if unresolved.
-  const artistQuery = constraints.artists?.[0];
-  if (artistQuery) {
-    const artistId = await resolveArtistId(artistQuery);
-    if (artistId) {
-      let tracks: MusicTrack[] = [];
-      try {
-        const catalog = await buildArtistCatalog(artistId, history, {
-          limit: constraints.length,
-          transitionBias,
-          likes: likeIds,
-          suppressed,
-        });
-        tracks = catalog.tracks;
-      } catch (err) {
-        console.error("[yt/vibe] artist catalog build failed:", (err as Error)?.message ?? err);
-      }
-      return NextResponse.json<VibeResponse>({
-        tracks: applyExclude(tracks),
-        constraints,
-        configured: true,
-        seedQuery: artistQuery,
-      });
+  //     ARTIST from a named song; we ALSO structurally extract a "by X" / "best
+  //     of X" intent from the raw prompt as a fallback (the LLM occasionally
+  //     drops a named artist into seedNames). For each candidate we resolve a
+  //     channel id and read the artist's own popularity-ordered Songs shelf
+  //     (NOT a similar-track radio). Falls through to song-radio if unresolved.
+  const artistCandidates = [
+    ...(constraints.artists ?? []),
+    ...extractArtistIntent(prompt),
+  ];
+  let resolvedArtist: { name: string; id: string } | null = null;
+  for (const name of artistCandidates.slice(0, 3)) {
+    const id = await resolveArtistId(name);
+    if (id) {
+      resolvedArtist = { name, id };
+      break;
     }
-    // Unresolved artist: use the name as a radio seed below rather than failing.
-    if (constraints.seedNames.length === 0) constraints.seedNames = [artistQuery];
+  }
+  if (resolvedArtist) {
+    let tracks: MusicTrack[] = [];
+    try {
+      const catalog = await buildArtistCatalog(resolvedArtist.id, history, {
+        limit: constraints.length,
+        transitionBias,
+        likes: likeIds,
+        suppressed,
+      });
+      tracks = catalog.tracks;
+      console.log(
+        `[yt/vibe] artist-catalog "${resolvedArtist.name}" -> ${resolvedArtist.id} (${tracks.length} tracks)`,
+      );
+    } catch (err) {
+      console.error("[yt/vibe] artist catalog build failed:", (err as Error)?.message ?? err);
+    }
+    return NextResponse.json<VibeResponse>({
+      tracks: applyExclude(tracks),
+      constraints,
+      configured: true,
+      seedQuery: resolvedArtist.name,
+    });
+  }
+  // Nothing resolved as an artist → song-radio. Feed the first candidate into
+  // the seed search if the LLM didn't already provide a seedName.
+  if (constraints.seedNames.length === 0 && artistCandidates.length > 0) {
+    constraints.seedNames = [artistCandidates[0]!];
   }
 
   // 2b. Song-radio path. Resolve a real seed videoId via search (grounding — no

@@ -283,13 +283,18 @@ export function pickSeeds(
   if (history.length <= count) return [...history];
 
   const weightOf = (entry: HistoryEntry): number => {
-    const daysSince = (now - Date.parse(entry.lastPlayedAt)) / DAY_MS;
-    const recency = Number.isFinite(daysSince) ? 1 / (1 + Math.max(0, daysSince) / 7) : 0.5;
     const skipPenalty = Math.pow(0.4, entry.skipCount);
     // A liked track is the clearest statement of taste we have, so it is a
-    // disproportionately good place to start a neighbourhood from.
-    const likeBoost = likes.has(entry.videoId) ? 3 : 1;
-    return Math.max(0.01, entry.playCount * recency * skipPenalty * likeBoost);
+    // disproportionately good place to start a neighbourhood from. Likes do not
+    // decay (a heart is a permanent statement), so a liked track's seed weight
+    // does NOT decay with recency either — otherwise older liked minority-taste
+    // tracks get buried under recent majority plays and stop surfacing.
+    if (likes.has(entry.videoId)) {
+      return Math.max(0.01, entry.playCount * skipPenalty * 3);
+    }
+    const daysSince = (now - Date.parse(entry.lastPlayedAt)) / DAY_MS;
+    const recency = Number.isFinite(daysSince) ? 1 / (1 + Math.max(0, daysSince) / 7) : 0.5;
+    return Math.max(0.01, entry.playCount * recency * skipPenalty);
   };
 
   const pool = history.map((entry) => ({

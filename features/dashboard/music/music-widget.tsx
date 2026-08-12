@@ -875,7 +875,20 @@ function TrackList({
             >
               {t.thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={t.thumbnail} alt="" className="size-10 shrink-0 rounded object-cover" />
+                <img
+                  src={t.thumbnail}
+                  alt=""
+                  onError={(e) => {
+                    // InnerTube thumbnail URLs (album/artist art) occasionally
+                    // 403/404. Fall back ONCE to YouTube's canonical per-video
+                    // thumbnail, which is public and always present.
+                    const img = e.currentTarget;
+                    if (img.dataset.fallback) return;
+                    img.dataset.fallback = "1";
+                    img.src = `https://i.ytimg.com/vi/${t.videoId}/mqdefault.jpg`;
+                  }}
+                  className="size-10 shrink-0 rounded object-cover"
+                />
               ) : (
                 <div className="grid size-10 shrink-0 place-items-center rounded bg-muted text-muted-foreground">
                   <Music4 className="size-4" />

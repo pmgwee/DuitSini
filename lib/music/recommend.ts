@@ -40,6 +40,8 @@ const EDITORIAL_FANOUT = 1;
 const LIKE_FANOUT = 2;
 /** A like carries ~this many plays of seed-trust (cf. W_LIKE "≈ five completed plays"). */
 const LIKE_SEED_WEIGHT = 3;
+/** How often the liked-fanout rotation advances (cycles through all likes over time). */
+const LIKE_ROTATION_MS = 2 * 60_000;
 
 class CandidatePool {
   private readonly byId = new Map<string, Candidate>();
@@ -246,17 +248,17 @@ export async function buildShelf(
   // selection and the confidence term — it never GUARANTEED its neighbourhood
   // entered the pool. So a freshly-liked discovery (e.g. a track liked from a
   // previous shelf) rarely surfaced similar tracks. Fetch radio around a few
-  // liked tracks that weren't picked as seeds. Most-recent-first with a rotating
-  // start, so different liked neighbourhoods are explored across builds and the
-  // listener's most recent taste leads.
+  // liked tracks that weren't picked as seeds. Coverage is a DETERMINISTIC
+  // round-robin over the whole liked set (stable within a short window, then
+  // rotates) — not a recency-biased sample — because likes don't decay: this is
+  // the mechanism that surfaces an older minority-taste cluster (e.g. Chinese
+  // likes played long ago) that recency-based seed selection buries.
   const seededIds = new Set(seeds.map((s) => s.videoId));
-  const likedCandidates = likes
-    .filter((l) => !seededIds.has(l.videoId))
-    .sort((a, b) => Date.parse(b.likedAt) - Date.parse(a.likedAt));
+  const likedCandidates = likes.filter((l) => !seededIds.has(l.videoId));
   if (likedCandidates.length > 0) {
     const start =
       likedCandidates.length > LIKE_FANOUT
-        ? Math.floor(random() * likedCandidates.length)
+        ? Math.floor(now / LIKE_ROTATION_MS) % likedCandidates.length
         : 0;
     const picks: string[] = [];
     for (let i = 0; i < LIKE_FANOUT && i < likedCandidates.length; i++) {

@@ -345,17 +345,23 @@ export async function resolveArtistId(query: string): Promise<string | null> {
     const yt = await getClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: any = await yt.music.search(query, { type: "artist" });
-    // youtubei.js returns either `contents` (flat) or `categories[].contents`.
+    // Artist results come back as shelf SECTIONS in `result.contents`
+    // (MusicShelf), each section's `.contents` holding the artist items
+    // (MusicResponsiveListItem whose `.id` / `.endpoint.payload.browseId` is the
+    // UC channel id). A top-result card may also carry the browseId on the
+    // section itself. Iterate both levels; the `UC` prefix filters out video
+    // ids (which are 11-char, not channel ids).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const buckets: any[] = Array.isArray(result?.contents)
-      ? result.contents
-      : Array.isArray(result?.categories)
-        ? result.categories.flatMap((c: any) => c?.contents ?? [])
-        : [];
-    for (const item of buckets) {
-      const id: string | undefined =
-        item?.id ?? item?.endpoint?.payload?.browseId ?? item?.browseId;
-      if (typeof id === "string" && id.startsWith("UC")) return id;
+    const sections: any[] = Array.isArray(result?.contents) ? result.contents : [];
+    for (const section of sections) {
+      const sectionId: unknown = section?.endpoint?.payload?.browseId ?? section?.id;
+      if (typeof sectionId === "string" && sectionId.startsWith("UC")) return sectionId;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const items: any[] = Array.isArray(section?.contents) ? section.contents : [];
+      for (const item of items) {
+        const id: unknown = item?.id ?? item?.endpoint?.payload?.browseId ?? item?.browseId;
+        if (typeof id === "string" && id.startsWith("UC")) return id;
+      }
     }
     return null;
   } catch (err) {
