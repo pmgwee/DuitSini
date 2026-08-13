@@ -44,6 +44,63 @@ export function freshnessWindowMs(pushSeconds: number): number {
   return clampPushSeconds(pushSeconds) * 2 * 1000 + FRESHNESS_GRACE_MS;
 }
 
+// ─── Preserved-source expiry (stream continuity) ───
+
+/**
+ * How long a previously-seen source is preserved on the dashboard after its
+ * collector stops pushing it. Stream continuity keeps a source through a
+ * transient outage (bridge asleep, a failed push) as an explicit "Saved"
+ * reading, but a source silent this long is a *permanently-removed* collector
+ * (e.g. a retired desktop build that used to push Gemini), not a blip — so on
+ * the next merge it is dropped instead of lingering as a stale card that only
+ * the row-wide `updated_at` refreshes.
+ *
+ * Wall-clock rather than cadence-derived: it must survive an overnight/weekend
+ * offline (transient, should come back) and still clear a retired source within
+ * about a day. Tunable — lower it to retire stale sources faster.
+ */
+export const PRESERVED_SOURCE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * True if a preserved source's last reading is too old to keep showing. A
+ * missing/unparseable `observed_at` is treated as "keep" (we can't prove the
+ * collector is gone); in practice every stream is stamped at ingest, so a truly
+ * unknown age is rare.
+ */
+export function isPreservedSourceStale(
+  observedAt: string | null | undefined,
+  now: number,
+): boolean {
+  if (!observedAt) return false;
+  const ts = new Date(observedAt).getTime();
+  if (Number.isNaN(ts)) return false;
+  return now - ts > PRESERVED_SOURCE_TTL_MS;
+}
+
+// ─── Supported dashboard sources ───
+
+/**
+ * The usage sources this dashboard renders — and their display order. The
+ * producers emit only these source ids (sharer: claude_pro/glm; desktop:
+ * claude/codex/glm; the ingest legacy single-source wrap: claude). A snapshot
+ * may carry other sources as stale data from a retired build (e.g. a `gemini`
+ * stream pushed once by an old desktop branch); those are dropped before render
+ * because this app has no Gemini tracking. One map holds both the allowlist and
+ * the sort order so they can't drift apart — add an entry here to support a new
+ * provider in every surface at once.
+ */
+export const SUPPORTED_SOURCES: Readonly<Record<string, number>> = {
+  claude_pro: 0,
+  claude: 0,
+  glm: 1,
+  codex: 2,
+};
+
+/** True if `source` is a provider this dashboard renders. */
+export function isSupportedSource(source: string): boolean {
+  return source in SUPPORTED_SOURCES;
+}
+
 // ─── Snapshot shape (mirrors the ingest route's v7 Zod schemas verbatim) ───
 
 export const windowSchema = z

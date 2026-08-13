@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { AgentProviderIcon } from "./agent-provider-icon";
+import { isSupportedSource } from "@/lib/claude-usage/protocol";
 
 type OS = "windows" | "mac";
 
@@ -71,7 +72,11 @@ export function ConnectClaudeCard() {
               .map((s) => ({
                 source: String(s.source || "claude"),
                 label: String(s.label || "Claude"),
-              })),
+              }))
+              // Drop untracked sources (e.g. a stale `gemini` stream left in the
+              // row by a retired build) — this app has no Gemini tracking. Same
+              // allowlist as the usage tracker (SUPPORTED_SOURCES).
+              .filter((s) => isSupportedSource(s.source)),
           );
         }
       } catch {

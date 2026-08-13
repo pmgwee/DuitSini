@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
 import { resolveBridgeUserId } from "@/lib/claude-usage/bridge-auth";
-import { bodySchema } from "@/lib/claude-usage/protocol";
+import { bodySchema, type UsageStream } from "@/lib/claude-usage/protocol";
 import { mergeUsageStreams } from "@/lib/claude-usage/stream-continuity";
 import type { Json } from "@/lib/supabase/types";
 
@@ -55,13 +55,20 @@ export async function POST(req: NextRequest) {
     const { five_hour, seven_day, limits, provider, streams, push_seconds, sharer_version } =
       parsed.data;
 
+    // Server time for this push. Stamps the row-wide `updated_at` and backfills
+    // `observed_at` on any incoming stream missing it (legacy single-source
+    // wrap, or a producer that forgot). Guaranteeing every stored stream has a
+    // reliable `observed_at` is what lets stream-continuity bound how long an
+    // omitted source is preserved instead of keeping a stale ghost forever.
+    const nowMs = Date.now();
+    const observedAt = new Date(nowMs).toISOString();
     // Normalize to a streams array — the UI reads from streams_json. Newer
     // bridges send `streams`; a legacy single-source push is wrapped so the row
     // still carries the new shape.
-    const incoming =
+    const incoming = (
       streams && streams.length > 0
         ? streams
-        : [
+        : ([
             {
               source: "claude",
               label: "Claude",
@@ -70,7 +77,8 @@ export async function POST(req: NextRequest) {
               limits: limits ?? null,
               provider: provider ?? null,
             },
-          ];
+          ] as UsageStream[])
+    ).map((s) => (s.observed_at ? s : { ...s, observed_at: observedAt }));
 
     const admin = createSupabaseAdminClient();
     // An ingest upsert replaces streams_json wholesale. Read the prior JSON so
@@ -84,6 +92,7 @@ export async function POST(req: NextRequest) {
     const normalized = mergeUsageStreams(
       incoming,
       Array.isArray(previous?.streams_json) ? previous.streams_json : null,
+      nowMs,
     );
 
     // The "primary" stream mirrors into the legacy scalar columns so older
@@ -103,7 +112,7 @@ export async function POST(req: NextRequest) {
       five_hour_resets_at: primary.five_hour?.resets_at ?? null,
       seven_day_utilization: primary.seven_day?.utilization ?? null,
       seven_day_resets_at: primary.seven_day?.resets_at ?? null,
-      updated_at: new Date().toISOString(),
+      updated_at: observedAt,
       streams_json: normalized as unknown as Json,
       limits_json: (primary.limits ?? null) as Json,
       provider_json: (primary.provider ?? null) as Json,
