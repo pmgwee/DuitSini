@@ -14,6 +14,7 @@ import {
   type UsageStream,
 } from "./use-claude-usage-live";
 import { usageStatePresentation } from "@/lib/claude-usage/state-presentation";
+import { SUPPORTED_SOURCES } from "@/lib/claude-usage/protocol";
 import { useNow } from "./use-now";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -144,7 +145,8 @@ function LiveViewSkeleton() {
 /**
  * Normalize a snapshot into a streams array. The live route always returns
  * `streams`, but this also tolerates an older single-source payload by wrapping
- * its top-level fields into one synthetic stream.
+ * its top-level fields into one synthetic stream. Untracked sources are dropped
+ * (see SUPPORTED_SOURCES in the shared protocol module).
  */
 function normalizeStreams(data: LiveUsage): UsageStream[] {
   const streams =
@@ -160,12 +162,12 @@ function normalizeStreams(data: LiveUsage): UsageStream[] {
             provider: data.provider ?? null,
           },
         ];
-  const order: Record<string, number> = { claude_pro: 0, claude: 0, glm: 1, codex: 2 };
   return streams
+    .filter((stream) => stream.source in SUPPORTED_SOURCES)
     .map((stream, index) => ({ stream, index }))
     .sort(
       (a, b) =>
-        (order[a.stream.source] ?? 99) - (order[b.stream.source] ?? 99) ||
+        SUPPORTED_SOURCES[a.stream.source] - SUPPORTED_SOURCES[b.stream.source] ||
         a.index - b.index,
     )
     .map(({ stream }) => stream);
@@ -322,8 +324,8 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
         <ProviderBadge provider={stream.provider} />
         {state ? (
           <span
-            title={`${stream.status_message || state.fallbackDescription} Observed ${formatAgo(stream.observed_at, now)}.`}
-            aria-label={`${stream.label}: ${state.label}. ${stream.status_message || state.fallbackDescription}`}
+            title={`${stream.status_message || state.fallbackDescription}${stream.observed_at ? ` Last observed ${formatAgo(stream.observed_at, now)} ago.` : ""}`}
+            aria-label={`${stream.label}: ${state.label}${stream.observed_at ? `, observed ${formatAgo(stream.observed_at, now)} ago` : ""}. ${stream.status_message || state.fallbackDescription}`}
             className={cn(
               "cursor-help rounded-full px-1.5 py-0.5 text-[10px] font-medium",
               state.tone === "warning"
@@ -332,6 +334,9 @@ function StreamSection({ stream, now, divided }: { stream: UsageStream; now: num
             )}
           >
             {state.label}
+            {stream.observed_at ? (
+              <span className="opacity-70"> · {formatAgo(stream.observed_at, now)}</span>
+            ) : null}
           </span>
         ) : null}
         {stream.source === "claude_pro" && stream.state === "auth_stale" ? (
