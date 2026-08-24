@@ -1,7 +1,7 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { z } from "zod";
-import { createChat, isZaiConfigured } from "@/lib/ai/zai";
+import { generateStructuredWithLLM, isLlmConfigured } from "@/lib/ai/llm";
 import { tagTweetTopics, TOPICS } from "./topics";
 import type { AnalyzedTicker, AnalyzedTweet, NameView, SerenityTweet, Stance, Topic } from "./types";
 
@@ -13,7 +13,8 @@ import type { AnalyzedTicker, AnalyzedTweet, NameView, SerenityTweet, Stance, To
  *  - a one-line insight label
  *
  * Two paths:
- *  - LLM (Z.ai GLM-5.2): the rich path — generated insight, prose-ticker catch,
+ *  - LLM (via the provider-neutral adapter in `lib/ai/llm.ts`): the rich path —
+ *    generated insight, prose-ticker catch,
  *    contextual stance. Cached per-tweet (durable via unstable_cache so the heavy
  *    extraction runs ONCE per post, ever) + a per-instance in-memory map so the
  *    page can read results WITHOUT triggering an LLM call (latency only on the
@@ -72,17 +73,21 @@ function shortHash(s: string): string {
 const llmExtractCached = unstable_cache(
   async (key: string, text: string, cashtags: string[]): Promise<LlmExtract> => {
     const user = `Post:\n"""${text}"""\n\n$-tickers present: ${cashtags.join(", ") || "(none)"}`;
-    const raw = await createChat({
+    const extract = await generateStructuredWithLLM({
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: user },
       ],
-      thinkingDisabled: true,
-      json: true,
+      schema: extractSchema,
+      schemaName: "post_analysis",
+      schemaDescription: "Topics, tickers with stance, and a one-line insight for one post.",
+      reasoning: "none",
       temperature: 0,
       maxTokens: 700,
     });
-    const parsed = extractSchema.safeParse(JSON.parse(raw));
+    // Re-validate locally: the adapter enforces the schema, this keeps the
+    // contract explicit at the call site (and normalises defaults).
+    const parsed = extractSchema.safeParse(extract);
     if (!parsed.success) throw new Error("bad LLM json");
     return parsed.data;
   },
@@ -161,7 +166,7 @@ export async function warmAnalysis(
   if (existing) return existing;
 
   let result: AnalyzedTweet;
-  if (isZaiConfigured()) {
+  if (isLlmConfigured()) {
     try {
       const extract = await llmExtractCached(shortHash(tweet.text), tweet.text, tweet.cashtags);
       result = mergeExtract(tweet, extract, byTicker);

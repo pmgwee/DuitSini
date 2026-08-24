@@ -787,7 +787,7 @@ export function MusicWidget() {
                 used to have (commit 0c74d29). */}
             {vibeConfigured === false && (
               <div className="mb-2 rounded-xl border border-warning/30 bg-warning/6 px-3 py-2 text-xs text-warning">
-                Set <code className="font-mono">ZAI_API_KEY</code> (server env) to enable Vibe.
+                Set <code className="font-mono">LLM_API_KEY</code> (server env) to enable Vibe.
               </div>
             )}
             <div className="mb-2 flex gap-2">

@@ -2,9 +2,12 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 /**
- * Live smoke test for the LLM music backend: exercises the real GLM tagger, the
- * `music_track_tags` DB cache (service-role), and the vibe intent parser against
- * the live services. Skips gracefully if a key is absent. Cleans up its own rows.
+ * Live smoke test for the LLM music backend: exercises the real tagger (OpenCode
+ * Go / gpt-5.6-luna via the Responses API), the `music_track_tags` DB cache
+ * (service-role), and the vibe intent parser against the live services.
+ * Skips unless BOTH an opt-in flag and a securely-configured LLM_API_KEY are
+ * present, so it can never make a billable request by accident. Cleans up its
+ * own rows. The key is read from the environment and is never printed.
  *
  * Run:  pnpm vitest run tests/music-llm-smoke.test.ts
  */
@@ -23,10 +26,14 @@ import { createDbTagStore } from "@/lib/music/tags-store";
 import { parseVibe, synthSeedQuery } from "@/lib/music/vibe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-// These tests hit the LIVE GLM API + the live `music_track_tags` table (and
-// spend quota), so they're SKIPPED by default. Run on demand with:
+// These tests hit the LIVE LLM provider + the live `music_track_tags` table
+// (and spend quota), so they're SKIPPED by default AND skipped whenever
+// LLM_API_KEY is absent — no key configured means no billable request. Run on
+// demand with:
 //   RUN_LIVE_MUSIC_SMOKE=1 npx vitest run tests/music-llm-smoke.test.ts
-const describeLive = process.env.RUN_LIVE_MUSIC_SMOKE === "1" ? describe : describe.skip;
+const liveEnabled =
+  process.env.RUN_LIVE_MUSIC_SMOKE === "1" && Boolean(process.env.LLM_API_KEY?.trim());
+const describeLive = liveEnabled ? describe : describe.skip;
 
 const TEST_IDS = ["vibe_smoke_db", "vibe_smoke_1"];
 const store = createDbTagStore();
@@ -53,7 +60,7 @@ describeLive("DB tag store (service-role)", () => {
   );
 });
 
-describeLive("GLM tagger (live)", () => {
+describeLive("LLM tagger (live)", () => {
   it(
     "produces in-vocabulary tags for a well-known track",
     async () => {

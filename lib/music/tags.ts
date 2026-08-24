@@ -1,5 +1,6 @@
 import "server-only";
-import { createChat, isZaiConfigured } from "@/lib/ai/zai";
+import { z } from "zod";
+import { generateStructuredWithLLM, isLlmConfigured } from "@/lib/ai/llm";
 
 /**
  * LLM-derived, CONSTRAINED-VOCABULARY tag layer over the catalog — the shared
@@ -15,7 +16,7 @@ import { createChat, isZaiConfigured } from "@/lib/ai/zai";
  * pragmatic analogue of Spotify's learned Semantic IDs (we don't fine-tune, so
  * we constrain at prompt time instead).
  *
- * WHY ANONYMOUS. Only track metadata (title/artist/videoId) is sent to GLM — no
+ * WHY ANONYMOUS. Only track metadata (title/artist/videoId) is sent to the LLM — no
  * user identity, no listening history. videoId is a public YouTube identifier,
  * not PII. The path stays effectively anonymous even though a server key now
  * exists.
@@ -86,50 +87,66 @@ function validate(raw: string[]): string[] {
 const BATCH_SIZE = 16;
 
 /**
- * Tag a batch of tracks (≤ BATCH_SIZE) in one GLM call. Returns videoId → tags.
+ * The wire contract for a tagging batch. An ARRAY of {id, tags} rather than a
+ * dynamically-keyed object, because that shape is expressible as a JSON schema
+ * and can therefore be enforced by the provider's structured-output mode. The
+ * vocabulary constraint is still applied locally by `validate()`, so an
+ * out-of-vocabulary tag is dropped rather than failing the batch.
+ */
+const tagBatchSchema = z.object({
+  tracks: z
+    .array(
+      z.object({
+        id: z.string(),
+        tags: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
+});
+
+/**
+ * Tag a batch of tracks (≤ BATCH_SIZE) in one LLM call. Returns videoId → tags.
  * Never throws for individual tracks: on any failure the map is just shorter.
  */
 async function tagBatch(batch: TrackInput[]): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
-  if (!isZaiConfigured() || batch.length === 0) return out;
+  if (!isLlmConfigured() || batch.length === 0) return out;
 
   const lines = batch.map((t, i) => `${i + 1}. ${t.title} — ${t.channel} (id:${t.videoId})`).join("\n");
   const system =
     "You are a music metadata tagger. For each track, choose 1–4 tags that best " +
     "describe it, using ONLY tags from the fixed vocabulary below. Do not invent " +
-    "tags. Respond as a JSON object mapping each id to an array of tags.\n\n" +
+    "tags. Respond as a JSON object with a \"tracks\" array.\n\n" +
     `Genres: ${GENRES.join(", ")}\n` +
     `Moods: ${MOODS.join(", ")}\n` +
     `Eras: ${ERAS.join(", ")}`;
   const user =
-    "Return JSON like {\"<id>\": [\"tag\", ...]} for each track. " +
-    "Use the id: prefix exactly as given.\n\n" + lines;
+    'Return JSON like {"tracks":[{"id":"<id>","tags":["tag", ...]}, ...]} with one ' +
+    "entry per track. Use the id exactly as given after the id: prefix.\n\n" + lines;
 
-  let content: string;
+  let parsed: z.infer<typeof tagBatchSchema>;
   try {
-    content = await createChat({
+    parsed = await generateStructuredWithLLM({
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
+      schema: tagBatchSchema,
+      schemaName: "track_tags",
+      schemaDescription: "Constrained-vocabulary tags for a batch of tracks.",
       temperature: 0,
-      thinkingDisabled: true,
-      json: true,
+      reasoning: "none",
       maxTokens: 800,
     });
   } catch {
-    return out; // network/model error → degrade silently, no tags for this batch
+    // network / model / malformed-output error → degrade silently, no tags for
+    // this batch (callers treat a missing vector as "behavioural signal only").
+    return out;
   }
 
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(stripFences(content)) as Record<string, unknown>;
-  } catch {
-    return out; // malformed JSON → degrade
-  }
-
+  const byId = new Map(parsed.tracks.map((t) => [String(t.id).trim(), t.tags]));
   for (const track of batch) {
-    const raw = parsed[track.videoId];
+    const raw = byId.get(track.videoId);
     if (Array.isArray(raw)) {
       const tags = validate(raw.filter((x): x is string => typeof x === "string"));
       if (tags.length > 0) out.set(track.videoId, tags);
@@ -138,17 +155,9 @@ async function tagBatch(batch: TrackInput[]): Promise<Map<string, string[]>> {
   return out;
 }
 
-function stripFences(s: string): string {
-  const t = s.trim();
-  if (t.startsWith("```")) {
-    return t.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
-  }
-  return t;
-}
-
 /**
  * Ensure every track has a tag vector: serve from the cache, compute the rest
- * via GLM (batched), and persist the new ones. Tracks the model can't tag are
+ * via the LLM (batched), and persist the new ones. Tracks the model can't tag are
  * simply absent from the result — callers must treat a missing vector as
  * "use behavioural signal only", which `similarity.ts` already does.
  */

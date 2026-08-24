@@ -5,7 +5,7 @@ import { classifyTheme, isCoreHolding, isUsInvestable, rating } from "./metrics"
 import { fetchTrackSerenitySignals } from "./trackserenity";
 import { getYearlyChanges } from "./prices";
 import { getAnalysis, warmAnalysis } from "./analyzer";
-import { isZaiConfigured } from "@/lib/ai/zai";
+import { isLlmConfigured } from "@/lib/ai/llm";
 import {
   SERENITY_THEMES,
   TRACKSERENITY_URL,
@@ -214,7 +214,7 @@ export async function warmSerenityAnalysis(): Promise<{ warmed: number; llm: boo
   for (let i = 0; i < tweets.length; i += concurrency) {
     await Promise.all(tweets.slice(i, i + concurrency).map((t) => warmAnalysis(t, byTicker)));
   }
-  return { warmed: tweets.length, llm: isZaiConfigured() };
+  return { warmed: tweets.length, llm: isLlmConfigured() };
 }
 
 /**

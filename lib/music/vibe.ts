@@ -1,5 +1,6 @@
 import "server-only";
-import { createChat, isZaiConfigured } from "@/lib/ai/zai";
+import { z } from "zod";
+import { generateStructuredWithLLM, isLlmConfigured } from "@/lib/ai/llm";
 import { GENRES, MOODS, ERAS } from "./tags";
 
 /**
@@ -38,11 +39,21 @@ export interface VibeConstraints {
   length: number;
 }
 
-function stripFences(s: string): string {
-  const t = s.trim();
-  if (t.startsWith("```")) return t.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
-  return t;
-}
+/**
+ * The wire contract the model is held to. Deliberately permissive (plain string
+ * arrays) — the vocabulary constraint is enforced locally by `fromVocab` below,
+ * so a model that drifts outside the vocabulary loses the stray tag rather than
+ * failing the whole parse. Same shape the previous provider was prompted for.
+ */
+const vibeSchema = z.object({
+  genres: z.array(z.string()).default([]),
+  moods: z.array(z.string()).default([]),
+  eras: z.array(z.string()).default([]),
+  artists: z.array(z.string()).default([]),
+  seedNames: z.array(z.string()).default([]),
+  exclude: z.array(z.string()).default([]),
+  length: z.number().default(25),
+});
 
 function fromVocab(value: unknown, allowed: readonly string[]): string[] {
   if (!Array.isArray(value)) return [];
@@ -74,12 +85,12 @@ function fromStrings(value: unknown, cap: number): string[] {
 
 /**
  * Parse a free-text music request into structured constraints. Returns `null`
- * when GLM is unavailable or the response is unparseable — callers then answer
- * with an empty result rather than guessing.
+ * when the LLM is unavailable or the response is unparseable — callers then
+ * answer with an empty result rather than guessing.
  */
 export async function parseVibe(prompt: string): Promise<VibeConstraints | null> {
   const trimmed = prompt.trim();
-  if (!trimmed || !isZaiConfigured()) return null;
+  if (!trimmed || !isLlmConfigured()) return null;
 
   const system =
     "You map a music request onto structured dimensions for a recommender. " +
@@ -98,27 +109,22 @@ export async function parseVibe(prompt: string): Promise<VibeConstraints | null>
     "length defaults to 25 (5-50). artists = named artists whose catalog the user wants (may be empty); " +
     "seedNames = named songs or 'artist - song' to seed from (may be empty). Use only the vocabulary for tags.";
 
-  let content: string;
+  let parsed: z.infer<typeof vibeSchema>;
   try {
-    content = await createChat({
+    parsed = await generateStructuredWithLLM({
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
+      schema: vibeSchema,
+      schemaName: "vibe_constraints",
+      schemaDescription: "Structured music-request constraints for the recommender.",
       temperature: 0,
-      thinkingDisabled: true,
-      json: true,
+      reasoning: "none",
       maxTokens: 500,
     });
   } catch {
-    return null;
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(stripFences(content)) as Record<string, unknown>;
-  } catch {
-    return null;
+    return null; // provider error or malformed/invalid output → degrade silently
   }
 
   const length = Number(parsed.length);

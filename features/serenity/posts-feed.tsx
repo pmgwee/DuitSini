@@ -43,7 +43,7 @@ export function PostsFeed({ feed }: { feed: AnalyzedTweet[] }) {
           <h2 className="text-lg font-semibold tracking-tight">Latest from Serenity on X</h2>
           <p className="text-xs text-muted-foreground">
             Each post auto-tagged by topic + tickers (with stance).
-            {llmCount > 0 ? ` ${llmCount} AI-analyzed with insight labels.` : " Add ZAI_API_KEY for AI insight labels."}
+            {llmCount > 0 ? ` ${llmCount} AI-analyzed with insight labels.` : " Add LLM_API_KEY for AI insight labels."}
           </p>
         </div>
         <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">

@@ -5,7 +5,7 @@
 
 ## Context
 
-User report: prompting the vibe surface (GLM intent parser) with *"generate top songs by the chainmokers"* returned a random-ish list of songs by *other* artists, not The Chainsmokers' catalog, and not ordered by recognition.
+User report: prompting the vibe surface (LLM intent parser — GLM at the time; see ADR-0011) with *"generate top songs by the chainmokers"* returned a random-ish list of songs by *other* artists, not The Chainsmokers' catalog, and not ordered by recognition.
 
 The root cause is structural, not a tuning bug (diagnosed 2026-08-12 against the live code):
 

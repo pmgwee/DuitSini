@@ -1,6 +1,6 @@
 # ADR-0007: LLM in the music recommender — prior + intent, never the song-picker
 
-- **Status:** Accepted — implemented 2026-08-04
+- **Status:** Accepted — implemented 2026-08-04. **Provider superseded by ADR-0011** (2026-08-24): the LLM *roles* below still hold, but the vendor is no longer Z.ai/GLM — every mention of GLM / `ZAI_*` now means OpenCode Go `gpt-5.6-luna` behind `lib/ai/llm.ts` (`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`).
 - **Scope:** `lib/music/` (tags, similarity, recommend, vibe), `app/api/yt/vibe`, the Music widget, migration `0020`
 
 ## Context

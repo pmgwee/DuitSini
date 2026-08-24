@@ -90,6 +90,15 @@ Two-stage recommender modelled on how Spotify and Apple Music actually work: che
 - **Decay is layered — do not "fix" this.** Koren's temporal-dynamics work found quality was *best with no decay at all* because underweighting old actions loses signal with the noise. So `similarity.ts` (how tracks relate) **never decays**, while `ranking.ts`'s recency term and `pickSeeds` (what you want now) **do**. Taste change is tracked by seed choice and ranking, never by corroding the co-occurrence graph.
 - **Autoplay**: `/api/yt/radio` (`{seed}` starts a station, `{continuation}` extends it). The player's queue is no longer finite — at the tail, `ENDED` tops it up instead of stopping, which is Apple's Autoplay (∞).
 
+### LLM adapter (`lib/ai/llm.ts`)
+**One** server-only module fronts every LLM feature — Serenity post analysis (`lib/serenity/analyzer.ts`), music track tagging (`lib/music/tags.ts`) and the Vibe intent parser (`lib/music/vibe.ts`). Features import `generateWithLLM` / `generateStructuredWithLLM` / `isLlmConfigured` and are **provider-agnostic by contract** — never import a vendor SDK in a feature, and never add a vendor-specific request field outside this file.
+
+- Provider: **OpenCode Go** (`https://opencode.ai/docs/go/`), model `gpt-5.6-luna`, reached through the OpenAI-compatible **Responses API** with `@ai-sdk/openai` + `ai`.
+- Config is centralized and provider-neutral: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` (server-only; never `NEXT_PUBLIC_`). `LLM_BASE_URL` is the **base** (`.../zen/go/v1`) — the SDK appends `/responses`; the adapter strips a trailing `/responses` defensively so you can never produce `/responses/responses`.
+- `generateStructuredWithLLM` is schema-enforced (zod → provider structured output) with a single plain-text-JSON retry, then **always** re-validates locally. Never relax a schema to make a call pass.
+- Every caller gates on `isLlmConfigured()` and catches — with no key the app degrades silently (deterministic Serenity tagger, no track tags, Vibe disabled). Preserve that.
+- Never log prompts or model output; errors name the env var, never its value.
+
 ### Styling
 Tailwind **v4** (CSS-first, `app/globals.css`). Design tokens are CSS variables consumed via Tailwind utilities and the `light-dark()` CSS function (theme-aware without per-mode duplication). Key custom classes: `glass`, `card-elevated`, category color tokens (`--cat-*`). Light/dark via `next-themes` (`app/providers.tsx`, class strategy).
 

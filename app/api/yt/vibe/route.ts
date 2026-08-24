@@ -13,13 +13,13 @@ import type { MusicTrack } from "@/types/music";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// GLM parse + up to a few YouTube searches + a radio build.
+// LLM intent parse + up to a few YouTube searches + a radio build.
 export const maxDuration = 30;
 
 interface VibeResponse {
   tracks: MusicTrack[];
   constraints: VibeConstraints | null;
-  /** False when GLM is not configured (so the UI can say why nothing happened). */
+  /** False when the LLM is not configured (so the UI can say why nothing happened). */
   configured: boolean;
   seedQuery: string | null;
 }
@@ -103,7 +103,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 1. Intent capture (GLM). Null when GLM is unconfigured/unavailable.
+  // 1. Intent capture (LLM). Null when the LLM is unconfigured/unavailable.
   const constraints = await parseVibe(prompt);
   if (!constraints) {
     return NextResponse.json<VibeResponse>(

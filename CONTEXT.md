@@ -19,6 +19,16 @@ missing, that's a signal — either reconsider the language, or note the gap for
 - **MYR-home** — the app normalizes every currency to ringgit for totals. Convert per-sub at full
   precision, sum, round once. See `lib/domain/fx.ts` (`toMYR`).
 
+## LLM provider (one adapter)
+
+- Every LLM feature (Serenity post analysis, music track tagging, Vibe intent parsing)
+  goes through `lib/ai/llm.ts`. Features are provider-agnostic; the vendor is named in
+  exactly one file plus three env vars (`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`).
+- Current provider: OpenCode Go, model `gpt-5.6-luna`, via the OpenAI-compatible
+  **Responses API** (`@ai-sdk/openai`). `LLM_BASE_URL` is the base — the SDK appends
+  `/responses`. (ADR-0011; supersedes the Z.ai/GLM chat-completions client in ADR-0007.)
+- Absence of a key is a supported state: every path degrades silently rather than failing.
+
 ## Claude-usage bridge (the sharer subsystem)
 
 - **Sharer** — the personalized `.mjs` script each member downloads and runs to broadcast their

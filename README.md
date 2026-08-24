@@ -96,6 +96,7 @@ How much of your Claude, GLM, and ChatGPT Codex plans have you burned — **live
 | Backend | Supabase (Postgres, Auth, Row-Level Security, Realtime) |
 | Cloud / APIs | Google Cloud — YouTube Data API v3 (music search), Google OAuth 2.0 (Google sign-in identity) |
 | Market data | Yahoo Finance public chart endpoint (keyless, 1-day cache) |
+| LLM | OpenCode Go (`gpt-5.6-luna`) via the OpenAI-compatible **Responses API**, `@ai-sdk/openai` + `ai` — behind one provider-neutral adapter (`lib/ai/llm.ts`) |
 | Forms / validation | React Hook Form + Zod |
 | Testing | Vitest (pure `lib/` modules — the sharer policy modules + protocol schema) |
 | Language | TypeScript (strict) |
@@ -127,6 +128,29 @@ pnpm dev                 # http://localhost:3000
 - **`supabase`** — production mode backed by Postgres + Auth (Google OAuth), scoped per-user by Row-Level Security.
 
 See [`.env.example`](.env.example) for every variable and what each controls.
+
+### The LLM layer
+Every AI feature (Serenity post analysis, music track tagging, the Vibe intent
+parser) goes through **one** server-only adapter — [`lib/ai/llm.ts`](lib/ai/llm.ts).
+Features call `generateWithLLM` / `generateStructuredWithLLM`; they never name a
+vendor, so switching providers is three env vars plus that one file.
+
+```
+LLM_API_KEY=<your OpenCode Go API key>     # SERVER-ONLY, never NEXT_PUBLIC_
+LLM_BASE_URL=https://opencode.ai/zen/go/v1 # base only - the SDK appends /responses
+LLM_MODEL=gpt-5.6-luna
+```
+
+`LLM_BASE_URL` is the **base**, not the full endpoint: `@ai-sdk/openai` appends
+`/responses`, so requests land on `https://opencode.ai/zen/go/v1/responses`.
+
+Leaving `LLM_API_KEY` unset is fully supported — every feature degrades
+gracefully: Serenity falls back to its deterministic topic/ticker tagger, music
+tracks simply carry no tag vectors, and the Vibe box tells you it is disabled.
+
+**Deployment:** set these three as Vercel Environment Variables (Production +
+Preview). `LLM_API_KEY` must be stored as a secret in the platform - never in the
+repo.
 
 ### Production build
 ```bash
