@@ -50,6 +50,9 @@ export async function GET(req: NextRequest) {
       watchlist: data.watchlist.length,
       analyzed: warmed.warmed,
       llm: warmed.llm,
+      // How many posts the LLM actually enriched. Zero across a non-empty feed
+      // while `llm` is true = the provider is failing and we silently degraded.
+      llmAnalyzed: warmed.llmAnalyzed,
       stale: data.stale,
     });
   } catch (e) {

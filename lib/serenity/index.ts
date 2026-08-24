@@ -201,9 +201,18 @@ async function fetchFresh(): Promise<SerenityData> {
  * Cron-only: warm every feed tweet's analysis so the page (which only peeks) has
  * LLM-enriched insight/topics/tickers ready. The LLM result is cached durably per
  * post (unstable_cache), so the heavy extraction runs once per post ever — later
- * warms are cache hits. Modest concurrency to respect Z.ai rate limits.
+ * warms are cache hits. Modest concurrency to respect provider rate limits.
+ *
+ * `llmAnalyzed` is the observability signal the cron surfaces: `llm: true` only
+ * says a key is configured, whereas a zero `llmAnalyzed` across a non-empty feed
+ * means every post fell back to the deterministic tagger — i.e. the provider is
+ * misconfigured or failing, which would otherwise degrade silently.
  */
-export async function warmSerenityAnalysis(): Promise<{ warmed: number; llm: boolean }> {
+export async function warmSerenityAnalysis(): Promise<{
+  warmed: number;
+  llm: boolean;
+  llmAnalyzed: number;
+}> {
   const [base, signals] = await Promise.all([
     fetchSerenityBase(),
     fetchTrackSerenitySignals().catch(() => null),
@@ -211,10 +220,14 @@ export async function warmSerenityAnalysis(): Promise<{ warmed: number; llm: boo
   const byTicker = new Map<string, NameView>(base.universe.map((n) => [n.ticker, n]));
   const tweets = signals?.tweets ?? [];
   const concurrency = 4;
+  let llmAnalyzed = 0;
   for (let i = 0; i < tweets.length; i += concurrency) {
-    await Promise.all(tweets.slice(i, i + concurrency).map((t) => warmAnalysis(t, byTicker)));
+    const batch = await Promise.all(
+      tweets.slice(i, i + concurrency).map((t) => warmAnalysis(t, byTicker)),
+    );
+    for (const r of batch) if (r.llmAnalyzed) llmAnalyzed += 1;
   }
-  return { warmed: tweets.length, llm: isLlmConfigured() };
+  return { warmed: tweets.length, llm: isLlmConfigured(), llmAnalyzed };
 }
 
 /**
