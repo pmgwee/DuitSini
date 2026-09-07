@@ -33,13 +33,27 @@ const usageResponse = (used = 7) =>
   );
 
 describe("codexAuthPaths", () => {
-  it("prefers CODEX_HOME and removes a duplicate default path", () => {
-    expect(codexAuthPaths("C:\\Users\\member", "D:\\codex-profile")).toEqual([
+  it("uses Windows paths and case-insensitive deduplication on Windows", () => {
+    expect(codexAuthPaths("C:\\Users\\member", "D:\\codex-profile", "win32")).toEqual([
       "D:\\codex-profile\\auth.json",
       "C:\\Users\\member\\.codex\\auth.json",
     ]);
-    expect(codexAuthPaths("C:\\Users\\member", "C:\\Users\\member\\.codex")).toEqual([
-      "C:\\Users\\member\\.codex\\auth.json",
+    expect(codexAuthPaths("C:\\Users\\member", "c:\\users\\MEMBER\\.CODEX", "win32")).toEqual([
+      "c:\\users\\MEMBER\\.CODEX\\auth.json",
+    ]);
+  });
+
+  it("uses POSIX paths and case-sensitive deduplication on Linux", () => {
+    expect(codexAuthPaths("/home/member", "/profiles/codex", "linux")).toEqual([
+      "/profiles/codex/auth.json",
+      "/home/member/.codex/auth.json",
+    ]);
+    expect(codexAuthPaths("/home/member", "/home/member/.codex", "linux")).toEqual([
+      "/home/member/.codex/auth.json",
+    ]);
+    expect(codexAuthPaths("/home/member", "/home/Member/.codex", "linux")).toEqual([
+      "/home/Member/.codex/auth.json",
+      "/home/member/.codex/auth.json",
     ]);
   });
 });

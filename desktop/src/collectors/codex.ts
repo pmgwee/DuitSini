@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 import {
   CODEX_USAGE_URL,
   parseCodexAuth,
@@ -49,15 +49,20 @@ export class AllCodexCredentialsRejectedError extends Error {
   }
 }
 
-export function codexAuthPaths(home = homedir(), codexHome = process.env.CODEX_HOME): string[] {
+export function codexAuthPaths(
+  home = homedir(),
+  codexHome = process.env.CODEX_HOME,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const pathApi = platform === "win32" ? win32 : posix;
   const candidates = [
-    codexHome ? join(codexHome, "auth.json") : null,
-    join(home, ".codex", "auth.json"),
+    codexHome ? pathApi.join(codexHome, "auth.json") : null,
+    pathApi.join(home, ".codex", "auth.json"),
   ].filter((path): path is string => Boolean(path));
 
   const seen = new Set<string>();
   return candidates.filter((path) => {
-    const key = process.platform === "win32" ? path.toLowerCase() : path;
+    const key = platform === "win32" ? path.toLowerCase() : path;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

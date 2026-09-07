@@ -25,6 +25,7 @@ const credentials = (
 function manager(options?: {
   reads?: unknown[];
   now?: () => number;
+  platform?: NodeJS.Platform;
   run?: (
     request: ClaudeCliLoginRequest,
   ) => Promise<{ code: number; timedOut?: boolean; stdout?: string; stderr?: string }>;
@@ -39,6 +40,7 @@ function manager(options?: {
   const withLock = vi.fn(async (_path: string, task: () => Promise<string | null>) => task());
   const value = new ClaudeCliRenewalManager({
     now: options?.now ?? (() => NOW),
+    platform: options?.platform,
     run,
     readCredentials,
     withLock,
@@ -61,7 +63,10 @@ describe("ClaudeCliRenewalManager", () => {
   it("renews an expiring dedicated login through the official CLI environment", async () => {
     const current = credentials("access-old", NOW + 2 * 60_000);
     const after = credentials("access-new", NOW + 8 * 60 * 60_000, "refresh-rotated");
-    const { value, run, events } = manager({ reads: [current, after] });
+    const { value, run, events } = manager({
+      platform: "win32",
+      reads: [current, after],
+    });
 
     await expect(value.renewIfNeeded(current, CREDS_PATH)).resolves.toBe("access-new");
 
@@ -81,6 +86,22 @@ describe("ClaudeCliRenewalManager", () => {
     expect(JSON.stringify(events)).not.toContain("refresh-secret");
     expect(JSON.stringify(events)).not.toContain("access-old");
     expect(events.map((event) => event.type)).toEqual(["cli_renew_start", "cli_renew_ok"]);
+  });
+
+  it("uses the extensionless Claude command on Linux", async () => {
+    const current = credentials("access-old", NOW + 2 * 60_000);
+    const after = credentials("access-new", NOW + 8 * 60 * 60_000, "refresh-rotated");
+    const path = "/home/member/.claude-pro/.credentials.json";
+    const { value, run } = manager({
+      platform: "linux",
+      reads: [current, after],
+    });
+
+    await expect(value.renewIfNeeded(current, path)).resolves.toBe("access-new");
+
+    const request = run.mock.calls[0]![0];
+    expect(request?.command).toBe("claude");
+    expect(request?.env.CLAUDE_CONFIG_DIR).toBe("/home/member/.claude-pro");
   });
 
   it("single-flights concurrent renewal for the same credential path", async () => {
