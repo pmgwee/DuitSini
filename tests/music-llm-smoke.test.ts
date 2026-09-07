@@ -12,9 +12,17 @@ import { readFileSync } from "node:fs";
  * Run:  pnpm vitest run tests/music-llm-smoke.test.ts
  */
 
-// Load `.env` into process.env (vitest doesn't auto-load it; no dotenv dep).
-// split on CRLF or LF and trim — the file has mixed line endings on Windows.
-for (const raw of readFileSync(`${process.cwd()}/.env`, "utf8").split(/\r?\n/)) {
+// Load `.env` into process.env when present (vitest doesn't auto-load it; no
+// dotenv dep). A missing file is normal for non-live test environments.
+let envContents = "";
+try {
+  envContents = readFileSync(`${process.cwd()}/.env`, "utf8");
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
+
+// Split on CRLF or LF and trim — the file has mixed line endings on Windows.
+for (const raw of envContents.split(/\r?\n/)) {
   const m = raw.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
   if (m && process.env[m[1]] === undefined) {
     process.env[m[1]] = m[2].replace(/^"|"$/g, "").trim();

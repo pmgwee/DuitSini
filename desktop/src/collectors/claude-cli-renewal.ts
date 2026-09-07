@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { open, readFile, stat, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import type { UsageTracker } from "../tracker";
 import type { RenewalBroker } from "./claude-oauth";
 
@@ -67,6 +67,7 @@ export interface ClaudeCliRenewalState {
 
 interface ClaudeCliRenewalDeps {
   now?: () => number;
+  platform?: NodeJS.Platform;
   run?: (request: ClaudeCliLoginRequest) => Promise<ClaudeCliLoginResult>;
   readCredentials?: (path: string) => Promise<unknown>;
   withLock?: (
@@ -224,6 +225,7 @@ async function defaultWithLock(
  */
 export class ClaudeCliRenewalManager implements RenewalBroker {
   private readonly now: () => number;
+  private readonly platform: NodeJS.Platform;
   private readonly run: (request: ClaudeCliLoginRequest) => Promise<ClaudeCliLoginResult>;
   private readonly readCredentials: (path: string) => Promise<unknown>;
   private readonly withLock: (
@@ -236,6 +238,7 @@ export class ClaudeCliRenewalManager implements RenewalBroker {
 
   constructor(deps: ClaudeCliRenewalDeps = {}) {
     this.now = deps.now ?? Date.now;
+    this.platform = deps.platform ?? process.platform;
     this.run = deps.run ?? defaultRun;
     this.readCredentials = deps.readCredentials ?? defaultReadCredentials;
     this.withLock = deps.withLock ?? defaultWithLock;
@@ -346,14 +349,15 @@ export class ClaudeCliRenewalManager implements RenewalBroker {
       delete env.CLAUDE_CODE_USE_BEDROCK;
       delete env.CLAUDE_CODE_USE_VERTEX;
       delete env.CLAUDE_CODE_USE_FOUNDRY;
-      env.CLAUDE_CONFIG_DIR = dirname(path);
+      const pathApi = this.platform === "win32" ? win32 : posix;
+      env.CLAUDE_CONFIG_DIR = pathApi.dirname(path);
       env.CLAUDE_CODE_OAUTH_REFRESH_TOKEN = latest.refreshToken;
       env.CLAUDE_CODE_OAUTH_SCOPES = (latest.scopes ?? []).join(" ");
 
       let result: ClaudeCliLoginResult;
       try {
         result = await this.run({
-          command: process.platform === "win32" ? "claude.cmd" : "claude",
+          command: this.platform === "win32" ? "claude.cmd" : "claude",
           args: ["auth", "login", "--claudeai"],
           env,
           timeoutMs: LOGIN_TIMEOUT_MS,
