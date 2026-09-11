@@ -116,6 +116,7 @@ export class TokenHolder {
   /** Drop the cached token so the next `get()` mints a fresh one. */
   invalidate(): void {
     this.token = null;
+    this.account = null;
   }
 
   async get(): Promise<string | null> {

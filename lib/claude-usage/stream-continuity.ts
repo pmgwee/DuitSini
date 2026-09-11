@@ -1,4 +1,5 @@
 import { isPreservedSourceStale, streamSchema, type UsageStream } from "./protocol";
+import { usageStreamKey } from "./codex-accounts";
 
 /**
  * A producer cycle is allowed to fail per source. Preserve any omitted source
@@ -18,16 +19,25 @@ export function mergeUsageStreams(
   now: number = Date.now(),
 ): UsageStream[] {
   const next = [...incoming];
-  const seen = new Set(incoming.map((stream) => stream.source));
+  const seen = new Set(incoming.map((stream) => usageStreamKey(stream)));
+  const hasIdentifiedCodex = incoming.some(
+    (stream) => stream.source === "codex" && Boolean(stream.account_key),
+  );
 
-  for (const candidate of previous ?? []) {
-    const parsed = streamSchema.safeParse(candidate);
-    if (!parsed.success || seen.has(parsed.data.source)) continue;
+  for (const previousValue of previous ?? []) {
+    const parsed = streamSchema.safeParse(previousValue);
+    if (!parsed.success) continue;
+    const candidate = parsed.data;
+    const key = usageStreamKey(candidate);
+    if (seen.has(key)) continue;
+    // Once a current producer identifies Codex accounts, an old anonymous
+    // codex stream must not be carried forward and mistaken for either seat.
+    if (hasIdentifiedCodex && candidate.source === "codex" && !candidate.account_key) continue;
     // Retired collector, not a blip — let it go instead of preserving a ghost.
     if (isPreservedSourceStale(parsed.data.observed_at, now)) continue;
-    seen.add(parsed.data.source);
+    seen.add(key);
     next.push({
-      ...parsed.data,
+      ...candidate,
       cached: true,
       state: "offline",
       status_message: "Collector unavailable; showing the last reading.",

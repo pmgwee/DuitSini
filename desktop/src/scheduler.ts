@@ -4,6 +4,7 @@ import {
   codexUsage429Hold,
   proUsage429Hold,
 } from "../../lib/bridge/sharer/backoff";
+import { usageStreamKey } from "../../lib/claude-usage/codex-accounts";
 import {
   API_CACHE_MS,
   CLIENT_VERSION,
@@ -22,8 +23,10 @@ import { LocalUsageEstimator } from "./collectors/claude-local";
 import {
   AllCodexCredentialsRejectedError,
   NoCodexCredentialsError,
+  codexCredentialSourcesForHome,
   currentCodexCredentialFingerprint,
   fetchCodexSnapshot,
+  type CodexAccountProfile,
 } from "./collectors/codex";
 import {
   detectProvider,
@@ -67,9 +70,17 @@ export interface SchedulerDeps {
   log: (line: string) => void;
   /** Durable forensic journal for usage/refresh events. */
   tracker: UsageTracker;
+  /** Isolated Codex account profiles. Tests may omit this for legacy one-stream mode. */
+  codexProfiles?: () => CodexAccountProfile[];
+  /** Stable opaque device id included with Codex observations. */
+  codexDeviceId?: string;
 }
 
 const jitter = (n: number) => Math.floor(Math.random() * n);
+
+function usageStreamKeyForProfile(profile: CodexAccountProfile): string {
+  return usageStreamKey({ source: "codex", account_key: profile.accountKey || null });
+}
 
 export class Scheduler {
   private timer: NodeJS.Timeout | null = null;
@@ -81,11 +92,24 @@ export class Scheduler {
   private lastApiSnapshot: Snapshot | null = null;
   private lastLocalAt = 0;
   private activeSourceLabel: string | null = null;
-  private lastCodexSnapshot: Snapshot | null = null;
-  private lastCodexAt = 0;
+  private readonly codexProfiles: CodexAccountProfile[];
+  private readonly lastCodex = new Map<string, {
+    snapshot: Snapshot;
+    observedAt: number;
+    identity: { memberId: string | null; email: string | null; workspaceId: string | null; workspaceName: string | null; planType: string | null };
+  }>();
   private running = false;
 
   constructor(private readonly deps: SchedulerDeps) {
+    this.codexProfiles = deps.codexProfiles?.() ?? [
+      {
+        accountKey: "",
+        slot: "member",
+        label: "Codex",
+        codexHome: process.env.CODEX_HOME || "",
+        includeKeychain: true,
+      },
+    ];
     // Pick the renewal strategy from DUITSINI_RENEWAL_MODE (default cli-renew).
     // A switch, never a layer — only one broker ever touches a credentials file.
     const mode = renewalMode();
@@ -106,10 +130,37 @@ export class Scheduler {
       this.lastApiSnapshot = this.snapshotOf(claude.stream);
       this.lastApiAt = claude.observedAt;
     }
-    const codex = this.deps.store.snapshot("codex");
-    if (codex) {
-      this.lastCodexSnapshot = this.snapshotOf(codex.stream);
-      this.lastCodexAt = codex.observedAt;
+    for (const profile of this.codexProfiles) {
+      const codex = this.deps.store.snapshot("codex", profile.accountKey || null);
+      if (codex) {
+        this.lastCodex.set(profile.accountKey || "codex", {
+          snapshot: this.snapshotOf(codex.stream),
+          observedAt: codex.observedAt,
+          identity: {
+            memberId: codex.stream.member_id ?? null,
+            email: codex.stream.account_email ?? null,
+            workspaceId: codex.stream.workspace_id ?? null,
+            workspaceName: codex.stream.workspace_name ?? null,
+            planType: codex.stream.plan_type ?? null,
+          },
+        });
+      }
+      if (profile.accountKey) {
+        const existing = this.deps.store.codexAccount(profile.accountKey);
+        this.deps.store.setCodexAccount({
+          accountKey: profile.accountKey,
+          slot: profile.slot,
+          label: profile.label,
+          email: codex?.stream.account_email ?? existing?.email ?? null,
+          memberId: codex?.stream.member_id ?? existing?.memberId ?? null,
+          workspaceId: codex?.stream.workspace_id ?? existing?.workspaceId ?? null,
+          workspaceName: codex?.stream.workspace_name ?? existing?.workspaceName ?? null,
+          planType: codex?.stream.plan_type ?? existing?.planType ?? null,
+          credentialFingerprint: this.deps.store.source(usageStreamKeyForProfile(profile)).credentialFingerprint,
+          status: codex ? "connected" : existing?.status ?? "offline",
+          lastSeenAt: codex?.observedAt ?? existing?.lastSeenAt,
+        });
+      }
     }
     // Prime the offline estimate immediately so the first paint is never empty.
     await this.refreshLocal();
@@ -180,8 +231,8 @@ export class Scheduler {
       const glm = await this.collectGlm(provider);
       if (glm) streams.push(glm);
       const codex = await this.collectCodex();
-      if (codex) streams.push(codex);
-      this.deps.log(`collected: claude=${!!claude} glm=${!!glm} codex=${!!codex}`);
+      streams.push(...codex);
+      this.deps.log(`collected: claude=${!!claude} glm=${!!glm} codex=${codex.length}`);
 
       if (streams.length === 0) {
         this.deps.log("no usage streams this cycle — nothing to push");
@@ -488,42 +539,63 @@ export class Scheduler {
    * CLI owns OAuth refresh and this collector re-reads its auth material every
    * query, matching cc-switch's reliable long-running behavior.
    */
-  private async collectCodex(): Promise<UsageStream | null> {
-    const state = this.deps.store.source("codex");
+  private async collectCodex(): Promise<UsageStream[]> {
+    // Profiles are deliberately collected one at a time. Each profile has its
+    // own state, credentials and quota budget; a failed seat never falls back
+    // to the other seat's token.
+    const streams: UsageStream[] = [];
+    for (const profile of this.codexProfiles) {
+      const stream = await this.collectCodexProfile(profile);
+      if (stream) streams.push(stream);
+    }
+    return streams;
+  }
+
+  private async collectCodexProfile(profile: CodexAccountProfile): Promise<UsageStream | null> {
+    const key = profile.accountKey || "codex";
+    const state = this.deps.store.source(usageStreamKeyForProfile(profile));
     const now = Date.now();
+    const cached = this.lastCodex.get(key);
+    const storedAccount = profile.accountKey ? this.deps.store.codexAccount(profile.accountKey) : null;
     const streamFromLast = (
       streamState: UsageStream["state"],
       message?: string,
     ): UsageStream | null => {
-      if (!this.lastCodexSnapshot) return null;
+      if (!cached) return null;
       return {
         source: "codex",
-        label: "Codex",
-        five_hour: this.lastCodexSnapshot.five_hour,
-        seven_day: this.lastCodexSnapshot.seven_day,
-        limits: this.lastCodexSnapshot.limits,
+        label: profile.label,
+        account_key: profile.accountKey || undefined,
+        device_id: this.deps.codexDeviceId,
+        account_email: cached.identity.email ?? storedAccount?.email ?? null,
+        member_id: cached.identity.memberId ?? storedAccount?.memberId ?? null,
+        workspace_id: cached.identity.workspaceId ?? storedAccount?.workspaceId ?? null,
+        workspace_name: cached.identity.workspaceName ?? storedAccount?.workspaceName ?? null,
+        plan_type: cached.identity.planType ?? storedAccount?.planType ?? null,
+        five_hour: cached.snapshot.five_hour,
+        seven_day: cached.snapshot.seven_day,
+        limits: cached.snapshot.limits,
         provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
         cached: streamState !== "live",
-        observed_at: new Date(this.lastCodexAt).toISOString(),
+        observed_at: new Date(cached.observedAt).toISOString(),
         state: streamState,
         status_message: message ?? null,
       };
     };
 
+    const sources = profile.accountKey
+      ? codexCredentialSourcesForHome(profile.codexHome, profile.includeKeychain)
+      : undefined;
     if (now < state.nextAt) {
-      const fingerprint = await currentCodexCredentialFingerprint();
-      if (
-        fingerprint &&
-        state.credentialFingerprint &&
-        fingerprint !== state.credentialFingerprint
-      ) {
+      const fingerprint = await currentCodexCredentialFingerprint(sources);
+      if (fingerprint && state.credentialFingerprint && fingerprint !== state.credentialFingerprint) {
         state.nextAt = 0;
         state.streak = 0;
         state.message = undefined;
-        this.deps.log("[Codex] fresh sign-in detected; resuming quota checks");
+        this.deps.log(`[${profile.label}] fresh sign-in detected; resuming quota checks`);
       } else {
         const mins = Math.max(1, Math.ceil((state.nextAt - now) / 60_000));
-        this.deps.log(`[Codex] cooling down ${mins}m (${state.message || "rate limit"})`);
+        this.deps.log(`[${profile.label}] cooling down ${mins}m (${state.message || "rate limit"})`);
         return streamFromLast(
           state.message?.includes("sign-in") ? "auth_stale" : "rate_limited",
           state.message || "Waiting for the provider cooldown before checking again.",
@@ -531,59 +603,97 @@ export class Scheduler {
       }
     }
 
-    if (this.lastCodexSnapshot && now - this.lastCodexAt < API_CACHE_MS) {
-      return streamFromLast("live");
-    }
+    if (cached && now - cached.observedAt < API_CACHE_MS) return streamFromLast("live");
 
     try {
-      const result = await fetchCodexSnapshot();
-      this.lastCodexSnapshot = result.snapshot;
-      this.lastCodexAt = Date.now();
+      const callNumber = this.deps.store.noteCodexUsageCall(key);
+      this.deps.log(`[${profile.label}] usage call #${callNumber} today`);
+      const result = await fetchCodexSnapshot({
+        sources,
+        profile: profile.accountKey ? profile : undefined,
+      });
+      const observedAt = Date.now();
+      this.lastCodex.set(key, {
+        snapshot: result.snapshot,
+        observedAt,
+        identity: result.identity,
+      });
       state.nextAt = 0;
       state.streak = 0;
       state.message = undefined;
       state.credentialFingerprint = result.fingerprint;
-      this.deps.log(`[Codex] quota ok via ${result.sourceLabel}`);
+      // `sourceLabel` is an internal file path for file-backed credentials.
+      // Keep paths out of logs while retaining enough evidence to diagnose
+      // whether the official OS store or an isolated auth file was selected.
+      const sourceKind = result.sourceLabel.includes("Keychain") ? "OS credential store" : "isolated auth file";
+      this.deps.log(`[${profile.label}] quota ok via ${sourceKind}`);
       const stream: UsageStream = {
         source: "codex",
-        label: "Codex",
+        label: profile.label,
+        account_key: profile.accountKey || undefined,
+        device_id: this.deps.codexDeviceId,
+        account_email: result.identity.email,
+        member_id: result.identity.memberId,
+        workspace_id: result.identity.workspaceId,
+        workspace_name: result.identity.workspaceName,
+        plan_type: result.identity.planType,
         five_hour: result.snapshot.five_hour,
         seven_day: result.snapshot.seven_day,
         limits: result.snapshot.limits,
         provider: { name: "OpenAI", gateway_host: "chatgpt.com", official: true },
         cached: false,
-        observed_at: new Date(this.lastCodexAt).toISOString(),
+        observed_at: new Date(observedAt).toISOString(),
         state: "live",
         status_message: null,
       };
-      this.deps.store.setSnapshot(stream.source, stream, this.lastCodexAt);
+      this.deps.store.setSnapshot(stream.source, stream, observedAt);
+      if (profile.accountKey) {
+        this.deps.store.setCodexAccount({
+          accountKey: profile.accountKey,
+          slot: profile.slot,
+          label: profile.label,
+          email: result.identity.email,
+          memberId: result.identity.memberId,
+          workspaceId: result.identity.workspaceId,
+          workspaceName: result.identity.workspaceName,
+          planType: result.identity.planType,
+          credentialFingerprint: result.fingerprint,
+          status: "connected",
+          lastSeenAt: observedAt,
+        });
+      }
       return stream;
     } catch (error) {
       const err = error as { code?: number | string; retryMs?: number; message: string };
       state.credentialFingerprint =
-        (await currentCodexCredentialFingerprint()) ?? state.credentialFingerprint;
+        (await currentCodexCredentialFingerprint(sources)) ?? state.credentialFingerprint;
 
       if (err.code === 429) {
         state.streak += 1;
         const hold = codexUsage429Hold(state.streak, err.retryMs, jitter(30_000));
         state.nextAt = Date.now() + hold;
         state.message = "cooling down after a rate limit";
-        this.deps.log(`[Codex] rate-limited; quiet for ${Math.round(hold / 60_000)}m`);
+        this.deps.log(`[${profile.label}] rate-limited; quiet for ${Math.round(hold / 60_000)}m`);
         return streamFromLast("rate_limited", "Provider rate limit; showing the last exact reading.");
       }
       if (error instanceof AllCodexCredentialsRejectedError) {
         state.nextAt = Date.now() + 10 * 60_000;
-        state.message = "Codex sign-in needs refreshing";
-        return streamFromLast("auth_stale", "Codex sign-in is stale; showing the last reading.");
-      } else if (!(error instanceof NoCodexCredentialsError)) {
-        this.deps.log(`[Codex] ${err.message}`);
+        state.message = `${profile.label} sign-in needs refreshing`;
+        if (profile.accountKey) {
+          const current = this.deps.store.codexAccount(profile.accountKey);
+          if (current) this.deps.store.setCodexAccount({ ...current, status: "needs_sign_in" });
+        }
+        return streamFromLast("auth_stale", `${profile.label} sign-in is stale; showing the last reading.`);
       }
-      return streamFromLast(
-        error instanceof NoCodexCredentialsError ? "auth_stale" : "offline",
-        error instanceof NoCodexCredentialsError
-          ? "Codex sign-in is unavailable; showing the last reading."
-          : "Codex is temporarily unreachable; showing the last reading.",
-      );
+      if (error instanceof NoCodexCredentialsError) {
+        if (profile.accountKey) {
+          const current = this.deps.store.codexAccount(profile.accountKey);
+          if (current) this.deps.store.setCodexAccount({ ...current, status: "needs_sign_in" });
+        }
+        return streamFromLast("auth_stale", `${profile.label} sign-in is unavailable; showing the last reading.`);
+      }
+      this.deps.log(`[${profile.label}] ${err.message}`);
+      return streamFromLast("offline", `${profile.label} is temporarily unreachable; showing the last reading.`);
     }
   }
 

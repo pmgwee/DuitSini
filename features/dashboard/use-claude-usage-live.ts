@@ -39,6 +39,12 @@ export interface UsageProvider {
 export interface UsageStream {
   source: string;
   label: string;
+  account_key?: string;
+  account_email?: string | null;
+  workspace_id?: string | null;
+  workspace_name?: string | null;
+  plan_type?: string | null;
+  device_id?: string | null;
   five_hour?: LiveUsageWindow | null;
   seven_day?: LiveUsageWindow | null;
   limits?: UsageLimit[] | null;
@@ -60,6 +66,7 @@ export interface LiveUsage {
   cached?: boolean;
   refreshed_at?: string;
   sharer_version?: string | null;
+  device_id?: string | null;
 }
 
 export type LiveStatus = UsageDeliveryStatus;

@@ -71,4 +71,26 @@ describe("mergeUsageStreams", () => {
 
     expect(mergeUsageStreams(incoming, prior, NOW)).toEqual(incoming);
   });
+
+  it("merges two identified Codex accounts without a source collision", () => {
+    const previous = [
+      { ...stream("codex", 30), account_key: "codex_business" },
+      { ...stream("codex", 40), account_key: "codex_member" },
+    ];
+    const incoming = [{ ...stream("codex", 31), account_key: "codex_business" }];
+
+    const merged = mergeUsageStreams(incoming, previous, NOW);
+
+    expect(
+      merged.map((value) => value.source + ":" + value.account_key),
+    ).toEqual(["codex:codex_business", "codex:codex_member"]);
+    expect(merged[1]).toMatchObject({ account_key: "codex_member", cached: true, state: "offline" });
+  });
+
+  it("does not preserve an anonymous legacy Codex reading beside identified accounts", () => {
+    const previous = [{ ...stream("codex", 30) }];
+    const incoming = [{ ...stream("codex", 31), account_key: "codex_member" }];
+
+    expect(mergeUsageStreams(incoming, previous, NOW)).toEqual(incoming);
+  });
 });

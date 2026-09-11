@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCodexAuth, parseCodexUsage } from "./codex";
+import { parseCodexAuth, parseCodexIdentity, parseCodexUsage } from "./codex";
 
 describe("parseCodexAuth", () => {
   it("accepts ChatGPT Codex CLI credentials", () => {
@@ -33,6 +33,43 @@ describe("parseCodexAuth", () => {
         tokens: { access_token: "access-token" },
       }),
     ).toBeNull();
+  });
+});
+
+describe("parseCodexIdentity", () => {
+  it("reads non-secret identity metadata without exposing token material", () => {
+    const credential = parseCodexAuth({
+      auth_mode: "chatgpt",
+      email: "perminggwee@gmail.com",
+      workspace_id: "workspace-1",
+      workspace_name: "mingcreatives",
+      plan_type: "business",
+      tokens: { access_token: "access-token", account_id: "account-123" },
+    });
+    const identity = parseCodexIdentity(
+      {
+        email: "perminggwee@gmail.com",
+        member_id: "member-1",
+        workspace_id: "workspace-1",
+        workspace_name: "mingcreatives",
+        plan_type: "business",
+      },
+      credential,
+    );
+    expect(identity).toEqual({
+      memberId: "member-1",
+      email: "perminggwee@gmail.com",
+      workspaceId: "workspace-1",
+      workspaceName: "mingcreatives",
+      planType: "business",
+    });
+    expect(parseCodexIdentity({ email: "perminggwee@gmail.com" }, credential)).toEqual({
+      memberId: null,
+      email: "perminggwee@gmail.com",
+      workspaceId: null,
+      workspaceName: null,
+      planType: null,
+    });
   });
 });
 

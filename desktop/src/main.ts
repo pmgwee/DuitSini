@@ -16,6 +16,10 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
+import { codexAccountProfiles } from "./codex-profiles";
+import { CodexRuntimeManager } from "./codex-runtime";
+import type { CodexAccountProfile } from "./collectors/codex";
+import { CODEX_ACCOUNT_SLOTS } from "../../lib/claude-usage/codex-accounts";
 import { Store } from "./store";
 import { TokenHolder } from "./mint";
 import { startLoopback, type LoopbackHandle } from "./loopback";
@@ -184,6 +188,32 @@ function notifyRenewalResult(success: boolean): void {
 
 const store = new Store(Store.pathFor(app.getPath("userData")));
 const tokens = new TokenHolder(() => win, appOriginOf());
+const codexProfiles = () => codexAccountProfiles(app.getPath("userData"));
+const deviceHash = createHash("sha256").update(app.getPath("userData")).digest("hex");
+const codexDeviceId = `${deviceHash.slice(0, 8)}-${deviceHash.slice(8, 12)}-${deviceHash.slice(12, 16)}-${deviceHash.slice(16, 20)}-${deviceHash.slice(20, 32)}`;
+async function startCodexEnrollment(profile: CodexAccountProfile): Promise<{ ok: boolean; message: string }> {
+  const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: profile.codexHome };
+  try {
+    const child =
+      process.platform === "win32"
+        ? spawn("cmd.exe", ["/c", "start", "DuitSini - Codex sign-in", "cmd.exe", "/k", "codex login"], {
+            env,
+            detached: true,
+            shell: false,
+            stdio: "ignore",
+          })
+        : spawn("codex", ["login"], { env, detached: true, stdio: "ignore" });
+    child.unref();
+    return {
+      ok: true,
+      message: `${profile.label} sign-in opened in an isolated Codex profile. Complete the browser step; the other account is not changed.`,
+    };
+  } catch (error) {
+    return { ok: false, message: `Could not open ${profile.label} sign-in: ${(error as Error).message}` };
+  }
+}
+
+const codexRuntime = new CodexRuntimeManager(codexProfiles(), store, codexDeviceId, undefined, startCodexEnrollment);
 
 function appOriginOf(): string {
   try {
@@ -568,6 +598,8 @@ async function startCollection(): Promise<void> {
     log: (line) => {
       if (isDev) console.log(`[duitsini] ${line}`);
     },
+    codexProfiles,
+    codexDeviceId,
   });
 
   void persisted;
@@ -644,13 +676,12 @@ function completeSignIn(params: CallbackParams, via: string): void {
         }
       } else if (u.pathname === "/subscriptions" || u.pathname === "/") {
         console.log(`[duitsini] signed in → ${u.pathname}; pushing usage now`);
-        // Fresh session just landed — push immediately instead of waiting up to
-        // a full cadence cycle, so usage appears on the dashboard right away.
-        // NOTE: the bridge token is intentionally kept cached here. An earlier
-        // attempt invalidated it on each sign-in to handle Google-account
-        // switching, but the re-mint raced the still-loading page and left usage
-        // blank, so it was removed — reliability beats the rare switch case.
-        void scheduler?.pullNow();
+        // Fresh session just landed — discard any bridge token minted for the
+        // previous DuitSini owner before the next push. The new page mints a
+        // token in its own cookie context; a short delay avoids racing the
+        // navigation commit while preserving immediate first-push behavior.
+        tokens.invalidate();
+        setTimeout(() => void scheduler?.pullNow(), 750);
       }
     } catch {
       /* a non-url commit — ignore */
@@ -820,6 +851,63 @@ ipcMain.on("duitsini:update-install", () => updater.installAndRestart());
 // wiring robust to renderer reloads/navigation.
 ipcMain.handle("duitsini:update-state:get", () => updater.getState());
 ipcMain.on("duitsini:update-open-popup", () => openUpdatePopup());
+
+function assertCodexRenderer(event: Electron.IpcMainInvokeEvent): void {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) {
+    throw new Error("unauthorized renderer");
+  }
+  if (event.senderFrame && event.senderFrame !== win.webContents.mainFrame) {
+    throw new Error("unauthorized frame");
+  }
+  try {
+    if (new URL(event.sender.getURL()).origin !== appOrigin) throw new Error("untrusted origin");
+  } catch {
+    throw new Error("untrusted origin");
+  }
+}
+
+function accountKeyInput(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 80) return null;
+  return CODEX_ACCOUNT_SLOTS.some((slot) => slot.account_key === value) ? value : null;
+}
+
+function switchRequestInput(value: unknown): { accountKey: string; requestId: string; expectedGeneration?: number } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const accountKey = accountKeyInput(candidate.accountKey);
+  const requestId = typeof candidate.requestId === "string" ? candidate.requestId : null;
+  const expectedGeneration = candidate.expectedGeneration;
+  if (!accountKey || !requestId || requestId.length < 8 || requestId.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(requestId)) {
+    return null;
+  }
+  if (expectedGeneration !== undefined && (typeof expectedGeneration !== "number" || !Number.isInteger(expectedGeneration) || expectedGeneration < 0)) {
+    return null;
+  }
+  return {
+    accountKey,
+    requestId,
+    ...(typeof expectedGeneration === "number" ? { expectedGeneration } : {}),
+  };
+}
+
+ipcMain.handle("duitsini:codex-status", async (event) => {
+  assertCodexRenderer(event);
+  return codexRuntime.status();
+});
+ipcMain.handle("duitsini:codex-switch", async (event, value: unknown) => {
+  assertCodexRenderer(event);
+  const request = switchRequestInput(value);
+  if (!request) throw new Error("invalid Codex switch request");
+  if (!(await tokens.get())) throw new Error("Sign in to DuitSini before switching Codex accounts.");
+  return codexRuntime.switchAccount(request);
+});
+ipcMain.handle("duitsini:codex-connect", async (event, value: unknown) => {
+  assertCodexRenderer(event);
+  const accountKey = accountKeyInput(value);
+  if (!accountKey) throw new Error("invalid Codex account");
+  if (!(await tokens.get())) throw new Error("Sign in to DuitSini before connecting a Codex account.");
+  return codexRuntime.connectAccount(accountKey);
+});
 
 /**
  * One-click Claude Pro sign-in renewal (F4). Triggered from the dashboard when a

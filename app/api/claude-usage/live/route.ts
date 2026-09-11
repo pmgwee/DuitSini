@@ -85,6 +85,7 @@ export async function GET() {
     limits: primary?.limits ?? null,
     provider: primary?.provider ?? null,
     streams,
+    device_id: data.device_id,
     refreshed_at: data.updated_at,
     cached: !fresh,
     sharer_version: data.sharer_version,
