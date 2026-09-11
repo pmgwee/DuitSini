@@ -138,6 +138,20 @@ expose("duitsiniUpdater", () => ({
 }));
 
 /**
+ * `window.duitsiniCodex` — the versioned, capability-gated Codex surface.
+ * Only structured account keys and request ids cross the bridge; credentials,
+ * paths, shell commands and auth responses stay in the main process.
+ */
+expose("duitsiniCodex", () => ({
+  version: 1,
+  getStatus: (): Promise<unknown> => ipcRenderer.invoke("duitsini:codex-status"),
+  switchAccount: (request: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("duitsini:codex-switch", request),
+  connectAccount: (accountKey: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("duitsini:codex-connect", accountKey),
+}));
+
+/**
  * `window.duitsiniClaudeRenewal` — one-click renewal of a dead Claude Pro
  * dedicated sign-in (F4). Present only in the desktop shell; the dashboard gates
  * the "Renew sign-in" button on its existence. No capability beyond spawning

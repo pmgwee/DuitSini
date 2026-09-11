@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { usageStreamKey } from "./codex-accounts";
 
 /**
  * Shared protocol for the Claude-usage bridge (ADR-0004).
@@ -135,6 +136,14 @@ export const providerSchema = z
 export const streamSchema = z.object({
   source: z.string().min(1).max(32),
   label: z.string().min(1).max(80),
+  /** Owner-scoped identity. Omitted only for legacy anonymous producers. */
+  account_key: z.string().min(1).max(80).optional(),
+  member_id: z.string().max(160).nullable().optional(),
+  account_email: z.string().email().max(320).nullable().optional(),
+  workspace_id: z.string().max(160).nullable().optional(),
+  workspace_name: z.string().max(120).nullable().optional(),
+  plan_type: z.string().max(80).nullable().optional(),
+  device_id: z.string().max(120).nullable().optional(),
   five_hour: windowSchema.optional(),
   seven_day: windowSchema.optional(),
   limits: z.array(limitSchema).max(40).nullable().optional(),
@@ -143,6 +152,17 @@ export const streamSchema = z.object({
   observed_at: z.string().max(64).nullable().optional(),
   state: z.enum(["live", "cached", "auth_stale", "rate_limited", "offline"]).optional(),
   status_message: z.string().max(200).nullable().optional(),
+});
+
+export const streamArraySchema = z.array(streamSchema).max(6).superRefine((streams, ctx) => {
+  const seen = new Set<string>();
+  streams.forEach((stream, index) => {
+    const key = usageStreamKey(stream);
+    if (seen.has(key)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index], message: "duplicate usage stream identity" });
+    }
+    seen.add(key);
+  });
 });
 
 /**
@@ -156,7 +176,7 @@ export const bodySchema = z.object({
   seven_day: windowSchema.optional(),
   limits: z.array(limitSchema).max(40).nullable().optional(),
   provider: providerSchema.optional(),
-  streams: z.array(streamSchema).max(6).optional(),
+  streams: streamArraySchema.optional(),
   // Self-reported cadence (sharer v6.2+). Wider band than the sharer's clamp,
   // with slack for future changes (see ingest route comment).
   push_seconds: z.number().int().min(60).max(7200).optional(),
@@ -170,3 +190,6 @@ export type UsageLimit = z.infer<typeof limitSchema>;
 export type UsageProvider = z.infer<typeof providerSchema>;
 export type UsageStream = z.infer<typeof streamSchema>;
 export type SnapshotBody = z.infer<typeof bodySchema>;
+
+/** Stable merge/cache/UI identity for one provider stream. */
+export { usageStreamKey };

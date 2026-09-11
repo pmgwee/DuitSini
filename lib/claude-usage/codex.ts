@@ -11,6 +11,14 @@ export type CodexCredential = {
   lastRefresh: string | null;
 };
 
+export type CodexIdentity = {
+  memberId: string | null;
+  email: string | null;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  planType: string | null;
+};
+
 export type CodexUsageSnapshot = {
   five_hour: UsageWindow;
   seven_day: UsageWindow;
@@ -42,6 +50,65 @@ export function parseCodexAuth(value: unknown): CodexCredential | null {
     accessToken,
     accountId,
     lastRefresh: typeof root.last_refresh === "string" ? root.last_refresh : null,
+  };
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function jwtClaims(token: string): Record<string, unknown> {
+  const parts = token.split(".");
+  if (parts.length < 2 || !parts[1]) return {};
+  try {
+    const encoded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+    const decoded = Buffer.from(padded, "base64").toString("utf8");
+    const value: unknown = JSON.parse(decoded);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Best-effort public identity metadata from the auth envelope and JWT claims.
+ * This is observational only: a decoded claim is never treated as proof of
+ * ownership or authorization.
+ */
+export function parseCodexIdentity(
+  value: unknown,
+  credential?: CodexCredential | null,
+): CodexIdentity {
+  const root =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const tokenEnvelope =
+    root.tokens && typeof root.tokens === "object" && !Array.isArray(root.tokens)
+      ? (root.tokens as Record<string, unknown>)
+      : {};
+  const claims = credential ? jwtClaims(credential.accessToken) : {};
+  const read = (...keys: string[]): string | null => {
+    for (const key of keys) {
+      const rootValue = stringValue(root[key]);
+      if (rootValue) return rootValue;
+      const tokenValue = stringValue(tokenEnvelope[key]);
+      if (tokenValue) return tokenValue;
+      const claimValue = stringValue(claims[key]);
+      if (claimValue) return claimValue;
+    }
+    return null;
+  };
+  const email = read("email", "user_email", "userEmail");
+  return {
+    memberId: read("member_id", "memberId", "user_id", "userId", "sub"),
+    email: email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : null,
+    workspaceId: read("workspace_id", "workspaceId", "organization_id", "organizationId"),
+    workspaceName: read("workspace_name", "workspaceName", "organization_name", "organizationName"),
+    planType: read("plan_type", "planType", "plan"),
   };
 }
 

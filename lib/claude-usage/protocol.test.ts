@@ -80,8 +80,42 @@ describe("snapshot schema (mirrors ingest route v7)", () => {
     expect(bodySchema.safeParse(body).success).toBe(true);
   });
 
+  it("keeps same-workspace Codex members distinct with an account key", () => {
+    const base = {
+      source: "codex",
+      five_hour: null,
+      seven_day: null,
+      workspace_id: "mingcreatives",
+      workspace_name: "mingcreatives",
+    };
+    const result = bodySchema.safeParse({
+      streams: [
+        { ...base, account_key: "codex_member", label: "Codex (Member)" },
+        { ...base, account_key: "codex_business", label: "Codex (Business)" },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.streams?.map((stream) => stream.account_key)).toEqual([
+        "codex_member",
+        "codex_business",
+      ]);
+    }
+  });
+
   it("rejects a stream missing required source/label", () => {
     expect(streamSchema.safeParse({ source: "pro" }).success).toBe(false);
+  });
+
+  it("rejects duplicate composite identities in one push", () => {
+    expect(
+      bodySchema.safeParse({
+        streams: [
+          { source: "codex", label: "Codex (Member)", account_key: "codex_member" },
+          { source: "codex", label: "Codex (Member copy)", account_key: "codex_member" },
+        ],
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects an unknown limit group", () => {

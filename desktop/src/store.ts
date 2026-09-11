@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Calibration } from "./collectors/claude-local";
 import type { UsageStream } from "./types";
+import { usageStreamKey } from "../../lib/claude-usage/codex-accounts";
 
 /**
  * Small JSON store beside the app's userData.
@@ -25,11 +26,39 @@ export interface SourceState {
   credentialFingerprint?: string;
 }
 
+export interface PersistedCodexAccount {
+  accountKey: string;
+  slot: "business" | "member";
+  label: string;
+  email: string | null;
+  memberId: string | null;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  planType: string | null;
+  credentialFingerprint?: string;
+  status: "connected" | "needs_sign_in" | "unsupported" | "offline";
+  lastSeenAt?: number;
+}
+
+export interface PersistedCodexRuntime {
+  state: "detected" | "unknown" | "not_running" | "unsupported";
+  accountKey: string | null;
+  memberId?: string | null;
+  email: string | null;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  observedAt: number;
+  confidence: "credential-file" | "unsupported";
+  message: string;
+}
+
 export interface PersistedState {
   sources: Record<string, SourceState>;
   calibration?: Calibration;
   /** Usage-endpoint call count, reset at local midnight. */
   usageCalls?: { day: string; count: number };
+  /** Per-account Codex usage-endpoint call counts, reset at local midnight. */
+  codexUsageCalls?: Record<string, { day: string; count: number }>;
   /**
    * Persisted renewal-broker state (mode-agnostic blob). Shape depends on the
    * active `renewalMode()`; each broker tolerates foreign fields, so switching
@@ -38,6 +67,10 @@ export interface PersistedState {
   cliRenewal?: Record<string, unknown>;
   /** Last known provider readings. These keep all rings visible through outages. */
   snapshots?: Record<string, { stream: UsageStream; observedAt: number }>;
+  /** Public account metadata only; credentials remain outside this JSON file. */
+  codexAccounts?: Record<string, PersistedCodexAccount>;
+  /** Last observational runtime identity, never a command or credential. */
+  codexRuntime?: PersistedCodexRuntime;
   /**
    * A version the user chose to skip. While this equals the available version,
    * the toast stays quiet — the tray item and in-app badge still show it, so the
@@ -93,15 +126,34 @@ export class Store {
   }
 
   setSnapshot(source: string, stream: UsageStream, observedAt = Date.now()): void {
-    (this.data.snapshots ??= {})[source] = {
+    const key = usageStreamKey({ source, account_key: stream.account_key });
+    (this.data.snapshots ??= {})[key] = {
       stream: structuredClone(stream),
       observedAt,
     };
   }
 
-  snapshot(source: string): { stream: UsageStream; observedAt: number } | null {
-    const value = this.data.snapshots?.[source];
+  snapshot(source: string, accountKey?: string | null): { stream: UsageStream; observedAt: number } | null {
+    const key = usageStreamKey({ source, account_key: accountKey });
+    const value = this.data.snapshots?.[key];
     return value ? structuredClone(value) : null;
+  }
+
+  setCodexAccount(account: PersistedCodexAccount): void {
+    (this.data.codexAccounts ??= {})[account.accountKey] = structuredClone(account);
+  }
+
+  codexAccount(accountKey: string): PersistedCodexAccount | null {
+    const value = this.data.codexAccounts?.[accountKey];
+    return value ? structuredClone(value) : null;
+  }
+
+  setCodexRuntime(runtime: PersistedCodexRuntime): void {
+    this.data.codexRuntime = structuredClone(runtime);
+  }
+
+  codexRuntime(): PersistedCodexRuntime | null {
+    return this.data.codexRuntime ? structuredClone(this.data.codexRuntime) : null;
   }
 
   /** Version the user chose to skip; the toast stays quiet for exactly this one. */
@@ -134,6 +186,24 @@ export class Store {
     const day = new Date().toISOString().slice(0, 10);
     const cur = this.data.usageCalls;
     return cur && cur.day === day ? cur.count : 0;
+  }
+
+  noteCodexUsageCall(accountKey: string): number {
+    const day = new Date().toISOString().slice(0, 10);
+    const calls = (this.data.codexUsageCalls ??= {});
+    const current = calls[accountKey];
+    if (!current || current.day !== day) {
+      calls[accountKey] = { day, count: 1 };
+      return 1;
+    }
+    current.count += 1;
+    return current.count;
+  }
+
+  codexUsageCallCount(accountKey: string): number {
+    const day = new Date().toISOString().slice(0, 10);
+    const current = this.data.codexUsageCalls?.[accountKey];
+    return current && current.day === day ? current.count : 0;
   }
 
   async save(): Promise<void> {

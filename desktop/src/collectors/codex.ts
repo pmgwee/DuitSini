@@ -6,7 +6,9 @@ import { join } from "node:path";
 import {
   CODEX_USAGE_URL,
   parseCodexAuth,
+  parseCodexIdentity,
   parseCodexUsage,
+  type CodexIdentity,
   type CodexUsageSnapshot,
 } from "../../../lib/claude-usage/codex";
 import { retryMsFrom, safeFetch } from "../net";
@@ -17,10 +19,21 @@ export interface CodexCredentialSource {
   read: () => Promise<unknown>;
 }
 
+/** A collection profile is isolated to one enrolled account. */
+export interface CodexAccountProfile {
+  accountKey: string;
+  slot: "business" | "member";
+  label: string;
+  codexHome: string;
+  /** The default profile may use the OS credential fallback. */
+  includeKeychain?: boolean;
+}
+
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface FetchCodexOptions {
   sources?: CodexCredentialSource[];
+  profile?: Pick<CodexAccountProfile, "accountKey" | "codexHome" | "includeKeychain">;
   fetcher?: Fetcher;
   nowMs?: number;
 }
@@ -30,6 +43,8 @@ export interface CodexResult {
   sourceLabel: string;
   /** Non-secret identity used to notice that Codex rotated/replaced a login. */
   fingerprint: string;
+  accountKey?: string;
+  identity: CodexIdentity;
 }
 
 export class NoCodexCredentialsError extends Error {
@@ -49,10 +64,14 @@ export class AllCodexCredentialsRejectedError extends Error {
   }
 }
 
-export function codexAuthPaths(home = homedir(), codexHome = process.env.CODEX_HOME): string[] {
+export function codexAuthPaths(
+  home = homedir(),
+  codexHome = process.env.CODEX_HOME,
+  includeDefault = true,
+): string[] {
   const candidates = [
     codexHome ? join(codexHome, "auth.json") : null,
-    join(home, ".codex", "auth.json"),
+    includeDefault ? join(home, ".codex", "auth.json") : null,
   ].filter((path): path is string => Boolean(path));
 
   const seen = new Set<string>();
@@ -107,7 +126,18 @@ export function codexCredentialSources(): CodexCredentialSource[] {
   ];
 }
 
-function credentialFingerprint(source: string, token: string, accountId: string): string {
+/** Read only one isolated profile, never falling through to another account. */
+export function codexCredentialSourcesForHome(
+  codexHome: string,
+  includeKeychain = false,
+): CodexCredentialSource[] {
+  const sources = codexAuthPaths(homedir(), codexHome, false).map(fileSource);
+  return includeKeychain
+    ? [...sources, { label: "macOS Keychain (Codex Auth)", read: readCodexKeychain }]
+    : sources;
+}
+
+export function codexCredentialFingerprint(source: string, token: string, accountId: string): string {
   return createHash("sha256")
     .update(source)
     .update("\0")
@@ -124,7 +154,7 @@ export async function currentCodexCredentialFingerprint(
   for (const source of sources) {
     const credential = parseCodexAuth(await source.read());
     if (!credential) continue;
-    return credentialFingerprint(source.label, credential.accessToken, credential.accountId);
+    return codexCredentialFingerprint(source.label, credential.accessToken, credential.accountId);
   }
   return null;
 }
@@ -144,13 +174,18 @@ function asSnapshot(snapshot: CodexUsageSnapshot): Snapshot {
 export async function fetchCodexSnapshot(
   options: FetchCodexOptions = {},
 ): Promise<CodexResult> {
-  const sources = options.sources ?? codexCredentialSources();
+  const sources =
+    options.sources ??
+    (options.profile
+      ? codexCredentialSourcesForHome(options.profile.codexHome, options.profile.includeKeychain)
+      : codexCredentialSources());
   const fetcher = options.fetcher ?? safeFetch;
   const rejected: string[] = [];
   let sawCredentials = false;
 
   for (const source of sources) {
-    const credential = parseCodexAuth(await source.read());
+    const raw = await source.read();
+    const credential = parseCodexAuth(raw);
     if (!credential) continue;
     sawCredentials = true;
 
@@ -189,11 +224,13 @@ export async function fetchCodexSnapshot(
     return {
       snapshot: asSnapshot(snapshot),
       sourceLabel: source.label,
-      fingerprint: credentialFingerprint(
+      fingerprint: codexCredentialFingerprint(
         source.label,
         credential.accessToken,
         credential.accountId,
       ),
+      accountKey: options.profile?.accountKey,
+      identity: parseCodexIdentity(raw, credential),
     };
   }
 

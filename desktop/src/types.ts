@@ -32,6 +32,14 @@ export interface ProviderInfo {
 export interface UsageStream {
   source: string;
   label: string;
+  /** Stable owner-scoped identity for a provider account. */
+  account_key?: string;
+  member_id?: string | null;
+  account_email?: string | null;
+  workspace_id?: string | null;
+  workspace_name?: string | null;
+  plan_type?: string | null;
+  device_id?: string | null;
   five_hour?: UsageWindow | null;
   seven_day?: UsageWindow | null;
   limits?: UsageLimit[] | null;

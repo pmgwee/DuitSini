@@ -4,6 +4,7 @@ import { resolveBridgeUserId } from "@/lib/claude-usage/bridge-auth";
 import { bodySchema, type UsageStream } from "@/lib/claude-usage/protocol";
 import { mergeUsageStreams } from "@/lib/claude-usage/stream-continuity";
 import type { Json } from "@/lib/supabase/types";
+import { CODEX_ACCOUNT_SLOTS } from "@/lib/claude-usage/codex-accounts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,58 @@ function without<T extends Record<string, unknown>>(obj: T, keys: readonly strin
   const out = { ...obj };
   for (const k of keys) delete out[k as keyof T];
   return out;
+}
+
+async function persistCodexMetadata(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  userId: string,
+  streams: readonly UsageStream[],
+  observedAt: string,
+  deviceId: string | null,
+): Promise<void> {
+  const rows = streams.flatMap((stream) => {
+    if (stream.source !== "codex" || !stream.account_key) return [];
+    const slot = CODEX_ACCOUNT_SLOTS.find((candidate) => candidate.account_key === stream.account_key);
+    if (!slot) return [];
+    return [{
+      user_id: userId,
+      account_key: slot.account_key,
+      slot: slot.slot,
+      label: slot.label,
+      email: stream.account_email ?? null,
+      member_id: stream.member_id ?? null,
+      workspace_id: stream.workspace_id ?? null,
+      workspace_name: stream.workspace_name ?? null,
+      plan_type: stream.plan_type ?? null,
+      status: "connected" as const,
+      device_id: deviceId,
+      last_seen_at: observedAt,
+    }];
+  });
+  if (rows.length > 0) {
+    const { error } = await admin.from("codex_accounts").upsert(rows, { onConflict: "user_id,account_key" });
+    if (error && !/codex_accounts|relation|column/i.test(error.message)) {
+      console.error("[claude-usage/ingest] account metadata error:", error.message);
+    }
+  }
+  if (deviceId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId)) {
+    const codexRows = streams.filter((stream) => stream.source === "codex" && stream.account_key);
+    if (codexRows.length > 0) {
+      const { error } = await admin.from("codex_devices").upsert({
+        id: deviceId,
+        user_id: userId,
+        device_name: "DuitSini Desktop",
+        protocol_version: 1,
+        switch_supported: false,
+        heartbeat_at: observedAt,
+        generation: 0,
+        updated_at: observedAt,
+      }, { onConflict: "id" });
+      if (error && !/codex_devices|relation|column/i.test(error.message)) {
+        console.error("[claude-usage/ingest] device metadata error:", error.message);
+      }
+    }
+  }
 }
 
 /**
@@ -78,7 +131,34 @@ export async function POST(req: NextRequest) {
               provider: provider ?? null,
             },
           ] as UsageStream[])
-    ).map((s) => (s.observed_at ? s : { ...s, observed_at: observedAt }));
+    ).map((s) => {
+      const parsedObserved = s.observed_at ? Date.parse(s.observed_at) : Number.NaN;
+      // A producer clock can drift, but a far-future timestamp would keep a
+      // stale account looking fresh indefinitely. Keep only a small skew.
+      const normalizedStream = !Number.isFinite(parsedObserved) || parsedObserved > nowMs + 5 * 60_000
+        ? { ...s, observed_at: observedAt }
+        : s;
+      // A bridge token authenticates the DuitSini owner, but it does not make
+      // an arbitrary account_key valid. Unknown Codex identities remain an
+      // anonymous legacy reading rather than being allowed to impersonate a
+      // registered card.
+      if (
+        normalizedStream.source === "codex" &&
+        normalizedStream.account_key &&
+        !CODEX_ACCOUNT_SLOTS.some((slot) => slot.account_key === normalizedStream.account_key)
+      ) {
+        return {
+          ...normalizedStream,
+          account_key: undefined,
+          account_email: null,
+          member_id: null,
+          workspace_id: null,
+          workspace_name: null,
+          plan_type: null,
+        };
+      }
+      return normalizedStream;
+    });
 
     const admin = createSupabaseAdminClient();
     // An ingest upsert replaces streams_json wholesale. Read the prior JSON so
@@ -101,6 +181,7 @@ export async function POST(req: NextRequest) {
     const primary =
       normalized.find((s) => s.source === "claude_pro" || s.source === "claude") ??
       normalized[0];
+    const deviceId = normalized.find((s) => s.device_id)?.device_id ?? null;
 
     // Try the full row; if a JSON column's migration isn't applied yet, retry
     // progressively without the offending column(s) so the widget keeps working.
@@ -113,6 +194,7 @@ export async function POST(req: NextRequest) {
       seven_day_utilization: primary.seven_day?.utilization ?? null,
       seven_day_resets_at: primary.seven_day?.resets_at ?? null,
       updated_at: observedAt,
+      device_id: deviceId,
       streams_json: normalized as unknown as Json,
       limits_json: (primary.limits ?? null) as Json,
       provider_json: (primary.provider ?? null) as Json,
@@ -120,21 +202,48 @@ export async function POST(req: NextRequest) {
       sharer_version: sharer_version ?? null,
     };
 
+    // New installations use the locked RPC so concurrent desktop profiles
+    // cannot overwrite one another's account stream. Older/self-hosted copies
+    // may not have the additive function yet; retain the guarded compatibility
+    // upsert below until that migration is applied.
+    const { error: atomicError } = await admin.rpc("merge_claude_usage_live", {
+      p_user_id: targetUser,
+      p_five_hour_utilization: full.five_hour_utilization,
+      p_five_hour_resets_at: full.five_hour_resets_at,
+      p_seven_day_utilization: full.seven_day_utilization,
+      p_seven_day_resets_at: full.seven_day_resets_at,
+      p_updated_at: full.updated_at,
+      p_device_id: full.device_id,
+      p_streams_json: full.streams_json,
+      p_limits_json: full.limits_json,
+      p_provider_json: full.provider_json,
+      p_push_seconds: full.push_seconds,
+      p_sharer_version: full.sharer_version,
+    });
+    if (!atomicError) {
+      await persistCodexMetadata(admin, targetUser, normalized, observedAt, deviceId);
+      return NextResponse.json({ ok: true, atomic: true });
+    }
+    if (!/function|schema cache|does not exist|merge_claude_usage_live/i.test(atomicError.message)) {
+      console.error("[claude-usage/ingest] atomic merge error:", atomicError.message);
+      return NextResponse.json({ ok: false, error: atomicError.message }, { status: 500 });
+    }
+
     let { error } = await admin.from("claude_usage_live").upsert(full);
-    if (error && /push_seconds|sharer_version/i.test(error.message)) {
+    if (error && /device_id|push_seconds|sharer_version/i.test(error.message)) {
       ({ error } = await admin
         .from("claude_usage_live")
-        .upsert(without(full, ["push_seconds", "sharer_version"])));
+        .upsert(without(full, ["device_id", "push_seconds", "sharer_version"])));
     }
     if (error && /streams_json/i.test(error.message)) {
       ({ error } = await admin
         .from("claude_usage_live")
-        .upsert(without(full, ["push_seconds", "sharer_version", "streams_json"])));
+        .upsert(without(full, ["device_id", "push_seconds", "sharer_version", "streams_json"])));
     }
     if (error && /provider_json/i.test(error.message)) {
       ({ error } = await admin
         .from("claude_usage_live")
-        .upsert(without(full, ["push_seconds", "sharer_version", "streams_json", "provider_json"])));
+        .upsert(without(full, ["device_id", "push_seconds", "sharer_version", "streams_json", "provider_json"])));
     }
     if (error && /limits_json/i.test(error.message)) {
       ({ error } = await admin
@@ -143,6 +252,7 @@ export async function POST(req: NextRequest) {
           without(full, [
             "push_seconds",
             "sharer_version",
+            "device_id",
             "streams_json",
             "provider_json",
             "limits_json",
@@ -153,6 +263,7 @@ export async function POST(req: NextRequest) {
       console.error("[claude-usage/ingest] db error:", error.message);
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
+    await persistCodexMetadata(admin, targetUser, normalized, observedAt, deviceId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     // The DB client's 8s timeout aborts a stalled upsert as an AbortError here,

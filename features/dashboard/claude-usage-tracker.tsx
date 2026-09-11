@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentProviderIcon } from "./agent-provider-icon";
 import { AgentUsageMascot } from "./agent-usage-mascot";
+import { CodexAccountsPanel } from "./codex-accounts-panel";
+import { usageStreamKey } from "@/lib/claude-usage/codex-accounts";
 
 const SESSION_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -89,6 +91,7 @@ export function ClaudeUsageTracker() {
     return (
       <WidgetShell>
         {header}
+        <CodexAccountsPanel streams={streams} now={now} />
         <LiveViewSkeleton />
       </WidgetShell>
     );
@@ -97,6 +100,7 @@ export function ClaudeUsageTracker() {
   return (
     <WidgetShell>
       {header}
+      <CodexAccountsPanel streams={streams} now={now} />
       {liveReady && live.data ? (
         <LiveView
           streams={streams}
@@ -168,6 +172,7 @@ function normalizeStreams(data: LiveUsage): UsageStream[] {
     .sort(
       (a, b) =>
         SUPPORTED_SOURCES[a.stream.source] - SUPPORTED_SOURCES[b.stream.source] ||
+        usageStreamKey(a.stream).localeCompare(usageStreamKey(b.stream)) ||
         a.index - b.index,
     )
     .map(({ stream }) => stream);
@@ -226,7 +231,7 @@ function LiveView({
     <div className="flex flex-col gap-5">
       <div className={cn("flex flex-col", streams.length > 1 ? "gap-5" : "gap-0")}>
         {streams.map((s) => (
-          <StreamSection key={s.source} stream={s} now={now} divided={streams.length > 1} />
+          <StreamSection key={usageStreamKey(s)} stream={s} now={now} divided={streams.length > 1} />
         ))}
       </div>
 

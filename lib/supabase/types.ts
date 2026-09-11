@@ -42,8 +42,120 @@ export type Database = {
         }
         Relationships: []
       }
+      codex_accounts: {
+        Row: {
+          account_key: string
+          created_at: string
+          device_id: string | null
+          email: string | null
+          id: string
+          label: string
+          last_seen_at: string | null
+          member_id: string | null
+          plan_type: string | null
+          provider_account_id: string | null
+          slot: "business" | "member"
+          status: "connected" | "needs_sign_in" | "unsupported" | "offline"
+          updated_at: string
+          user_id: string
+          verified: boolean
+          workspace_id: string | null
+          workspace_name: string | null
+        }
+        Insert: {
+          account_key: string
+          created_at?: string
+          device_id?: string | null
+          email?: string | null
+          id?: string
+          label: string
+          last_seen_at?: string | null
+          member_id?: string | null
+          plan_type?: string | null
+          provider_account_id?: string | null
+          slot: "business" | "member"
+          status?: "connected" | "needs_sign_in" | "unsupported" | "offline"
+          updated_at?: string
+          user_id: string
+          verified?: boolean
+          workspace_id?: string | null
+          workspace_name?: string | null
+        }
+        Update: {
+          account_key?: string
+          created_at?: string
+          device_id?: string | null
+          email?: string | null
+          id?: string
+          label?: string
+          last_seen_at?: string | null
+          member_id?: string | null
+          plan_type?: string | null
+          provider_account_id?: string | null
+          slot?: "business" | "member"
+          status?: "connected" | "needs_sign_in" | "unsupported" | "offline"
+          updated_at?: string
+          user_id?: string
+          verified?: boolean
+          workspace_id?: string | null
+          workspace_name?: string | null
+        }
+        Relationships: []
+      }
+      codex_devices: {
+        Row: {
+          active_account_key: string | null
+          active_email: string | null
+          active_observed_at: string | null
+          active_workspace_id: string | null
+          active_workspace_name: string | null
+          created_at: string
+          device_name: string
+          generation: number
+          heartbeat_at: string | null
+          id: string
+          protocol_version: number
+          switch_supported: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_account_key?: string | null
+          active_email?: string | null
+          active_observed_at?: string | null
+          active_workspace_id?: string | null
+          active_workspace_name?: string | null
+          created_at?: string
+          device_name?: string
+          generation?: number
+          heartbeat_at?: string
+          id?: string
+          protocol_version?: number
+          switch_supported?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_account_key?: string | null
+          active_email?: string | null
+          active_observed_at?: string | null
+          active_workspace_id?: string | null
+          active_workspace_name?: string | null
+          created_at?: string
+          device_name?: string
+          generation?: number
+          heartbeat_at?: string
+          id?: string
+          protocol_version?: number
+          switch_supported?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       claude_usage_live: {
         Row: {
+          device_id: string | null
           five_hour_resets_at: string | null
           five_hour_utilization: number | null
           limits_json: Json | null
@@ -58,6 +170,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          device_id?: string | null
           five_hour_resets_at?: string | null
           five_hour_utilization?: number | null
           limits_json?: Json | null
@@ -72,6 +185,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          device_id?: string | null
           five_hour_resets_at?: string | null
           five_hour_utilization?: number | null
           limits_json?: Json | null
@@ -715,6 +829,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      merge_claude_usage_live: {
+        Args: {
+          p_device_id: string | null
+          p_five_hour_resets_at: string | null
+          p_five_hour_utilization: number | null
+          p_limits_json: Json | null
+          p_provider_json: Json | null
+          p_push_seconds: number | null
+          p_seven_day_resets_at: string | null
+          p_seven_day_utilization: number | null
+          p_sharer_version: string | null
+          p_streams_json: Json
+          p_updated_at: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       log_music_play: {
         Args: {
           p_channel: string
