@@ -29,6 +29,8 @@ export interface CodexStreamIdentity {
   source: string;
   account_key?: string | null;
   account_email?: string | null;
+  member_id?: string | null;
+  workspace_id?: string | null;
 }
 
 /**
@@ -75,11 +77,18 @@ function normalizedEmail(value: string | null | undefined): string | null {
 /**
  * Resolve one Codex stream to an enrolled account.
  *
- * The account key is the preferred identity for current desktop streams, but
- * older profiles could stamp the default local credential with the Member key
- * even when the provider identity was the Business seat. A unique enrolled
- * email is stronger evidence and corrects that historical profile attribution.
- * Identity-free legacy streams remain unresolved rather than being guessed.
+ * The account key is the preferred identity for isolated per-seat profiles,
+ * but the default local profile is shared: Desktop <= 1.5.0 stamped it with the
+ * Member key no matter which seat was actually signed in. Provider identity is
+ * therefore the stronger evidence and is allowed to correct the key.
+ *
+ * Precedence is "unique match wins, unknown identity abstains":
+ *  - an identity that matches exactly one enrolled account resolves to it;
+ *  - an ambiguous match (two seats carrying the same identity) keeps the key
+ *    when the key is one of them, because a tie proves nothing;
+ *  - an identity the directory has never seen neither confirms nor contradicts
+ *    the key, so it falls through to the next signal instead of discarding a
+ *    live reading. Only a positive contradiction refuses to attribute.
  */
 export function accountForCodexStream(
   stream: CodexStreamIdentity,
@@ -90,22 +99,50 @@ export function accountForCodexStream(
   const keyed = stream.account_key
     ? accounts.find((account) => account.account_key === stream.account_key) ?? null
     : null;
+
   const email = normalizedEmail(stream.account_email);
   if (email) {
     const emailMatches = accounts.filter((account) => normalizedEmail(account.email) === email);
     if (emailMatches.length === 1) return emailMatches[0];
-    if (keyed && emailMatches.includes(keyed)) return keyed;
+    if (emailMatches.length > 1) return keyed && emailMatches.includes(keyed) ? keyed : null;
+    // Length 0: this sign-in is simply not enrolled yet. Keep looking.
+  }
+
+  const memberId = stream.member_id?.trim() || null;
+  if (memberId) {
+    const memberMatches = accounts.filter((account) => {
+      if (account.member_id?.trim() !== memberId) return false;
+      return !stream.workspace_id || !account.workspace_id || account.workspace_id === stream.workspace_id;
+    });
+    if (memberMatches.length === 1) return memberMatches[0];
+    if (memberMatches.length > 1) return keyed && memberMatches.includes(keyed) ? keyed : null;
+  }
+
+  // A directory that positively binds this email elsewhere must not be
+  // overridden by a shared default-profile key.
+  if (email && accounts.some((account) => normalizedEmail(account.email) && normalizedEmail(account.email) !== email && account.account_key === keyed?.account_key)) {
     return null;
   }
 
   return keyed;
 }
 
-/** The generic usage view is reserved for providers without account cards. */
-export function withoutCodexStreams<T extends { source: string }>(
+/** Resolve and deduplicate current/legacy Codex readings by enrolled account. */
+export function codexStreamsByAccount<T extends CodexStreamIdentity & { cached?: boolean }>(
   streams: readonly T[],
-): T[] {
-  return streams.filter((stream) => stream.source !== "codex");
+  accounts: readonly CodexAccountMetadata[],
+): Map<string, T> {
+  const result = new Map<string, T>();
+  for (const stream of streams) {
+    if (stream.source !== "codex") continue;
+    const account = accountForCodexStream(stream, accounts);
+    if (!account) continue;
+    const previous = result.get(account.account_key);
+    if (!previous || (previous.cached && !stream.cached)) {
+      result.set(account.account_key, stream);
+    }
+  }
+  return result;
 }
 
 /**

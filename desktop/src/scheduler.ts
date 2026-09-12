@@ -557,6 +557,17 @@ export class Scheduler {
       );
       if (matches.length === 1) return matches[0];
     }
+    // A seat enrolled before its email was recorded is still identifiable by
+    // the provider subject, which is what the shared default profile reports.
+    const memberId = identity.memberId?.trim() || null;
+    if (memberId) {
+      const matches = this.codexProfiles.filter((candidate) => {
+        const account = accounts[candidate.accountKey];
+        if (account?.memberId?.trim() !== memberId) return false;
+        return !identity.workspaceId || !account.workspaceId || account.workspaceId === identity.workspaceId;
+      });
+      if (matches.length === 1) return matches[0];
+    }
     return profile;
   }
 

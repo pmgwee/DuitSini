@@ -6,10 +6,21 @@ export interface UsageStatePresentation {
   fallbackDescription: string;
 }
 
+/**
+ * `not_connected` is presentation-only: it marks an enrolled seat that has
+ * never reported, so it is deliberately absent from the ingest wire schema and
+ * cannot be pushed by a companion. Every other state comes off the wire.
+ */
 export function usageStatePresentation(
-  state: UsageStream["state"] | undefined,
+  state: UsageStream["state"] | "not_connected" | undefined,
 ): UsageStatePresentation | null {
   switch (state) {
+    case "not_connected":
+      return {
+        label: "Not connected",
+        tone: "muted",
+        fallbackDescription: "Connect this account to start tracking its usage.",
+      };
     case "auth_stale":
       return {
         label: "Sign-in stale",
