@@ -10,7 +10,7 @@ import {
   Tray,
   type MenuItemConstructorOptions,
 } from "electron";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -18,8 +18,9 @@ import { APP_URL } from "./config";
 import { Scheduler, type Status } from "./scheduler";
 import { codexAccountProfiles } from "./codex-profiles";
 import { CodexRuntimeManager } from "./codex-runtime";
+import { codexCliInvocation, createCodexAppServerAccountReader } from "./codex-app-server";
 import type { CodexAccountProfile } from "./collectors/codex";
-import { CODEX_ACCOUNT_SLOTS } from "../../lib/claude-usage/codex-accounts";
+import { CODEX_ACCOUNT_SLOTS, type CodexAccountMetadata } from "../../lib/claude-usage/codex-accounts";
 import { Store } from "./store";
 import { TokenHolder } from "./mint";
 import { startLoopback, type LoopbackHandle } from "./loopback";
@@ -191,29 +192,41 @@ const tokens = new TokenHolder(() => win, appOriginOf());
 const codexProfiles = () => codexAccountProfiles(app.getPath("userData"));
 const deviceHash = createHash("sha256").update(app.getPath("userData")).digest("hex");
 const codexDeviceId = `${deviceHash.slice(0, 8)}-${deviceHash.slice(8, 12)}-${deviceHash.slice(12, 16)}-${deviceHash.slice(16, 20)}-${deviceHash.slice(20, 32)}`;
+const codexAccountReader = createCodexAppServerAccountReader();
 async function startCodexEnrollment(profile: CodexAccountProfile): Promise<{ ok: boolean; message: string }> {
   const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: profile.codexHome };
   try {
-    const child =
-      process.platform === "win32"
-        ? spawn("cmd.exe", ["/c", "start", "DuitSini - Codex sign-in", "cmd.exe", "/k", "codex login"], {
-            env,
-            detached: true,
-            shell: false,
-            stdio: "ignore",
-          })
-        : spawn("codex", ["login"], { env, detached: true, stdio: "ignore" });
+    mkdirSync(profile.codexHome, { recursive: true });
+    const invocation = codexCliInvocation(["login"]);
+    const child = spawn(invocation.command, invocation.args, {
+      env,
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+      windowsHide: false,
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
     child.unref();
     return {
       ok: true,
-      message: `${profile.label} sign-in opened in an isolated Codex profile. Complete the browser step; the other account is not changed.`,
+      message: `${profile.label} sign-in started in an isolated profile. Complete the browser consent or MFA step; the other account stays signed in.`,
     };
   } catch (error) {
     return { ok: false, message: `Could not open ${profile.label} sign-in: ${(error as Error).message}` };
   }
 }
 
-const codexRuntime = new CodexRuntimeManager(codexProfiles(), store, codexDeviceId, undefined, startCodexEnrollment);
+const codexRuntime = new CodexRuntimeManager(
+  codexProfiles(),
+  store,
+  codexDeviceId,
+  undefined,
+  startCodexEnrollment,
+  codexAccountReader,
+);
 
 function appOriginOf(): string {
   try {
@@ -600,6 +613,7 @@ async function startCollection(): Promise<void> {
     },
     codexProfiles,
     codexDeviceId,
+    codexAccountReader,
   });
 
   void persisted;
@@ -871,6 +885,49 @@ function accountKeyInput(value: unknown): string | null {
   return CODEX_ACCOUNT_SLOTS.some((slot) => slot.account_key === value) ? value : null;
 }
 
+function accountMetadataInput(value: unknown): CodexAccountMetadata[] | null {
+  if (!Array.isArray(value) || value.length > CODEX_ACCOUNT_SLOTS.length) return null;
+  const accounts: CodexAccountMetadata[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const candidate = item as Record<string, unknown>;
+    const accountKey = accountKeyInput(candidate.account_key);
+    const slot = CODEX_ACCOUNT_SLOTS.find((entry) => entry.account_key === accountKey);
+    const email = candidate.email;
+    const status = candidate.status;
+    if (
+      !slot ||
+      candidate.slot !== slot.slot ||
+      (email !== null && email !== undefined && (typeof email !== "string" || email.length > 320)) ||
+      !["connected", "needs_sign_in", "unsupported", "offline"].includes(String(status))
+    ) {
+      return null;
+    }
+    const optionalText = (key: string, max: number): string | null => {
+      const raw = candidate[key];
+      return typeof raw === "string" && raw.length <= max ? raw : null;
+    };
+    const lastSeen = candidate.last_seen_at;
+    if (lastSeen !== null && lastSeen !== undefined && typeof lastSeen !== "string") return null;
+    accounts.push({
+      account_key: slot.account_key,
+      slot: slot.slot,
+      label: slot.label,
+      email: typeof email === "string" ? email : null,
+      member_id: optionalText("member_id", 160),
+      workspace_id: optionalText("workspace_id", 160),
+      workspace_name: optionalText("workspace_name", 120),
+      plan_type: optionalText("plan_type", 80),
+      connected: candidate.connected === true,
+      verified: candidate.verified === true,
+      status: status as CodexAccountMetadata["status"],
+      device_id: optionalText("device_id", 120),
+      last_seen_at: typeof lastSeen === "string" ? lastSeen : null,
+    });
+  }
+  return accounts;
+}
+
 function switchRequestInput(value: unknown): { accountKey: string; requestId: string; expectedGeneration?: number } | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
@@ -907,6 +964,14 @@ ipcMain.handle("duitsini:codex-connect", async (event, value: unknown) => {
   if (!accountKey) throw new Error("invalid Codex account");
   if (!(await tokens.get())) throw new Error("Sign in to DuitSini before connecting a Codex account.");
   return codexRuntime.connectAccount(accountKey);
+});
+ipcMain.handle("duitsini:codex-sync-accounts", async (event, value: unknown) => {
+  assertCodexRenderer(event);
+  const accounts = accountMetadataInput(value);
+  if (!accounts) throw new Error("invalid Codex account metadata");
+  if (!(await tokens.get())) return { ok: false, code: "not_signed_in" };
+  codexRuntime.syncAccounts(accounts);
+  return { ok: true };
 });
 
 /**

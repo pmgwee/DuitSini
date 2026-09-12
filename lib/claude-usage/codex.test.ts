@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { parseCodexAuth, parseCodexIdentity, parseCodexUsage } from "./codex";
 
+function jwt(claims: Record<string, unknown>): string {
+  return `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
+}
+
 describe("parseCodexAuth", () => {
   it("accepts ChatGPT Codex CLI credentials", () => {
     expect(
@@ -69,6 +73,36 @@ describe("parseCodexIdentity", () => {
       workspaceId: null,
       workspaceName: null,
       planType: null,
+    });
+  });
+
+  it("reads member, workspace, email, and plan from current nested Codex claims", () => {
+    const raw = {
+      auth_mode: "chatgpt",
+      tokens: {
+        account_id: "workspace-shared",
+        access_token: jwt({
+          sub: "google-oauth2|business-user",
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "workspace-shared",
+            chatgpt_account_user_id: "workspace-member-business",
+            chatgpt_user_id: "user-business",
+            chatgpt_plan_type: "team",
+          },
+          "https://api.openai.com/profile": {
+            email: "perminggwee@gmail.com",
+          },
+        }),
+        id_token: jwt({ email: "perminggwee@gmail.com" }),
+      },
+    };
+
+    expect(parseCodexIdentity(raw, parseCodexAuth(raw))).toEqual({
+      memberId: "workspace-member-business",
+      email: "perminggwee@gmail.com",
+      workspaceId: "workspace-shared",
+      workspaceName: null,
+      planType: "team",
     });
   });
 });

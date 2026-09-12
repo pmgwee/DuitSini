@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { AgentProviderIcon } from "./agent-provider-icon";
 import { AgentUsageMascot } from "./agent-usage-mascot";
 import { CodexAccountsPanel } from "./codex-accounts-panel";
-import { usageStreamKey } from "@/lib/claude-usage/codex-accounts";
+import { usageStreamKey, withoutCodexStreams } from "@/lib/claude-usage/codex-accounts";
 
 const SESSION_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -46,6 +46,7 @@ export function ClaudeUsageTracker() {
   const live = useClaudeUsageLive();
 
   const streams = live.data ? normalizeStreams(live.data) : [];
+  const genericStreams = withoutCodexStreams(streams);
   const liveReady =
     mode === "live" &&
     (live.status === "live" || live.status === "cached") &&
@@ -103,7 +104,7 @@ export function ClaudeUsageTracker() {
       <CodexAccountsPanel streams={streams} now={now} />
       {liveReady && live.data ? (
         <LiveView
-          streams={streams}
+          streams={genericStreams}
           refreshedAt={live.data.refreshed_at}
           now={now}
           onPull={live.pull}
@@ -229,11 +230,17 @@ function LiveView({
     pullCooldownEndsAt !== null ? Math.max(0, Math.ceil((pullCooldownEndsAt - now) / 1000)) : 0;
   return (
     <div className="flex flex-col gap-5">
-      <div className={cn("flex flex-col", streams.length > 1 ? "gap-5" : "gap-0")}>
-        {streams.map((s) => (
-          <StreamSection key={usageStreamKey(s)} stream={s} now={now} divided={streams.length > 1} />
-        ))}
-      </div>
+      {streams.length > 0 ? (
+        <div className={cn("flex flex-col", streams.length > 1 ? "gap-5" : "gap-0")}>
+          {streams.map((s) => (
+            <StreamSection key={usageStreamKey(s)} stream={s} now={now} divided={streams.length > 1} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground/70">
+          Account specific Codex usage is shown above.
+        </p>
+      )}
 
       <div className="flex items-center justify-between border-t border-border/50 pt-3">
         <span className="text-[11px] text-muted-foreground/80">
