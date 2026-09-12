@@ -21,7 +21,9 @@ import { cn } from "@/lib/utils";
 import { AgentProviderIcon } from "./agent-provider-icon";
 import { AgentUsageMascot } from "./agent-usage-mascot";
 import { CodexAccountsPanel } from "./codex-accounts-panel";
-import { usageStreamKey, withoutCodexStreams } from "@/lib/claude-usage/codex-accounts";
+import { useCodexAccounts } from "./use-codex-accounts";
+import { streamsWithCodexAccounts } from "./codex-usage-streams";
+import { usageStreamKey } from "@/lib/claude-usage/codex-accounts";
 
 const SESSION_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -44,9 +46,10 @@ export function ClaudeUsageTracker() {
   const [mode, setMode] = useState<"live" | "manual">("live");
   useEffect(() => setMounted(true), []);
   const live = useClaudeUsageLive();
+  const { accounts: codexAccounts, devices: codexDevices, loaded: codexAccountsLoaded } = useCodexAccounts();
 
   const streams = live.data ? normalizeStreams(live.data) : [];
-  const genericStreams = withoutCodexStreams(streams);
+  const displayStreams = streamsWithCodexAccounts(streams, codexAccounts, codexAccountsLoaded);
   const liveReady =
     mode === "live" &&
     (live.status === "live" || live.status === "cached") &&
@@ -92,7 +95,7 @@ export function ClaudeUsageTracker() {
     return (
       <WidgetShell>
         {header}
-        <CodexAccountsPanel streams={streams} now={now} />
+        <CodexAccountsPanel streams={streams} accounts={codexAccounts} devices={codexDevices} directoryReady={codexAccountsLoaded} />
         <LiveViewSkeleton />
       </WidgetShell>
     );
@@ -101,10 +104,10 @@ export function ClaudeUsageTracker() {
   return (
     <WidgetShell>
       {header}
-      <CodexAccountsPanel streams={streams} now={now} />
+      <CodexAccountsPanel streams={streams} accounts={codexAccounts} devices={codexDevices} directoryReady={codexAccountsLoaded} />
       {liveReady && live.data ? (
         <LiveView
-          streams={genericStreams}
+          streams={displayStreams}
           refreshedAt={live.data.refreshed_at}
           now={now}
           onPull={live.pull}
@@ -238,7 +241,7 @@ function LiveView({
         </div>
       ) : (
         <p className="text-[11px] text-muted-foreground/70">
-          Account specific Codex usage is shown above.
+          No usage is being reported yet. Connect an account above to start a tracker.
         </p>
       )}
 

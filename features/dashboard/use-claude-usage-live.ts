@@ -41,6 +41,7 @@ export interface UsageStream {
   label: string;
   account_key?: string;
   account_email?: string | null;
+  member_id?: string | null;
   workspace_id?: string | null;
   workspace_name?: string | null;
   plan_type?: string | null;
@@ -51,7 +52,8 @@ export interface UsageStream {
   provider?: UsageProvider | null;
   cached?: boolean;
   observed_at?: string | null;
-  state?: "live" | "cached" | "auth_stale" | "rate_limited" | "offline";
+  /** `not_connected` is added client-side for an enrolled seat with no data. */
+  state?: "live" | "cached" | "auth_stale" | "rate_limited" | "offline" | "not_connected";
   status_message?: string | null;
 }
 
