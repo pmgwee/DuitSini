@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, CircleAlert, Laptop, LockKeyhole, RefreshCw, UserRound } from "lucide-react";
-import { CODEX_ACCOUNT_SLOTS, sortCodexAccounts, usageStreamKey, type CodexAccountMetadata } from "@/lib/claude-usage/codex-accounts";
+import {
+  accountForCodexStream,
+  CODEX_ACCOUNT_SLOTS,
+  sortCodexAccounts,
+  type CodexAccountMetadata,
+} from "@/lib/claude-usage/codex-accounts";
 import { cn } from "@/lib/utils";
 import type { UsageStream, LiveUsageWindow } from "./use-claude-usage-live";
 
@@ -17,7 +22,7 @@ type RuntimeStatus = {
   observedAt: number;
   generation: number;
   confidence: "credential-file" | "unsupported";
-  switchSupported: false;
+  switchSupported: boolean;
   message: string;
 };
 
@@ -25,6 +30,7 @@ type CodexDesktopCapability = {
   getStatus: () => Promise<RuntimeStatus>;
   switchAccount: (request: unknown) => Promise<{ ok: boolean; code?: string; message?: string; status?: RuntimeStatus }>;
   connectAccount: (accountKey: unknown) => Promise<{ ok: boolean; code?: string; message?: string }>;
+  syncAccounts?: (accounts: unknown) => Promise<{ ok: boolean; code?: string; message?: string }>;
 };
 
 type DeviceRow = {
@@ -98,6 +104,7 @@ export function CodexAccountsPanel({ streams, now }: { streams: UsageStream[]; n
   const [switching, setSwitching] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [switchLog, setSwitchLog] = useState<SwitchLog[]>([]);
+  const syncedAccountsRef = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -141,13 +148,36 @@ export function CodexAccountsPanel({ streams, now }: { streams: UsageStream[]; n
     };
   }, []);
 
-  const streamsByKey = useMemo(() => {
+  useEffect(() => {
+    if (!desktop?.syncAccounts || accounts.length === 0) return;
+    const signature = accounts
+      .map((account) => `${account.account_key}:${account.email ?? ""}:${account.member_id ?? ""}:${account.workspace_id ?? ""}`)
+      .join("|");
+    if (syncedAccountsRef.current === signature) return;
+    void desktop.syncAccounts(accounts).then((result) => {
+      if (result.ok) syncedAccountsRef.current = signature;
+    }).catch(() => {
+      // Metadata sync is an enhancement; quota cards remain usable if an older
+      // desktop build does not accept the optional IPC method.
+    });
+  }, [accounts, desktop]);
+
+  const { streamsByAccount, unassignedStreams } = useMemo(() => {
     const map = new Map<string, UsageStream>();
+    const unassigned: UsageStream[] = [];
     for (const stream of streams) {
-      if (stream.source === "codex" && stream.account_key) map.set(usageStreamKey(stream), stream);
+      if (stream.source !== "codex") continue;
+      const account = accountForCodexStream(stream, accounts);
+      if (!account) {
+        unassigned.push(stream);
+        continue;
+      }
+      const key = account.account_key;
+      const previous = map.get(key);
+      if (!previous || (previous.cached && !stream.cached)) map.set(key, stream);
     }
-    return map;
-  }, [streams]);
+    return { streamsByAccount: map, unassignedStreams: unassigned };
+  }, [streams, accounts]);
   const reportingDevice = devices[0];
   const runtimeAccount = runtime?.accountKey ? accounts.find((account) => account.account_key === runtime.accountKey) : null;
   const runtimeCopy = runtime?.state === "detected" && runtimeAccount
@@ -162,6 +192,7 @@ export function CodexAccountsPanel({ streams, now }: { streams: UsageStream[]; n
     : reportingDevice
       ? `Last reported on ${reportingDevice.device_name}`
       : "This computer has no verified Codex runtime identity.";
+  const switchReady = desktop !== null && runtime?.switchSupported === true;
 
   const switchTo = async (account: CodexAccountMetadata) => {
     setNotice(null);
@@ -216,7 +247,7 @@ export function CodexAccountsPanel({ streams, now }: { streams: UsageStream[]; n
 
       <div className="grid gap-3 md:grid-cols-2">
         {accounts.map((account) => {
-          const stream = streamsByKey.get(usageStreamKey({ source: "codex", account_key: account.account_key }));
+          const stream = streamsByAccount.get(account.account_key);
           const session = accountPercent(stream, stream?.five_hour, now);
           const weekly = accountPercent(stream, stream?.seven_day, now);
           const isVerifiedActive = runtime?.state === "detected" && runtime.accountKey === account.account_key;
@@ -246,16 +277,36 @@ export function CodexAccountsPanel({ streams, now }: { streams: UsageStream[]; n
               <p className="text-[10px] text-muted-foreground/70">{stream?.observed_at && now !== null ? `Last successful observation ${relativeTime(stream.observed_at, now)}.` : "No successful quota observation yet."}</p>
 
               <div className="mt-auto flex flex-wrap gap-2">
-                {(account.status === "needs_sign_in" && !stream) || stream?.state === "auth_stale" ? <button type="button" onClick={() => void connect(account)} disabled={switching === account.account_key} className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-[11px] font-semibold text-warning hover:bg-warning/15 disabled:opacity-60"><LockKeyhole className="size-3.5" /> {switching === account.account_key ? "Opening sign-in…" : stream?.state === "auth_stale" ? "Sign in again" : "Connect account"}</button> : null}
-                <button type="button" onClick={() => void switchTo(account)} disabled={switching !== null || isVerifiedActive} aria-label={isVerifiedActive ? `Already using ${account.label}` : desktop ? `Use ${account.label}` : "Open or update DuitSini Desktop to switch Codex"} className={cn("inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-default disabled:opacity-60", isVerifiedActive ? "border border-primary/50 bg-primary/10 text-primary" : "bg-primary text-primary-foreground hover:bg-primary/90")}>
+                {(account.status === "needs_sign_in" && !stream) || stream?.state === "auth_stale" ? desktop ? <button type="button" onClick={() => void connect(account)} disabled={switching === account.account_key} className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-[11px] font-semibold text-warning hover:bg-warning/15 disabled:opacity-60"><LockKeyhole className="size-3.5" /> {switching === account.account_key ? "Opening sign-in…" : stream?.state === "auth_stale" ? "Sign in again" : "Connect account"}</button> : <a href="/download" className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-[11px] font-semibold text-warning hover:bg-warning/15"><LockKeyhole className="size-3.5" /> Open Desktop to connect</a> : null}
+                {desktop ? <button type="button" onClick={() => void switchTo(account)} disabled={!switchReady || switching !== null || isVerifiedActive} aria-label={isVerifiedActive ? `Already using ${account.label}` : switchReady ? `Use ${account.label}` : `Switching ${account.label} is unavailable`} title={switchReady ? undefined : "The installed Codex app does not expose a supported running-GUI account switch."} className={cn("inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", isVerifiedActive ? "border border-primary/50 bg-primary/10 text-primary" : "bg-primary text-primary-foreground hover:bg-primary/90")}>
                   {switching === account.account_key ? <RefreshCw className="size-3.5 animate-spin" /> : isVerifiedActive ? <Check className="size-3.5" /> : null}
-                  {switching === account.account_key ? "Checking…" : isVerifiedActive ? "Already using this account" : desktop ? `Use ${account.label}` : "Open/Update Desktop"}
-                </button>
+                  {switching === account.account_key ? "Checking…" : isVerifiedActive ? "Already using this account" : switchReady ? `Use ${account.label}` : runtime ? "Switch unavailable" : "Checking switch support…"}
+                </button> : <a href="/download" aria-label={`Open DuitSini Desktop to use ${account.label}`} className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90">Open/Update Desktop</a>}
               </div>
             </article>
           );
         })}
       </div>
+
+      {unassignedStreams.length > 0 ? (
+        <div className="rounded-xl border border-warning/40 bg-warning/5 p-3">
+          <div className="flex items-start gap-2">
+            <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+            <div className="min-w-0">
+              <h3 className="text-xs font-semibold">Codex usage · identity pending</h3>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                A legacy Codex bridge reported usage without an enrolled account identity. It is kept here until the next verified sign-in.
+              </p>
+            </div>
+          </div>
+          {unassignedStreams.map((stream, index) => (
+            <div key={`${stream.source}-${stream.observed_at ?? index}`} className="mt-2 grid grid-cols-2 gap-2">
+              <QuotaBar label="5-hour" percent={accountPercent(stream, stream.five_hour, now)} reset={stream.five_hour?.resets_at} now={now} />
+              <QuotaBar label="7-day" percent={accountPercent(stream, stream.seven_day, now)} reset={stream.seven_day?.resets_at} now={now} />
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {notice ? <div role="status" className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-2 text-[11px] text-warning"><CircleAlert className="mt-0.5 size-3.5 shrink-0" /> <span>{notice}</span></div> : null}
       <details className="text-[11px] text-muted-foreground">

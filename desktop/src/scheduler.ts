@@ -38,6 +38,7 @@ import type { Store } from "./store";
 import { safeFetch } from "./net";
 import type { UsageTracker } from "./tracker";
 import type { Snapshot, UsageStream } from "./types";
+import type { CodexAccountReader } from "./codex-app-server";
 
 /**
  * Collection loop.
@@ -74,6 +75,8 @@ export interface SchedulerDeps {
   codexProfiles?: () => CodexAccountProfile[];
   /** Stable opaque device id included with Codex observations. */
   codexDeviceId?: string;
+  /** Read-only account/read probe; injected so tests never spawn Codex. */
+  codexAccountReader?: CodexAccountReader;
 }
 
 const jitter = (n: number) => Math.floor(Math.random() * n);
@@ -93,6 +96,7 @@ export class Scheduler {
   private lastLocalAt = 0;
   private activeSourceLabel: string | null = null;
   private readonly codexProfiles: CodexAccountProfile[];
+  private readonly codexAccountReader?: CodexAccountReader;
   private readonly lastCodex = new Map<string, {
     snapshot: Snapshot;
     observedAt: number;
@@ -110,6 +114,7 @@ export class Scheduler {
         includeKeychain: true,
       },
     ];
+    this.codexAccountReader = deps.codexAccountReader;
     // Pick the renewal strategy from DUITSINI_RENEWAL_MODE (default cli-renew).
     // A switch, never a layer — only one broker ever touches a credentials file.
     const mode = renewalMode();
@@ -535,6 +540,27 @@ export class Scheduler {
   }
 
   /**
+   * Resolve a provider identity against the owner-scoped enrollment metadata.
+   * The local profile path remains the fallback when an older credential has no
+   * identity fields; a unique enrolled email is allowed to correct a historical
+   * default-profile Member/Business mismatch.
+   */
+  private profileForIdentity(
+    profile: CodexAccountProfile,
+    identity: { email: string | null; memberId: string | null; workspaceId: string | null },
+  ): CodexAccountProfile {
+    const accounts = this.deps.store.get().codexAccounts ?? {};
+    const email = identity.email?.trim().toLowerCase() ?? null;
+    if (email) {
+      const matches = this.codexProfiles.filter(
+        (candidate) => accounts[candidate.accountKey]?.email?.trim().toLowerCase() === email,
+      );
+      if (matches.length === 1) return matches[0];
+    }
+    return profile;
+  }
+
+  /**
    * OpenAI Codex subscription stream. This is intentionally read-only: Codex
    * CLI owns OAuth refresh and this collector re-reads its auth material every
    * query, matching cc-switch's reliable long-running behavior.
@@ -543,12 +569,17 @@ export class Scheduler {
     // Profiles are deliberately collected one at a time. Each profile has its
     // own state, credentials and quota budget; a failed seat never falls back
     // to the other seat's token.
-    const streams: UsageStream[] = [];
+    const byKey = new Map<string, UsageStream>();
     for (const profile of this.codexProfiles) {
       const stream = await this.collectCodexProfile(profile);
-      if (stream) streams.push(stream);
+      if (!stream) continue;
+      const key = usageStreamKey(stream);
+      const previous = byKey.get(key);
+      // If an old default profile and a newly enrolled isolated profile both
+      // resolve to the same provider account, keep the fresher/live reading.
+      if (!previous || (previous.cached && !stream.cached)) byKey.set(key, stream);
     }
-    return streams;
+    return [...byKey.values()];
   }
 
   private async collectCodexProfile(profile: CodexAccountProfile): Promise<UsageStream | null> {
@@ -562,10 +593,11 @@ export class Scheduler {
       message?: string,
     ): UsageStream | null => {
       if (!cached) return null;
+      const attributedProfile = this.profileForIdentity(profile, cached.identity);
       return {
         source: "codex",
-        label: profile.label,
-        account_key: profile.accountKey || undefined,
+        label: attributedProfile.label,
+        account_key: attributedProfile.accountKey || undefined,
         device_id: this.deps.codexDeviceId,
         account_email: cached.identity.email ?? storedAccount?.email ?? null,
         member_id: cached.identity.memberId ?? storedAccount?.memberId ?? null,
@@ -613,10 +645,21 @@ export class Scheduler {
         profile: profile.accountKey ? profile : undefined,
       });
       const observedAt = Date.now();
+      const appServerIdentity = this.codexAccountReader
+        ? await this.codexAccountReader(profile.codexHome).catch(() => null)
+        : null;
+      const identity = {
+        memberId: appServerIdentity?.memberId ?? result.identity.memberId,
+        email: appServerIdentity?.email ?? result.identity.email,
+        workspaceId: appServerIdentity?.workspaceId ?? result.identity.workspaceId,
+        workspaceName: appServerIdentity?.workspaceName ?? result.identity.workspaceName,
+        planType: appServerIdentity?.planType ?? result.identity.planType,
+      };
+      const attributedProfile = this.profileForIdentity(profile, identity);
       this.lastCodex.set(key, {
         snapshot: result.snapshot,
         observedAt,
-        identity: result.identity,
+        identity,
       });
       state.nextAt = 0;
       state.streak = 0;
@@ -629,14 +672,14 @@ export class Scheduler {
       this.deps.log(`[${profile.label}] quota ok via ${sourceKind}`);
       const stream: UsageStream = {
         source: "codex",
-        label: profile.label,
-        account_key: profile.accountKey || undefined,
+        label: attributedProfile.label,
+        account_key: attributedProfile.accountKey || undefined,
         device_id: this.deps.codexDeviceId,
-        account_email: result.identity.email,
-        member_id: result.identity.memberId,
-        workspace_id: result.identity.workspaceId,
-        workspace_name: result.identity.workspaceName,
-        plan_type: result.identity.planType,
+        account_email: identity.email,
+        member_id: identity.memberId,
+        workspace_id: identity.workspaceId,
+        workspace_name: identity.workspaceName,
+        plan_type: identity.planType,
         five_hour: result.snapshot.five_hour,
         seven_day: result.snapshot.seven_day,
         limits: result.snapshot.limits,
@@ -647,16 +690,16 @@ export class Scheduler {
         status_message: null,
       };
       this.deps.store.setSnapshot(stream.source, stream, observedAt);
-      if (profile.accountKey) {
+      if (attributedProfile.accountKey) {
         this.deps.store.setCodexAccount({
-          accountKey: profile.accountKey,
-          slot: profile.slot,
-          label: profile.label,
-          email: result.identity.email,
-          memberId: result.identity.memberId,
-          workspaceId: result.identity.workspaceId,
-          workspaceName: result.identity.workspaceName,
-          planType: result.identity.planType,
+          accountKey: attributedProfile.accountKey,
+          slot: attributedProfile.slot,
+          label: attributedProfile.label,
+          email: identity.email,
+          memberId: identity.memberId,
+          workspaceId: identity.workspaceId,
+          workspaceName: identity.workspaceName,
+          planType: identity.planType,
           credentialFingerprint: result.fingerprint,
           status: "connected",
           lastSeenAt: observedAt,

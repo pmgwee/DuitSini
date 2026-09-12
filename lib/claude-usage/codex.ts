@@ -91,24 +91,48 @@ export function parseCodexIdentity(
       ? (root.tokens as Record<string, unknown>)
       : {};
   const claims = credential ? jwtClaims(credential.accessToken) : {};
+  const idToken = stringValue(tokenEnvelope.id_token);
+  const idClaims = idToken ? jwtClaims(idToken) : {};
+  const claimSources = [
+    root,
+    tokenEnvelope,
+    claims,
+    idClaims,
+    asRecord(claims["https://api.openai.com/auth"]),
+    asRecord(idClaims["https://api.openai.com/auth"]),
+    asRecord(claims["https://api.openai.com/profile"]),
+    asRecord(idClaims["https://api.openai.com/profile"]),
+  ].filter((source): source is JsonRecord => source !== null);
   const read = (...keys: string[]): string | null => {
     for (const key of keys) {
-      const rootValue = stringValue(root[key]);
-      if (rootValue) return rootValue;
-      const tokenValue = stringValue(tokenEnvelope[key]);
-      if (tokenValue) return tokenValue;
-      const claimValue = stringValue(claims[key]);
-      if (claimValue) return claimValue;
+      for (const source of claimSources) {
+        const value = stringValue(source[key]);
+        if (value) return value;
+      }
     }
     return null;
   };
   const email = read("email", "user_email", "userEmail");
   return {
-    memberId: read("member_id", "memberId", "user_id", "userId", "sub"),
+    memberId: read(
+      "chatgpt_account_user_id",
+      "member_id",
+      "memberId",
+      "chatgpt_user_id",
+      "user_id",
+      "userId",
+      "sub",
+    ),
     email: email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : null,
-    workspaceId: read("workspace_id", "workspaceId", "organization_id", "organizationId"),
+    workspaceId: read(
+      "chatgpt_account_id",
+      "workspace_id",
+      "workspaceId",
+      "organization_id",
+      "organizationId",
+    ),
     workspaceName: read("workspace_name", "workspaceName", "organization_name", "organizationName"),
-    planType: read("plan_type", "planType", "plan"),
+    planType: read("chatgpt_plan_type", "plan_type", "planType", "plan"),
   };
 }
 

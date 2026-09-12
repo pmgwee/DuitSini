@@ -1,10 +1,15 @@
 import { parseCodexAuth, parseCodexIdentity, type CodexIdentity } from "../../lib/claude-usage/codex";
 import {
+  CODEX_ACCOUNT_SLOTS,
+  type CodexAccountMetadata,
+} from "../../lib/claude-usage/codex-accounts";
+import {
   codexCredentialFingerprint,
   codexCredentialSources,
   type CodexCredentialSource,
   type CodexAccountProfile,
 } from "./collectors/codex";
+import type { CodexAccountReader } from "./codex-app-server";
 import type { Store } from "./store";
 
 export type CodexRuntimeState = "detected" | "unknown" | "not_running" | "unsupported";
@@ -63,8 +68,89 @@ export class CodexRuntimeManager {
     private readonly deviceId: string,
     private readonly credentialSources: readonly CodexCredentialSource[] = codexCredentialSources(),
     private readonly startEnrollment?: (profile: CodexAccountProfile) => Promise<{ ok: boolean; message: string }>,
+    private readonly accountReader?: CodexAccountReader,
   ) {
     this.current = this.unsupportedStatus("Codex GUI account control is not exposed by this build.");
+  }
+
+  /**
+   * Sync public enrollment metadata from the signed-in web owner. This gives
+   * the local reader a stable email-to-slot map without moving credentials or
+   * trusting a renderer supplied token/path.
+   */
+  syncAccounts(accounts: readonly CodexAccountMetadata[]): void {
+    for (const account of accounts) {
+      const slot = CODEX_ACCOUNT_SLOTS.find((candidate) => candidate.account_key === account.account_key);
+      if (!slot || account.slot !== slot.slot) continue;
+      const existing = this.store.codexAccount(account.account_key);
+      const parsedLastSeen = account.last_seen_at ? Date.parse(account.last_seen_at) : NaN;
+      this.store.setCodexAccount({
+        accountKey: slot.account_key,
+        slot: slot.slot,
+        label: slot.label,
+        email: account.email ?? existing?.email ?? null,
+        memberId: account.member_id ?? existing?.memberId ?? null,
+        workspaceId: account.workspace_id ?? existing?.workspaceId ?? null,
+        workspaceName: account.workspace_name ?? existing?.workspaceName ?? null,
+        planType: account.plan_type ?? existing?.planType ?? null,
+        credentialFingerprint: existing?.credentialFingerprint,
+        status: existing?.status === "connected" ? existing.status : account.status,
+        lastSeenAt: Number.isFinite(parsedLastSeen) ? parsedLastSeen : existing?.lastSeenAt,
+      });
+    }
+  }
+
+  private readonly appServerCache = new Map<string, { at: number; identity: CodexIdentity | null; inflight?: Promise<CodexIdentity | null> }>();
+
+  private async appServerIdentity(profile: CodexAccountProfile): Promise<CodexIdentity | null> {
+    if (!this.accountReader) return null;
+    const now = Date.now();
+    const current = this.appServerCache.get(profile.codexHome);
+    if (current?.inflight) return current.inflight;
+    if (current && now - current.at < 5 * 60_000) return current.identity;
+    const inflight = this.accountReader(profile.codexHome).catch(() => null).then((identity) => {
+      this.appServerCache.set(profile.codexHome, { at: Date.now(), identity });
+      return identity;
+    });
+    this.appServerCache.set(profile.codexHome, { at: now, identity: current?.identity ?? null, inflight });
+    try {
+      return await inflight;
+    } finally {
+      const after = this.appServerCache.get(profile.codexHome);
+      if (after?.inflight === inflight) this.appServerCache.set(profile.codexHome, { at: Date.now(), identity: after.identity });
+    }
+  }
+
+  private profileForSource(sourceLabel: string): CodexAccountProfile | null {
+    const normalized = sourceLabel.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return this.profiles.find((profile) => {
+      const authPath = `${profile.codexHome.replace(/\\/g, "/").replace(/\/+$/, "")}/auth.json`.toLowerCase();
+      return normalized === authPath;
+    }) ?? null;
+  }
+
+  private accountForIdentity(
+    identity: CodexIdentity,
+    profile: CodexAccountProfile | null,
+    fingerprint: string,
+  ): CodexAccountProfile | null {
+    const accounts = this.store.get().codexAccounts ?? {};
+    const email = identity.email?.trim().toLowerCase() ?? null;
+    if (email) {
+      const emailMatches = this.profiles.filter((candidate) => {
+        const account = accounts[candidate.accountKey];
+        return account?.email?.trim().toLowerCase() === email;
+      });
+      if (emailMatches.length === 1) return emailMatches[0];
+    }
+    const fingerprintMatch = this.profiles.find((candidate) => {
+      const account = accounts[candidate.accountKey];
+      if (!account || account.credentialFingerprint !== fingerprint) return false;
+      if (account.memberId && identity.memberId && account.memberId !== identity.memberId) return false;
+      if (account.workspaceId && identity.workspaceId && account.workspaceId !== identity.workspaceId) return false;
+      return true;
+    });
+    return fingerprintMatch ?? profile;
   }
 
   async observeRuntime(): Promise<CodexRuntimeStatus> {
@@ -80,26 +166,33 @@ export class CodexRuntimeManager {
       const fingerprint = codexCredentialFingerprint(source.label, credential.accessToken, credential.accountId);
       if (this.observedFingerprint !== null && this.observedFingerprint !== fingerprint) this.generation += 1;
       this.observedFingerprint = fingerprint;
-      const identity = parseCodexIdentity(raw, credential);
-      const match = this.profiles.find((profile) => {
-        const account = accounts[profile.accountKey];
-        if (!account || account.credentialFingerprint !== fingerprint) return false;
-        // A rotating token digest only proves that this local source changed.
-        // When stable member/workspace metadata is enrolled, require both
-        // identities to agree before associating the runtime with a card.
-        if (account.memberId && identity.memberId && account.memberId !== identity.memberId) return false;
-        if (account.workspaceId && identity.workspaceId && account.workspaceId !== identity.workspaceId) return false;
-        return true;
-      });
+      const profile = this.profileForSource(source.label);
+      const authIdentity = parseCodexIdentity(raw, credential);
+      const serverIdentity = profile ? await this.appServerIdentity(profile) : null;
+      const identity: CodexIdentity = {
+        memberId: serverIdentity?.memberId ?? authIdentity.memberId,
+        email: serverIdentity?.email ?? authIdentity.email,
+        workspaceId: serverIdentity?.workspaceId ?? authIdentity.workspaceId,
+        workspaceName: serverIdentity?.workspaceName ?? authIdentity.workspaceName,
+        planType: serverIdentity?.planType ?? authIdentity.planType,
+      };
+      const match = this.accountForIdentity(identity, profile, fingerprint);
+      const matchedAccount = match ? accounts[match.accountKey] : null;
+      /*
+       * A credential file path is a profile hint, not an account identity. The
+       * app-server account/read result (or token claims) is allowed to move a
+       * default profile from Member to Business when the enrolled email proves
+       * that mapping. The running GUI remains unverified and uncontrollable.
+       */
       this.current = {
         state: "unknown",
         accountKey: match?.accountKey ?? null,
         label: match?.label ?? null,
-        memberId: identity.memberId ?? (match ? accounts[match.accountKey]?.memberId ?? null : null),
-        email: identity.email ?? (match ? accounts[match.accountKey]?.email ?? null : null),
-        workspaceId: identity.workspaceId ?? (match ? accounts[match.accountKey]?.workspaceId ?? null : null),
-        workspaceName: identity.workspaceName ?? (match ? accounts[match.accountKey]?.workspaceName ?? null : null),
-        planType: identity.planType ?? (match ? accounts[match.accountKey]?.planType ?? null : null),
+        memberId: identity.memberId ?? matchedAccount?.memberId ?? null,
+        email: identity.email ?? matchedAccount?.email ?? null,
+        workspaceId: identity.workspaceId ?? matchedAccount?.workspaceId ?? null,
+        workspaceName: identity.workspaceName ?? matchedAccount?.workspaceName ?? null,
+        planType: identity.planType ?? matchedAccount?.planType ?? null,
         deviceId: this.deviceId,
         observedAt,
         generation: this.generation,

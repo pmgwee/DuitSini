@@ -149,6 +149,8 @@ expose("duitsiniCodex", () => ({
     ipcRenderer.invoke("duitsini:codex-switch", request),
   connectAccount: (accountKey: unknown): Promise<unknown> =>
     ipcRenderer.invoke("duitsini:codex-connect", accountKey),
+  syncAccounts: (accounts: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("duitsini:codex-sync-accounts", accounts),
 }));
 
 /**

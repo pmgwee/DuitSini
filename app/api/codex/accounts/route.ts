@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { CODEX_ACCOUNT_SLOTS, sortCodexAccounts, type CodexAccountMetadata } from "@/lib/claude-usage/codex-accounts";
+import {
+  CODEX_ACCOUNT_SLOTS,
+  mergeCodexAccountMetadata,
+  sortCodexAccounts,
+  type CodexAccountMetadata,
+} from "@/lib/claude-usage/codex-accounts";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -19,18 +24,12 @@ const metadataSchema = z.object({
   plan_type: z.string().max(80).nullable().optional(),
 });
 
-const privateEnrollment = new Map([
-  ["leeahming199@gmail.com", { business: "perminggwee@gmail.com", member: "leeahming199@gmail.com" }],
-  ["perminggwee@gmail.com", { business: "perminggwee@gmail.com", member: "leeahming199@gmail.com" }],
-]);
-
-function fallbackAccounts(viewerEmail: string | null): CodexAccountMetadata[] {
-  const enrollment = viewerEmail ? privateEnrollment.get(viewerEmail) : undefined;
+function fallbackAccounts(): CodexAccountMetadata[] {
   return CODEX_ACCOUNT_SLOTS.map((slot) => ({
     account_key: slot.account_key,
     slot: slot.slot,
     label: slot.label,
-    email: enrollment?.[slot.slot] ?? null,
+    email: null,
     member_id: null,
     workspace_id: null,
     workspace_name: null,
@@ -52,7 +51,6 @@ export async function GET() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const viewerEmail = user.email?.trim().toLowerCase() ?? null;
   const { data, error } = await supabase
     .from("codex_accounts")
     .select("account_key, slot, label, email, member_id, workspace_id, workspace_name, plan_type, verified, status, device_id, last_seen_at")
@@ -61,7 +59,7 @@ export async function GET() {
     // The additive migration may not have reached a self-hosted copy yet. Keep
     // the dashboard usable with two explicit, unconnected account shells.
     if (/codex_accounts|relation|column/i.test(error.message)) {
-      return NextResponse.json({ accounts: fallbackAccounts(viewerEmail), devices: [], migration_pending: true });
+      return NextResponse.json({ accounts: fallbackAccounts(), devices: [], migration_pending: true });
     }
     return NextResponse.json({ error: "db", message: error.message }, { status: 500 });
   }
@@ -86,7 +84,10 @@ export async function GET() {
       } satisfies CodexAccountMetadata] as const];
     }),
   );
-  const accounts = fallbackAccounts(viewerEmail).map((fallback) => rows.get(fallback.account_key) ?? fallback);
+  const accounts = fallbackAccounts().map((fallback) => {
+    const observed = rows.get(fallback.account_key);
+    return observed ? mergeCodexAccountMetadata(fallback, observed) : fallback;
+  });
   const { data: devices } = await supabase
     .from("codex_devices")
     .select("id, device_name, protocol_version, switch_supported, active_account_key, active_email, active_workspace_id, active_workspace_name, heartbeat_at, generation, updated_at")
