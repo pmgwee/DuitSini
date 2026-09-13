@@ -226,12 +226,24 @@ export class CodexRuntimeManager {
       const profile = this.profileForSource(source.label);
       const authIdentity = parseCodexIdentity(raw, credential);
       const serverIdentity = profile ? await this.appServerIdentity(profile) : null;
+      /*
+       * The credential file wins over the app-server.
+       *
+       * auth.json is what Codex will use the next time it starts, so after a
+       * deliberate seat switch it is the configured account by definition. The
+       * app-server instead answers for a session that may predate the swap,
+       * and letting it win made the dashboard insist the old seat was still
+       * active right after a switch it had just performed successfully.
+       *
+       * The app-server stays as a gap-filler, which is what it was added for:
+       * credentials written by Desktop <= 1.5.0 carry no identity of their own.
+       */
       const identity: CodexIdentity = {
-        memberId: serverIdentity?.memberId ?? authIdentity.memberId,
-        email: serverIdentity?.email ?? authIdentity.email,
-        workspaceId: serverIdentity?.workspaceId ?? authIdentity.workspaceId,
-        workspaceName: serverIdentity?.workspaceName ?? authIdentity.workspaceName,
-        planType: serverIdentity?.planType ?? authIdentity.planType,
+        memberId: authIdentity.memberId ?? serverIdentity?.memberId ?? null,
+        email: authIdentity.email ?? serverIdentity?.email ?? null,
+        workspaceId: authIdentity.workspaceId ?? serverIdentity?.workspaceId ?? null,
+        workspaceName: authIdentity.workspaceName ?? serverIdentity?.workspaceName ?? null,
+        planType: authIdentity.planType ?? serverIdentity?.planType ?? null,
       };
       const match = this.accountForIdentity(identity, profile, fingerprint);
       const matchedAccount = match ? accounts[match.accountKey] : null;
@@ -352,9 +364,11 @@ export class CodexRuntimeManager {
         ownerOf: (identity) => this.seatKeyForIdentity(identity),
       });
 
-      // The credential under the default profile changed, so drop cached
-      // identity reads and re-observe before reporting back.
+      // The credential under the default profile changed, so drop BOTH cached
+      // identity layers before re-observing. The reader keeps its own 5-minute
+      // cache; clearing only ours left the pre-switch account on screen.
       this.appServerCache.delete(defaultProfile.codexHome);
+      this.accountReader?.invalidate?.(defaultProfile.codexHome);
       const observed = outcome.ok && outcome.code === "switched" ? await this.observeRuntime() : status;
 
       if (!outcome.ok) {

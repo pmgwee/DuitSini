@@ -62,7 +62,7 @@ export function CodexAccountsPanel({
   const [desktop, setDesktop] = useState<CodexDesktopCapability | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; tone: "info" | "warning" } | null>(null);
   const [switchLog, setSwitchLog] = useState<SwitchLog[]>([]);
   const syncedAccountsRef = useRef<string | null>(null);
 
@@ -141,11 +141,14 @@ export function CodexAccountsPanel({
       const result = await desktop.switchAccount({ accountKey: account.account_key, requestId, expectedGeneration: runtime?.generation ?? 0 });
       // The main process writes the outcome copy (it knows whether the
       // credential moved and where the outgoing one was preserved).
-      setNotice(result.message ?? (result.ok ? `Codex now uses ${account.label}.` : "Codex could not switch this account."));
+      setNotice({
+        text: result.message ?? (result.ok ? `Codex now uses ${account.label}.` : "Codex could not switch this account."),
+        tone: result.ok ? "info" : "warning",
+      });
       setSwitchLog((previous) => [{ at: Date.now(), label: account.label, result: result.code ?? (result.ok ? "switched" : "failed") }, ...previous].slice(0, 5));
       if (result.status) setRuntime(result.status);
     } catch (error) {
-      setNotice((error as Error).message);
+      setNotice({ text: (error as Error).message, tone: "warning" });
     } finally {
       setSwitching(null);
     }
@@ -157,9 +160,12 @@ export function CodexAccountsPanel({
     setSwitching(account.account_key);
     try {
       const result = await desktop.connectAccount(account.account_key);
-      setNotice(result.ok ? result.message ?? "Codex sign-in opened in an isolated profile." : result.message ?? "This account needs sign-in.");
+      setNotice({
+        text: result.message ?? (result.ok ? "Codex sign-in opened in an isolated profile." : "This account needs sign-in."),
+        tone: result.ok ? "info" : "warning",
+      });
     } catch (error) {
-      setNotice((error as Error).message);
+      setNotice({ text: (error as Error).message, tone: "warning" });
     } finally {
       setSwitching(null);
     }
@@ -173,7 +179,8 @@ export function CodexAccountsPanel({
           <h2 id="codex-accounts-heading" className="text-sm font-semibold">Codex account controls</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">{runtimeCopy}</p>
           <p className="text-[11px] text-muted-foreground/80">{runtimeDetail}</p>
-          <p className="mt-1 text-[11px] text-muted-foreground/70">Usage is shown in the two standard Codex trackers below.</p>
+          <p className="mt-1 text-[11px] text-muted-foreground/70">Switching rewrites the Codex sign-in on this computer. A Codex session that is already open keeps its previous account until you restart it.</p>
+          <p className="text-[11px] text-muted-foreground/70">Usage is shown in the two standard Codex trackers below.</p>
         </div>
       </div>
 
@@ -234,7 +241,20 @@ export function CodexAccountsPanel({
         })}
       </div>
 
-      {notice ? <div role="status" className="flex items-start gap-1.5 rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-2 text-[11px] text-warning"><CircleAlert className="mt-0.5 size-3.5 shrink-0" /> <span>{notice}</span></div> : null}
+      {notice ? (
+        <div
+          role="status"
+          className={cn(
+            "flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[11px]",
+            notice.tone === "warning"
+              ? "border-warning/40 bg-warning/10 text-warning"
+              : "border-primary/40 bg-primary/10 text-primary",
+          )}
+        >
+          {notice.tone === "warning" ? <CircleAlert className="mt-0.5 size-3.5 shrink-0" /> : <Check className="mt-0.5 size-3.5 shrink-0" />}
+          <span>{notice.text}</span>
+        </div>
+      ) : null}
       <details className="text-[11px] text-muted-foreground">
         <summary className="cursor-pointer select-none">Recent switches</summary>
         <div className="mt-2 flex flex-col gap-1 border-l border-border/50 pl-3">

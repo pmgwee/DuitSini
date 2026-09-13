@@ -241,3 +241,82 @@ describe("CodexRuntimeManager switch", () => {
     expect(refreshed).toBe(1);
   });
 });
+
+describe("credential file vs app-server precedence", () => {
+  const idToken = (email: string) =>
+    `header.${Buffer.from(JSON.stringify({ email, sub: `sub-${email}` })).toString("base64url")}.sig`;
+
+  it("trusts the swapped credential over a Codex session that predates the switch", async () => {
+    // Field case 2026-09-13: the swap put Member into ~/.codex, but the still
+    // running Codex answered "Business", and the dashboard believed it — so it
+    // insisted the old seat was active right after switching away from it.
+    const dir = await mkdtemp(join(tmpdir(), "duitsini-codex-precedence-"));
+    dirs.push(dir);
+    const store = new Store(join(dir, "desktop-state.json"));
+    await store.load();
+    const business = CODEX_ACCOUNT_SLOTS.find((slot) => slot.slot === "business")!;
+    const member = CODEX_ACCOUNT_SLOTS.find((slot) => slot.slot === "member")!;
+    const defaultHome = join(dir, ".codex");
+
+    const source: CodexCredentialSource = {
+      label: join(defaultHome, "auth.json"),
+      read: async () => ({
+        auth_mode: "chatgpt",
+        tokens: {
+          access_token: "member-token",
+          account_id: "274586c5",
+          id_token: idToken("leeahming199@gmail.com"),
+        },
+      }),
+    };
+    const profiles = [
+      { accountKey: "", slot: "member" as const, label: "Codex (current local profile)", codexHome: defaultHome, includeKeychain: true },
+      profile(business.account_key, "business", business.label),
+      profile(member.account_key, "member", member.label),
+    ];
+    // The stale session still claims the account we just switched away from.
+    const staleReader = async () => ({
+      memberId: null,
+      email: "perminggwee@gmail.com",
+      workspaceId: null,
+      workspaceName: null,
+      planType: "team",
+    });
+
+    const manager = new CodexRuntimeManager(profiles, store, "device-1", [source], undefined, staleReader);
+    for (const [accountKey, slot, label, email] of [
+      [business.account_key, "business", business.label, "perminggwee@gmail.com"],
+      [member.account_key, "member", member.label, "leeahming199@gmail.com"],
+    ] as const) {
+      store.setCodexAccount({ accountKey, slot, label, email, memberId: null, workspaceId: null, workspaceName: null, planType: null, status: "connected" });
+    }
+
+    const status = await manager.status();
+    expect(status.email).toBe("leeahming199@gmail.com");
+    expect(status.accountKey).toBe(member.account_key);
+    expect(status.message).toMatch(/signed in as Codex \(Member\)/);
+  });
+
+  it("still lets the app-server name an identity-free legacy credential", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "duitsini-codex-gapfill-"));
+    dirs.push(dir);
+    const store = new Store(join(dir, "desktop-state.json"));
+    await store.load();
+    const defaultHome = join(dir, ".codex");
+    const source: CodexCredentialSource = {
+      label: join(defaultHome, "auth.json"),
+      // Desktop <= 1.5.0 wrote credentials carrying no identity at all.
+      read: async () => ({ auth_mode: "chatgpt", tokens: { access_token: "legacy", account_id: "274586c5" } }),
+    };
+    const manager = new CodexRuntimeManager(
+      [{ accountKey: "", slot: "member", label: "Codex (current local profile)", codexHome: defaultHome, includeKeychain: true }],
+      store,
+      "device-1",
+      [source],
+      undefined,
+      async () => ({ memberId: null, email: "perminggwee@gmail.com", workspaceId: null, workspaceName: null, planType: "team" }),
+    );
+
+    expect((await manager.status()).email).toBe("perminggwee@gmail.com");
+  });
+});

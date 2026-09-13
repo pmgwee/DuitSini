@@ -4,8 +4,17 @@ import { existsSync } from "node:fs";
 import { join, win32 as win32Path } from "node:path";
 import type { CodexIdentity } from "../../lib/claude-usage/codex";
 
-/** Read-only account identity obtained from a local Codex app-server. */
-export type CodexAccountReader = (codexHome: string) => Promise<CodexIdentity | null>;
+/**
+ * Read-only account identity obtained from a local Codex app-server.
+ *
+ * Results are cached, so anything that deliberately rewrites a profile's
+ * credentials must be able to drop the stale entry — otherwise the reader keeps
+ * reporting the pre-swap account for the rest of the cache window.
+ */
+export interface CodexAccountReader {
+  (codexHome: string): Promise<CodexIdentity | null>;
+  invalidate?: (codexHome: string) => void;
+}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -207,7 +216,7 @@ export async function readCodexAppServerAccount(
  */
 export function createCodexAppServerAccountReader(): CodexAccountReader {
   const cache = new Map<string, { at: number; value: CodexIdentity | null; inflight?: Promise<CodexIdentity | null> }>();
-  return async (codexHome: string) => {
+  const reader: CodexAccountReader = async (codexHome: string) => {
     const now = Date.now();
     const existing = cache.get(codexHome);
     if (existing?.inflight) return existing.inflight;
@@ -225,4 +234,8 @@ export function createCodexAppServerAccountReader(): CodexAccountReader {
       if (current?.inflight === inflight) cache.set(codexHome, { at: Date.now(), value: current.value });
     }
   };
+  reader.invalidate = (codexHome: string) => {
+    cache.delete(codexHome);
+  };
+  return reader;
 }
