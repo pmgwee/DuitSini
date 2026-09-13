@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CircleAlert, Laptop, LockKeyhole, RefreshCw, UserRound } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Laptop, LockKeyhole, RefreshCw, UserRound } from "lucide-react";
 import {
   accountForCodexStream,
   codexStreamsByAccount,
@@ -38,28 +38,44 @@ type CodexDesktopCapability = {
 
 type SwitchLog = { at: number; label: string; result: string };
 
+/** Per-viewer convenience only — nothing here needs to outlive the browser. */
+const FOLD_KEY = "duitsini.codex-controls.folded";
+
+/*
+ * Two independent facts, previously collapsed into one word:
+ *
+ *   - do we hold a sign-in for this seat?
+ *   - is it the sign-in Codex is actually using?
+ *
+ * A parked seat reported "Connected", which is not true in any sense the user
+ * cares about — Codex is not using it. So the active seat says "In use" and a
+ * parked one says "Signed in · not in use", and only a seat we genuinely cannot
+ * authenticate is described as needing a sign-in.
+ *
+ * A parked seat's access token also stops answering the usage endpoint once
+ * Codex stops using it — measured 2026-09-13: a 401 while the token's own `exp`
+ * was still eight days out, so a server-side invalidation rather than a local
+ * expiry. Its refresh token is intact and Codex renews it as soon as the seat
+ * is active again, so that state must not read as "log in before you switch".
+ */
 function connectionStatus(
   stream: UsageStream | undefined,
   account: CodexAccountMetadata,
   credentialActive: boolean,
+  neverConnected: boolean,
 ): string {
-  /*
-   * A parked seat's access token stops answering the usage endpoint once Codex
-   * stops using it — measured 2026-09-13: a 401 while the token's own `exp` was
-   * still eight days out, so this is a server-side invalidation, not a local
-   * expiry. Its refresh token is intact, and Codex renews it as soon as the
-   * seat is active again. Calling that "Sign in again" reads as "you must log
-   * in before you can switch", which is the opposite of what is needed.
-   */
-  if (stream?.state === "auth_stale") {
-    return credentialActive ? "Sign in again" : "Stored · renews when you switch to it";
+  if (neverConnected) {
+    return account.status === "unsupported" ? "Unsupported by installed Codex build" : "Not connected";
   }
-  if (stream?.state === "rate_limited") return "Connected · provider cooldown";
-  if (stream?.state === "offline" || stream?.cached) return "Connected · companion offline";
-  if (stream) return "Connected";
-  if (account.status === "needs_sign_in") return "Not connected";
-  if (account.status === "unsupported") return "Unsupported by installed Codex build";
-  return "Connection unavailable";
+  if (credentialActive) {
+    if (stream?.state === "auth_stale") return "In use · sign in again";
+    if (stream?.state === "rate_limited") return "In use · provider cooldown";
+    if (stream?.state === "offline" || stream?.cached) return "In use · companion offline";
+    return "In use";
+  }
+  if (stream?.state === "auth_stale") return "Sign-in expired · renews when you switch to it";
+  if (stream?.state === "rate_limited") return "Signed in · not in use · provider cooldown";
+  return "Signed in · not in use";
 }
 
 export function CodexAccountsPanel({
@@ -78,7 +94,30 @@ export function CodexAccountsPanel({
   const [switching, setSwitching] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; tone: "info" | "warning" } | null>(null);
   const [switchLog, setSwitchLog] = useState<SwitchLog[]>([]);
+  const [open, setOpen] = useState(true);
   const syncedAccountsRef = useRef<string | null>(null);
+
+  /*
+   * Restored after paint, never during render: reading localStorage while
+   * rendering would make the server and client markup disagree. Storage can
+   * also throw outright (private windows, blocked site data), so a failure
+   * simply leaves the panel expanded.
+   */
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(FOLD_KEY) === "closed") setOpen(false);
+    } catch {
+      // Expanded is the safe default: nothing is hidden that cannot be found.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FOLD_KEY, open ? "open" : "closed");
+    } catch {
+      // A remembered fold is a convenience, never a correctness requirement.
+    }
+  }, [open]);
 
   useEffect(() => {
     const candidate = (window as unknown as { duitsiniCodex?: CodexDesktopCapability }).duitsiniCodex;
@@ -145,6 +184,15 @@ export function CodexAccountsPanel({
         : "No verified runtime identity reported by this computer.";
   const compatibleDesktop = desktop !== null && typeof desktop.syncAccounts === "function";
   const switchReady = compatibleDesktop && runtime?.switchSupported === true;
+  // Folding must not hide a seat that needs the user to do something.
+  const attentionCount = useMemo(
+    () =>
+      accounts.filter((account) => {
+        const stream = streamsByAccount.get(account.account_key);
+        return (!stream && account.status !== "connected") || stream?.state === "auth_stale";
+      }).length,
+    [accounts, streamsByAccount],
+  );
 
   const switchTo = async (account: CodexAccountMetadata) => {
     if (!desktop || !switchReady) return;
@@ -187,17 +235,50 @@ export function CodexAccountsPanel({
 
   return (
     <section aria-labelledby="codex-accounts-heading" className="flex flex-col gap-3 rounded-2xl border border-border/50 bg-surface/20 p-3">
+      {/*
+        Folded away, this still has to answer "which account am I on?" — so the
+        collapsed header keeps the active seat and surfaces anything needing
+        attention, and only the controls and explanation are hidden.
+      */}
       <div className="flex items-start gap-2">
         <Laptop className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-        <div className="min-w-0">
-          <h2 id="codex-accounts-heading" className="text-sm font-semibold">Codex account controls</h2>
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => setOpen((previous) => !previous)}
+            aria-expanded={open}
+            aria-controls="codex-accounts-body"
+            className="flex w-full items-center gap-1.5 text-left"
+          >
+            <h2 id="codex-accounts-heading" className="text-sm font-semibold">Codex account controls</h2>
+            {!open && attentionCount > 0 ? (
+              <span className="shrink-0 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                {attentionCount} need{attentionCount === 1 ? "s" : ""} attention
+              </span>
+            ) : null}
+            <ChevronDown
+              className={cn("ml-auto size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+              aria-hidden="true"
+            />
+          </button>
           <p className="mt-0.5 text-[11px] text-muted-foreground">{runtimeCopy}</p>
           <p className="text-[11px] text-muted-foreground/80">{runtimeDetail}</p>
-          <p className="mt-1 text-[11px] text-muted-foreground/70">Switching rewrites the Codex sign-in on this computer. A Codex session that is already open keeps its previous account until you restart it.</p>
-          <p className="text-[11px] text-muted-foreground/70">Usage is shown in the two standard Codex trackers below.</p>
+          {open ? (
+            <>
+              <p className="mt-1 text-[11px] text-muted-foreground/70">Switching rewrites the Codex sign-in on this computer. A Codex session that is already open keeps its previous account until you restart it.</p>
+              <p className="text-[11px] text-muted-foreground/70">Usage is shown in the two standard Codex trackers below.</p>
+            </>
+          ) : null}
         </div>
       </div>
 
+      {/*
+        Not `hidden={!open}` alongside a display utility: `[hidden]` and `.flex`
+        have the same specificity, so the utility can win and the panel would
+        never actually collapse. Swapping the class outright leaves no conflict,
+        and keeping the element mounted preserves the aria-controls target.
+      */}
+      <div id="codex-accounts-body" className={open ? "flex flex-col gap-3" : "hidden"}>
       <div className="grid gap-3 md:grid-cols-2">
         {accounts.map((account) => {
           const stream = streamsByAccount.get(account.account_key);
@@ -207,23 +288,38 @@ export function CodexAccountsPanel({
           // reported does, even if its parked token has since gone stale.
           const neverConnected = !stream && account.status !== "connected";
           const staleSignIn = stream?.state === "auth_stale";
+          const accountEmail = stream?.account_email ?? account.email ?? "Email pending verification";
           return (
             <article key={account.account_key} className={cn("flex min-w-0 flex-col gap-3 rounded-xl border p-3", credentialActive ? "border-primary ring-1 ring-primary/50" : "border-border/60 bg-background/20")}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex min-w-0 items-start gap-2">
+              {/*
+                Two of these sit side by side in a narrow widget, so the name
+                and the address each get one line and truncate. `break-words`
+                used to split the address mid-word ("leeahming199" / "@gmail.com")
+                and the badge's old label squeezed the heading onto two lines.
+              */}
+              <div className="flex items-start justify-between gap-1.5">
+                <div className="flex min-w-0 flex-1 items-start gap-2">
                   <UserRound className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-semibold">{account.label}</h3>
-                    <p className="break-words text-[11px] text-muted-foreground">{stream?.account_email ?? account.email ?? "Email pending verification"}</p>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-sm font-semibold" title={account.label}>{account.label}</h3>
+                    <p className="truncate text-[11px] text-muted-foreground" title={accountEmail}>{accountEmail}</p>
                   </div>
                 </div>
-                {credentialActive ? <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary"><Check className="size-3" /> {verifiedActive ? "In use" : "Credential active"}</span> : null}
+                {credentialActive ? (
+                  <span
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary"
+                    title={verifiedActive ? "Codex is using this account." : "This account's sign-in is the one stored in the Codex profile."}
+                  >
+                    <Check className="size-3 shrink-0" />
+                    {verifiedActive ? "In use" : "Active"}
+                  </span>
+                ) : null}
               </div>
 
               {/* Connection state only: quota lives in this seat's tracker below. */}
               <div className="text-[11px] text-muted-foreground">
-                <span className={cn("font-medium", neverConnected || (credentialActive && stream?.state === "auth_stale") ? "text-warning" : "text-foreground/80")}>
-                  {connectionStatus(stream, account, credentialActive)}
+                <span className={cn("font-medium", neverConnected || staleSignIn ? "text-warning" : "text-foreground/80")}>
+                  {connectionStatus(stream, account, credentialActive, neverConnected)}
                 </span>
               </div>
 
@@ -253,8 +349,11 @@ export function CodexAccountsPanel({
                     }
                     className={cn("inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", credentialActive ? "border border-primary/50 bg-primary/10 text-primary" : "bg-primary text-primary-foreground hover:bg-primary/90")}
                   >
-                    {switching === account.account_key ? <RefreshCw className="size-3.5 animate-spin" /> : credentialActive ? <Check className="size-3.5" /> : null}
-                    {switching === account.account_key ? "Switching…" : credentialActive ? "Currently in use" : switchReady ? `Use ${account.label}` : "Switch unavailable"}
+                    {switching === account.account_key ? <RefreshCw className="size-3.5 shrink-0 animate-spin" /> : credentialActive ? <Check className="size-3.5 shrink-0" /> : null}
+                    {/* The heading names the account; aria-label carries it for screen readers. */}
+                    <span className="truncate">
+                      {switching === account.account_key ? "Switching…" : credentialActive ? "Currently in use" : switchReady ? "Use this account" : "Switch unavailable"}
+                    </span>
                   </button>
                 ) : !neverConnected ? (
                   <a href="/download" className="inline-flex min-h-8 flex-1 items-center justify-center rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90">{desktop ? "Update Desktop" : "Open/Update Desktop"}</a>
@@ -297,6 +396,7 @@ export function CodexAccountsPanel({
           {switchLog.length === 0 ? <span>No switches in this session.</span> : switchLog.map((entry) => <span key={`${entry.at}-${entry.label}`}>{entry.label} · {entry.result}</span>)}
         </div>
       </details>
+      </div>
     </section>
   );
 }
