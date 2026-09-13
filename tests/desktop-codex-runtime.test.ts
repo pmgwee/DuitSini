@@ -8,6 +8,11 @@ import { Store } from "../desktop/src/store";
 import type { UsageStream } from "../desktop/src/types";
 import { CODEX_ACCOUNT_SLOTS } from "../lib/claude-usage/codex-accounts";
 import { codexAccountProfiles } from "../desktop/src/codex-profiles";
+import {
+  codexCredentialIdentityKey,
+  readCodexAuthFile,
+  writeCodexAuthFile,
+} from "../desktop/src/codex-switch";
 
 const dirs: string[] = [];
 
@@ -61,7 +66,7 @@ describe("CodexRuntimeManager", () => {
     expect(enrolled.every((candidate) => candidate.codexHome !== current?.codexHome)).toBe(true);
   });
 
-  it("reports credential evidence without claiming GUI control", async () => {
+  it("names the signed-in seat and refuses a switch with no default profile", async () => {
     const dir = await mkdtemp(join(tmpdir(), "duitsini-codex-runtime-"));
     dirs.push(dir);
     const store = new Store(join(dir, "desktop-state.json"));
@@ -95,9 +100,12 @@ describe("CodexRuntimeManager", () => {
     const status = await manager.status();
     expect(status.state).toBe("unknown");
     expect(status.accountKey).toBe("codex_member");
+    // No seat has a credential on disk here, so there is nothing to swap in.
     expect(status.switchSupported).toBe(false);
-    expect(status.message).toMatch(/GUI account is not exposed/);
+    expect(status.message).toMatch(/signed in as Codex \(Member\)/);
 
+    // These profiles are all keyed — without a default profile there is no
+    // path Codex actually reads, so a switch must decline rather than guess.
     const result = await manager.switchAccount({ accountKey: "codex_business", requestId: "request-1234", expectedGeneration: 0 });
     expect(result).toMatchObject({ ok: false, code: "unsupported" });
     expect((await manager.status()).accountKey).toBe("codex_member");
@@ -167,3 +175,69 @@ describe("CodexRuntimeManager", () => {
   });
 });
 
+
+describe("CodexRuntimeManager switch", () => {
+  it("swaps the target seat into the default profile and preserves the outgoing one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "duitsini-codex-switch-mgr-"));
+    dirs.push(dir);
+    const store = new Store(join(dir, "desktop-state.json"));
+    await store.load();
+
+    const defaultHome = join(dir, ".codex");
+    const businessHome = join(dir, "seats", "codex_business");
+    const memberHome = join(dir, "seats", "codex_member");
+    const profiles = [
+      { accountKey: "", slot: "member" as const, label: "Codex (current local profile)", codexHome: defaultHome, includeKeychain: true },
+      { accountKey: "codex_business", slot: "business" as const, label: "Codex (Business)", codexHome: businessHome, includeKeychain: false },
+      { accountKey: "codex_member", slot: "member" as const, label: "Codex (Member)", codexHome: memberHome, includeKeychain: false },
+    ];
+
+    const auth = (token: string, email: string) => ({
+      auth_mode: "chatgpt",
+      email,
+      tokens: { access_token: token, account_id: "shared-workspace" },
+    });
+
+    // Business exists ONLY in the shared default profile — the case where a
+    // careless swap would destroy it.
+    await writeCodexAuthFile(defaultHome, auth("business-token", "perminggwee@gmail.com"));
+    await writeCodexAuthFile(memberHome, auth("member-token", "leeahming199@gmail.com"));
+    for (const [accountKey, slot, label, email] of [
+      ["codex_business", "business", "Codex (Business)", "perminggwee@gmail.com"],
+      ["codex_member", "member", "Codex (Member)", "leeahming199@gmail.com"],
+    ] as const) {
+      store.setCodexAccount({ accountKey, slot, label, email, memberId: null, workspaceId: null, workspaceName: null, planType: null, status: "connected" });
+    }
+
+    let refreshed = 0;
+    const manager = new CodexRuntimeManager(
+      profiles,
+      store,
+      "device-1",
+      [{ label: join(defaultHome, "auth.json"), read: async () => readCodexAuthFile(defaultHome) }],
+      undefined,
+      undefined,
+      () => { refreshed += 1; },
+    );
+
+    expect((await manager.status()).switchSupported).toBe(true);
+
+    const result = await manager.switchAccount({ accountKey: "codex_member", requestId: "request-abcd1234" });
+    expect(result).toMatchObject({ ok: true, code: "switched" });
+    expect(result.ok && result.message).toMatch(/Restart Codex/);
+    // Usage for both seats must be re-read, not served from the stale cache.
+    expect(refreshed).toBe(1);
+
+    expect(codexCredentialIdentityKey(await readCodexAuthFile(defaultHome))).toBe(
+      codexCredentialIdentityKey(auth("member-token", "leeahming199@gmail.com")),
+    );
+    expect(codexCredentialIdentityKey(await readCodexAuthFile(businessHome))).toBe(
+      codexCredentialIdentityKey(auth("business-token", "perminggwee@gmail.com")),
+    );
+
+    // Repeating the switch is a no-op rather than a second destructive write.
+    const again = await manager.switchAccount({ accountKey: "codex_member", requestId: "request-efgh5678" });
+    expect(again).toMatchObject({ ok: true, code: "already_active" });
+    expect(refreshed).toBe(1);
+  });
+});

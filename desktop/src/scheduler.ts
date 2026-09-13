@@ -5,6 +5,7 @@ import {
   proUsage429Hold,
 } from "../../lib/bridge/sharer/backoff";
 import { usageStreamKey } from "../../lib/claude-usage/codex-accounts";
+import { codexCredentialIdentityKey, readCodexAuthFile } from "./codex-switch";
 import {
   API_CACHE_MS,
   CLIENT_VERSION,
@@ -183,6 +184,16 @@ export class Scheduler {
    *  MIN_GAP_MS floor and the broker's own 429 gates. */
   async pullNow(): Promise<void> {
     await this.tick(true);
+  }
+
+  /**
+   * Re-read every Codex seat after a deliberate account switch. Cached readings
+   * are keyed by profile, and the default profile just changed hands, so
+   * serving them would attribute one seat's quota to the other.
+   */
+  async codexAccountSwitched(): Promise<void> {
+    this.lastCodex.clear();
+    await this.pullNow();
   }
 
   /**
@@ -581,7 +592,25 @@ export class Scheduler {
     // own state, credentials and quota budget; a failed seat never falls back
     // to the other seat's token.
     const byKey = new Map<string, UsageStream>();
+    /*
+     * After a seat switch the shared default profile holds a copy of an
+     * enrolled seat's credential. Querying both would spend two calls of the
+     * same account's usage-endpoint budget every cycle for one reading, which
+     * is exactly the volume that trips the rolling 429 window. Detect the
+     * duplicate from the files alone — no network — and collect the seat.
+     */
+    const seatIdentities = new Set<string>();
     for (const profile of this.codexProfiles) {
+      if (!profile.accountKey) continue;
+      const identity = codexCredentialIdentityKey(await readCodexAuthFile(profile.codexHome));
+      if (identity) seatIdentities.add(identity);
+    }
+
+    for (const profile of this.codexProfiles) {
+      if (!profile.accountKey) {
+        const identity = codexCredentialIdentityKey(await readCodexAuthFile(profile.codexHome));
+        if (identity && seatIdentities.has(identity)) continue;
+      }
       const stream = await this.collectCodexProfile(profile);
       if (!stream) continue;
       const key = usageStreamKey(stream);

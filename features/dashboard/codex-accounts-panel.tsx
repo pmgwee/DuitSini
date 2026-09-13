@@ -139,8 +139,10 @@ export function CodexAccountsPanel({
     const requestId = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `switch-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     try {
       const result = await desktop.switchAccount({ accountKey: account.account_key, requestId, expectedGeneration: runtime?.generation ?? 0 });
-      setNotice(result.ok ? "Already using this account." : result.message ?? "Codex could not switch this account.");
-      setSwitchLog((previous) => [{ at: Date.now(), label: account.label, result: result.ok ? "already active" : result.code ?? "failed" }, ...previous].slice(0, 5));
+      // The main process writes the outcome copy (it knows whether the
+      // credential moved and where the outgoing one was preserved).
+      setNotice(result.message ?? (result.ok ? `Codex now uses ${account.label}.` : "Codex could not switch this account."));
+      setSwitchLog((previous) => [{ at: Date.now(), label: account.label, result: result.code ?? (result.ok ? "switched" : "failed") }, ...previous].slice(0, 5));
       if (result.status) setRuntime(result.status);
     } catch (error) {
       setNotice((error as Error).message);
@@ -206,9 +208,22 @@ export function CodexAccountsPanel({
                   <a href="/download" className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-[11px] font-semibold text-warning hover:bg-warning/15"><LockKeyhole className="size-3.5" /> {desktop ? "Update Desktop to connect" : "Open Desktop to connect"}</a>
                 ) : null}
                 {compatibleDesktop ? (
-                  <button type="button" onClick={() => void switchTo(account)} disabled={!switchReady || switching !== null || verifiedActive} aria-label={verifiedActive ? `Already using ${account.label}` : switchReady ? `Use ${account.label}` : `Switching ${account.label} is unavailable`} title={switchReady ? undefined : "The installed Codex app does not expose a supported running-GUI account switch."} className={cn("inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", verifiedActive ? "border border-primary/50 bg-primary/10 text-primary" : "bg-primary text-primary-foreground hover:bg-primary/90")}>
-                    {switching === account.account_key ? <RefreshCw className="size-3.5 animate-spin" /> : verifiedActive ? <Check className="size-3.5" /> : null}
-                    {switching === account.account_key ? "Checking…" : verifiedActive ? "Already using this account" : switchReady ? `Use ${account.label}` : "Switch unavailable"}
+                  <button
+                    type="button"
+                    onClick={() => void switchTo(account)}
+                    disabled={credentialActive || !switchReady || switching !== null}
+                    aria-label={credentialActive ? `Codex already uses ${account.label}` : switchReady ? `Use ${account.label}` : `Switching to ${account.label} is unavailable`}
+                    title={
+                      credentialActive
+                        ? undefined
+                        : switchReady
+                          ? "Writes this account's sign-in into the Codex profile. Restart Codex afterwards."
+                          : "Connect a second account first — switching needs its sign-in stored on this computer."
+                    }
+                    className={cn("inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", credentialActive ? "border border-primary/50 bg-primary/10 text-primary" : "bg-primary text-primary-foreground hover:bg-primary/90")}
+                  >
+                    {switching === account.account_key ? <RefreshCw className="size-3.5 animate-spin" /> : credentialActive ? <Check className="size-3.5" /> : null}
+                    {switching === account.account_key ? "Switching…" : credentialActive ? "Currently in use" : switchReady ? `Use ${account.label}` : "Switch unavailable"}
                   </button>
                 ) : (
                   <a href="/download" className="inline-flex min-h-8 flex-1 items-center justify-center rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90">{desktop ? "Update Desktop" : "Open/Update Desktop"}</a>

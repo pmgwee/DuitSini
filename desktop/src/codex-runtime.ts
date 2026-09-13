@@ -10,6 +10,12 @@ import {
   type CodexAccountProfile,
 } from "./collectors/codex";
 import type { CodexAccountReader } from "./codex-app-server";
+import {
+  codexCredentialIdentityKey,
+  readCodexAuthFile,
+  switchCodexAccount,
+  type CodexSwitchOutcome,
+} from "./codex-switch";
 import type { Store } from "./store";
 
 export type CodexRuntimeState = "detected" | "unknown" | "not_running" | "unsupported";
@@ -27,7 +33,8 @@ export interface CodexRuntimeStatus {
   observedAt: number;
   generation: number;
   confidence: "credential-file" | "unsupported";
-  switchSupported: false;
+  /** True when some other enrolled seat has a stored sign-in we can swap in. */
+  switchSupported: boolean;
   message: string;
 }
 
@@ -38,9 +45,15 @@ export interface CodexSwitchRequest {
 }
 
 export type CodexActionResult =
-  | { ok: true; code: "already_active"; status: CodexRuntimeStatus }
+  | { ok: true; code: "already_active"; message: string; status: CodexRuntimeStatus }
+  | { ok: true; code: "switched"; message: string; status: CodexRuntimeStatus }
   | { ok: true; code: "started"; message: string; status: CodexRuntimeStatus }
-  | { ok: false; code: "bad_request" | "busy" | "stale_generation" | "unsupported" | "needs_sign_in"; message: string; status: CodexRuntimeStatus };
+  | {
+      ok: false;
+      code: "bad_request" | "busy" | "stale_generation" | "unsupported" | "needs_sign_in" | "io_error";
+      message: string;
+      status: CodexRuntimeStatus;
+    };
 
 const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 
@@ -69,6 +82,8 @@ export class CodexRuntimeManager {
     private readonly credentialSources: readonly CodexCredentialSource[] = codexCredentialSources(),
     private readonly startEnrollment?: (profile: CodexAccountProfile) => Promise<{ ok: boolean; message: string }>,
     private readonly accountReader?: CodexAccountReader,
+    /** Lets the scheduler refresh both seats right after a successful swap. */
+    private readonly onSwitched?: (profile: CodexAccountProfile) => void,
   ) {
     this.current = this.unsupportedStatus("Codex GUI account control is not exposed by this build.");
   }
@@ -121,6 +136,46 @@ export class CodexRuntimeManager {
     }
   }
 
+  /**
+   * Seats with a stored sign-in on disk. Only these can be swapped into the
+   * default profile, so this is what gates the Switch control in the UI.
+   */
+  private async enrolledSeats(): Promise<CodexAccountProfile[]> {
+    const seats: CodexAccountProfile[] = [];
+    for (const profile of this.profiles) {
+      if (!profile.accountKey) continue;
+      if (codexCredentialIdentityKey(await readCodexAuthFile(profile.codexHome))) seats.push(profile);
+    }
+    return seats;
+  }
+
+  private defaultProfile(): CodexAccountProfile | null {
+    return this.profiles.find((profile) => !profile.accountKey) ?? null;
+  }
+
+  /**
+   * Resolve a provider identity to an enrolled seat key using the metadata the
+   * signed-in web owner synced down. Used to give an outgoing credential a home.
+   */
+  private seatKeyForIdentity(identity: CodexIdentity): string | null {
+    const accounts = this.store.get().codexAccounts ?? {};
+    const email = identity.email?.trim().toLowerCase() ?? null;
+    if (email) {
+      const matches = this.profiles.filter(
+        (profile) => profile.accountKey && accounts[profile.accountKey]?.email?.trim().toLowerCase() === email,
+      );
+      if (matches.length === 1) return matches[0].accountKey;
+    }
+    const memberId = identity.memberId?.trim() || null;
+    if (memberId) {
+      const matches = this.profiles.filter(
+        (profile) => profile.accountKey && accounts[profile.accountKey]?.memberId?.trim() === memberId,
+      );
+      if (matches.length === 1) return matches[0].accountKey;
+    }
+    return null;
+  }
+
   private profileForSource(sourceLabel: string): CodexAccountProfile | null {
     const normalized = sourceLabel.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
     return this.profiles.find((profile) => {
@@ -156,6 +211,8 @@ export class CodexRuntimeManager {
   async observeRuntime(): Promise<CodexRuntimeStatus> {
     const observedAt = Date.now();
     const accounts = this.store.get().codexAccounts ?? {};
+    // A seat can only be swapped in if its credential is already on disk.
+    const switchSupported = (await this.enrolledSeats()).length > 0;
     const sources = this.credentialSources;
     let sawCredential = false;
     for (const source of sources) {
@@ -197,9 +254,9 @@ export class CodexRuntimeManager {
         observedAt,
         generation: this.generation,
         confidence: "credential-file",
-        switchSupported: false,
+        switchSupported,
         message: match
-          ? `Local credentials match ${match.label}; the running Codex GUI account is not exposed by this build.`
+          ? `Codex is signed in as ${match.label} on this computer.`
           : "A Codex credential was found, but it is not bound to a verified enrolled account.",
       };
       this.store.setCodexRuntime({
@@ -220,7 +277,7 @@ export class CodexRuntimeManager {
         ? "Codex credentials were found, but the running GUI account cannot be verified."
         : "No Codex credential is available for runtime observation.",
     );
-    this.current = { ...this.current, state: sawCredential ? "unknown" : "not_running" };
+    this.current = { ...this.current, state: sawCredential ? "unknown" : "not_running", switchSupported };
     this.store.setCodexRuntime({
       state: this.current.state,
       accountKey: null,
@@ -268,18 +325,58 @@ export class CodexRuntimeManager {
         status,
       });
     }
-    this.locked = true;
-    try {
-      // Capability evidence for codex-cli 0.153.4 / Windows package
-      // 26.903.9818.0 does not expose a control channel for the existing GUI.
-      // Do not replace the user's whole CODEX_HOME or mutate auth files here.
-      const result: CodexActionResult = {
+    const defaultProfile = this.defaultProfile();
+    if (!defaultProfile) {
+      return this.remember(request.requestId, {
         ok: false,
         code: "unsupported",
-        message: "This Codex build does not expose a supported switch for the running desktop app. Sign in through Codex when prompted, then retry after a verified upgrade.",
+        message: "No default Codex profile is configured on this computer.",
         status,
-      };
-      return this.remember(request.requestId, result);
+      });
+    }
+
+    this.locked = true;
+    try {
+      /*
+       * Codex reads auth.json out of CODEX_HOME, so switching is a credential
+       * swap into that path — there is still no control channel into a running
+       * Codex process, which is why the success message asks for a restart
+       * rather than claiming the live session moved.
+       */
+      const outcome: CodexSwitchOutcome = await switchCodexAccount({
+        defaultProfile,
+        target: profile,
+        // Every seat, not just the enrolled ones: a seat with no stored
+        // credential is precisely where an outgoing sign-in needs to land.
+        seats: this.profiles.filter((candidate) => candidate.accountKey),
+        ownerOf: (identity) => this.seatKeyForIdentity(identity),
+      });
+
+      // The credential under the default profile changed, so drop cached
+      // identity reads and re-observe before reporting back.
+      this.appServerCache.delete(defaultProfile.codexHome);
+      const observed = outcome.ok && outcome.code === "switched" ? await this.observeRuntime() : status;
+
+      if (!outcome.ok) {
+        return this.remember(request.requestId, { ...outcome, status: observed });
+      }
+      if (outcome.code === "already_active") {
+        return this.remember(request.requestId, {
+          ok: true,
+          code: "already_active",
+          message: outcome.message,
+          status: observed,
+        });
+      }
+      this.onSwitched?.(profile);
+      return this.remember(request.requestId, {
+        ok: true,
+        code: "switched",
+        message: outcome.preservedTo
+          ? `${outcome.message} The previous sign-in was saved to ${outcome.preservedTo}.`
+          : outcome.message,
+        status: observed,
+      });
     } finally {
       this.locked = false;
     }

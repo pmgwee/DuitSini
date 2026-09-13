@@ -226,6 +226,15 @@ const codexRuntime = new CodexRuntimeManager(
   undefined,
   startCodexEnrollment,
   codexAccountReader,
+  // Resolved lazily: the scheduler is built later, in startCollection().
+  (profile) => {
+    void scheduler?.codexAccountSwitched().catch((error) => {
+      usageTracker.event("codex_switch_refresh_error", {
+        account: profile.slot,
+        message: (error as Error).message,
+      });
+    });
+  },
 );
 
 function appOriginOf(): string {
