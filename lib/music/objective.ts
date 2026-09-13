@@ -244,6 +244,19 @@ export interface AssembleSlateOptions {
   maxPerArtist?: number;
   endorsedCap?: number;
   quotas?: Partial<Record<SlatePool, number>>;
+  /**
+   * How much of the slate the `loved` pool may take, as a [min, max] fraction
+   * sampled per build.
+   *
+   * A fixed share produced exactly the same number of liked songs on every
+   * rebuild, which reads as mechanical — the shelf is supposed to feel
+   * different each time, and "always precisely four" is the most obvious
+   * possible tell. Sampling the SIZE as well as the membership means a rebuild
+   * can lean into the listener's favourites or lean away from them. The extra
+   * is taken from the discovery pools in proportion, so the totals still sum
+   * to one and discovery is never silently starved.
+   */
+  lovedRange?: [number, number];
   random?: () => number;
   /**
    * Softmax temperature for within-pool selection, as a fraction of the pool's
@@ -309,6 +322,7 @@ export function assembleSlate(
     random = Math.random,
     temperature = 0.35,
     ignorePools = false,
+    lovedRange = [0.1, 0.225],
   } = options;
 
   const dominantLanguage = dominantOf(listener.languageTarget);
@@ -392,6 +406,21 @@ export function assembleSlate(
     "cross-discovery": quotas["cross-discovery"] ?? DEFAULT_QUOTAS["cross-discovery"],
     exploration: quotas.exploration ?? DEFAULT_QUOTAS.exploration,
   };
+
+  // Sample this build's liked share, then fund the difference from discovery in
+  // proportion so the fractions still sum to one.
+  if (quotas.loved === undefined) {
+    const [lo, hi] = lovedRange;
+    const sampled = lo + random() * Math.max(0, hi - lo);
+    const delta = sampled - resolved.loved;
+    const discoveryTotal = DISCOVERY_POOLS.reduce((sum, pool) => sum + resolved[pool], 0);
+    if (discoveryTotal > 0) {
+      for (const pool of DISCOVERY_POOLS) {
+        resolved[pool] = Math.max(0, resolved[pool] - delta * (resolved[pool] / discoveryTotal));
+      }
+    }
+    resolved.loved = sampled;
+  }
 
   // Any quota that cannot be met from its own pool is redistributed to the
   // discovery pools that DO have candidates, before anything falls through to a

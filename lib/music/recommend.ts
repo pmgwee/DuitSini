@@ -521,7 +521,13 @@ export async function buildShelf(
         thumbnail: like.thumbnail,
         source: "local",
       },
-      { sourceId: "liked-library", origin: "liked", rank: 0, seedWeight: LIKE_SEED_WEIGHT },
+      // The source id is PER TRACK, not a shared "liked-library" bucket.
+      // `similarity.ts` builds its co-occurrence vector from source ids, so one
+      // shared id made every liked track identical to every other — cosine 1.0
+      // — and the greedy sequencer chained them into one consecutive block.
+      // Distinct ids let each liked track be positioned by its real
+      // neighbourhood (the radios it also appears in) instead.
+      { sourceId: `liked:lib:${like.videoId}`, origin: "liked", rank: 0, seedWeight: LIKE_SEED_WEIGHT },
     );
   }
 

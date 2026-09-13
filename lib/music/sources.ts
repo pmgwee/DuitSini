@@ -136,8 +136,23 @@ function pickThumbnail(item: any): string | null {
  * PlaylistPanelVideo (radio queues), MusicResponsiveListItem and MusicTwoRowItem
  * (shelves) — they expose the id under different keys.
  */
+/**
+ * Read one of a MusicResponsiveListItem's flex columns as text.
+ *
+ * Playlist items carry NOTHING in `artists`, `author` or `subtitle` — all three
+ * are undefined — and put the artist in `flex_columns[1]` instead, with the
+ * title at [0] and views (often the literal "N/A") at [2]. Radio queues use the
+ * structured fields, so the two shapes disagree completely and only the radio
+ * one was handled.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toTrack(item: any): MusicTrack | null {
+function flexColumnText(item: any, index: number): string {
+  const raw = item?.flex_columns?.[index]?.title?.toString?.();
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function toTrack(item: any): MusicTrack | null {
   const id: string | undefined =
     item?.video_id ?? item?.id ?? item?.endpoint?.payload?.videoId;
   if (!id || !VIDEO_ID.test(id)) return null;
@@ -148,7 +163,18 @@ function toTrack(item: any): MusicTrack | null {
   const subtitle: string = item?.subtitle?.toString?.() ?? "";
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const artists: string | undefined = item?.artists?.map((a: any) => a?.name).filter(Boolean).join(", ");
-  const channel = artists || item?.author?.name || subtitle.split("•")[0]?.trim() || "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const authors: string | undefined = item?.authors?.map((a: any) => a?.name).filter(Boolean).join(", ");
+
+  // `flex_columns[1]` is the playlist fallback. It is guarded because that slot
+  // is positional rather than typed: it repeats the title on some rows and
+  // carries the literal "N/A" where a count would go, and either would read as
+  // an artist name if taken at face value.
+  const flex = flexColumnText(item, 1);
+  const flexArtist = flex && flex !== "N/A" && flex !== title.trim() ? flex : "";
+
+  const channel =
+    artists || item?.author?.name || authors || subtitle.split("•")[0]?.trim() || flexArtist || "";
 
   return {
     videoId: id,

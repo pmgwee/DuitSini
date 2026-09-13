@@ -155,6 +155,7 @@ interface SimulationResult {
   lovedPoolSlots: number;
   shelvesWithEnoughLikes: number;
   shelvesMeetingLovedQuota: number;
+  lovedCounts: number[];
   servedSlots: number;
   backfilled: number;
   backfilledFamiliar: number;
@@ -183,6 +184,7 @@ function simulate(days: number, seed: number): SimulationResult {
   let lovedPoolSlots = 0;
   let shelvesWithEnoughLikes = 0;
   let shelvesMeetingLovedQuota = 0;
+  const lovedCounts: number[] = [];
   let servedSlots = 0;
   let backfilled = 0;
   let backfilledFamiliar = 0;
@@ -295,6 +297,7 @@ function simulate(days: number, seed: number): SimulationResult {
     const lovedTarget = Math.round(SHELF * 0.1);
     if (likes.size >= lovedTarget) shelvesWithEnoughLikes += 1;
     const lovedOnThisShelf = assembled.slots.filter((slot) => slot.pool === "loved").length;
+    if (likes.size >= lovedTarget) lovedCounts.push(lovedOnThisShelf);
     if (likes.size >= lovedTarget) {
       // Counted only on shelves that COULD honour the quota. Averaging over the
       // early days, when the listener had fewer than four likes, measures how
@@ -378,6 +381,7 @@ function simulate(days: number, seed: number): SimulationResult {
     lovedPoolSlots,
     shelvesWithEnoughLikes,
     shelvesMeetingLovedQuota,
+    lovedCounts,
     servedSlots,
     backfilled,
     backfilledFamiliar,
@@ -412,6 +416,9 @@ describe("Listen Again over 90 days of use", () => {
         ? 0
         : result.lovedPoolSlots / result.shelvesWithEnoughLikes,
     shelvesWithEnoughLikes: result.shelvesWithEnoughLikes,
+    lovedMin: Math.min(...result.lovedCounts),
+    lovedMax: Math.max(...result.lovedCounts),
+    lovedDistinctCounts: new Set(result.lovedCounts).size,
     lovedQuotaMetShare:
       result.shelvesWithEnoughLikes === 0
         ? 1
@@ -491,12 +498,29 @@ describe("Listen Again over 90 days of use", () => {
     // competing for one shared familiar allowance, produced exactly ONE liked
     // song on a 40-slot shelf. A reserved pool is what makes the floor hold as
     // play history keeps growing.
-    // Measured only where the quota is achievable — a listener with two likes
-    // cannot be given four, and counting those shelves would measure how fast
-    // likes accumulate rather than whether the floor holds.
-    expect(report.shelvesWithEnoughLikes).toBeGreaterThan(50);
+    /*
+     * Measured only where the quota is achievable — a listener with two likes
+     * cannot be given four, and counting those shelves would measure how fast
+     * likes accumulate rather than whether the floor holds.
+     *
+     * The eligible count is ~46 of 90 rather than ~82 as it was when the loved
+     * share was fixed, and the drop is a genuine coupling rather than noise: a
+     * larger loved pool leaves fewer discovery slots, so the simulated listener
+     * meets fewer new tracks, completes fewer, and therefore likes more slowly.
+     * Forty is simply "enough shelves for the floor to mean something".
+     */
+    expect(report.shelvesWithEnoughLikes).toBeGreaterThan(40);
     expect(report.lovedSlotsPerEligibleShelf).toBeGreaterThanOrEqual(4);
     expect(report.lovedQuotaMetShare).toBeGreaterThan(0.9);
+  });
+
+  it("varies how much liked music each rebuild carries", () => {
+    // A fixed share put exactly the same number of liked songs on every
+    // rebuild, which reads as mechanical — "always precisely four" is the most
+    // obvious possible tell that a shelf is generated.
+    expect(report.lovedMin).toBeGreaterThanOrEqual(4);
+    expect(report.lovedMax).toBeGreaterThan(report.lovedMin);
+    expect(report.lovedDistinctCounts).toBeGreaterThanOrEqual(3);
   });
 
   it("attributes where familiar slots come from", () => {
