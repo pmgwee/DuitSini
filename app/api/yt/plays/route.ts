@@ -3,8 +3,16 @@ import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getGoogleAccessToken } from "@/lib/google/tokens";
 import { LIKED_MUSIC_ID, listPlaylistTracks } from "@/lib/google/youtube";
-import { buildShelf } from "@/lib/music/recommend";
+import { buildShelf, type ShelfDiagnostics } from "@/lib/music/recommend";
 import {
+  loadExposure,
+  loadListenEvents,
+  loadTrackLanguages,
+  recordImpressions,
+  saveTrackLanguages,
+} from "@/lib/music/events-store";
+import {
+  loadEverPlayed,
   loadHistory,
   loadLikes,
   loadSuppressions,
@@ -34,6 +42,8 @@ export interface ListenAgainResponse {
    *  minute" rather than wiping the list. */
   throttled?: boolean;
   retry_after_s?: number;
+  /** True when candidate generation produced nothing and history was served. */
+  degraded?: boolean;
 }
 
 const SHELF_CAP = 40;
@@ -99,10 +109,23 @@ export async function GET() {
     });
   }
 
-  const [history, likes, suppressions] = await Promise.all([
+  const [history, likes, suppressions, everPlayed] = await Promise.all([
     loadHistory(supabase, user.id),
     loadLikes(supabase, user.id),
     loadSuppressions(supabase, user.id),
+    loadEverPlayed(supabase, user.id),
+  ]);
+
+  // Exposure and events come from the immutable stream (migration 0021). Both
+  // degrade to empty when the tables are absent, in which case `buildShelf`
+  // projects exposure from the aggregates instead — a thinner memory, but still
+  // one that knows what has ever been played.
+  const [exposure, listenEvents, languageHints] = await Promise.all([
+    loadExposure(supabase, user.id, everPlayed, now),
+    loadListenEvents(supabase, user.id),
+    // Labels for tracks already in history: the learned language mix is built
+    // from what was PLAYED, so those are the ones whose labels must be right.
+    loadTrackLanguages(supabase, [...everPlayed]),
   ]);
 
   // A like alone is enough to build a shelf from — the listener has told us
@@ -114,21 +137,65 @@ export async function GET() {
       ...suppressions.snoozedUntil.keys(),
     ]);
     let tracks: MusicTrack[] = [];
+    let diagnostics: ShelfDiagnostics | null = null;
     try {
-      tracks = await buildShelf(history, {
+      const shelf = await buildShelf(history, {
         limit: SHELF_CAP,
         transitionBias,
         likes,
         suppressed,
+        everPlayed,
+        exposure,
+        listenEvents,
+        languageHints,
       });
+      tracks = shelf.tracks;
+      diagnostics = shelf.diagnostics;
+
+      // Record what was SHOWN, not just what was played. This is the memory the
+      // recommender never had: "offered twelve times, ignored eleven" is what
+      // separates a track the listener is tired of from one they have not met.
+      // Fire-and-forget — a lost impression slightly under-counts fatigue and
+      // must never delay the shelf.
+      void saveTrackLanguages(
+        supabase,
+        // The label's OWN confidence, never a flat 1. Storing a weak
+        // Latin-script guess as certainty would make it outrank every future
+        // inference — the hint would permanently beat better evidence.
+        new Map(
+          shelf.slots.map((slot) => [
+            slot.videoId,
+            { language: slot.language, confidence: slot.languageConfidence },
+          ]),
+        ),
+      );
+
+      void recordImpressions(
+        supabase,
+        user.id,
+        crypto.randomUUID(),
+        shelf.slots.map((slot) => ({
+          videoId: slot.videoId,
+          position: slot.position,
+          pool: slot.pool,
+          source: slot.source,
+          retrievalRank: slot.retrievalRank,
+          language: slot.language,
+          score: slot.total,
+        })),
+      );
     } catch (err) {
       // Recommendation must never take the dashboard down.
       console.error("[yt/plays] shelf build failed:", (err as Error)?.message ?? err);
     }
 
     // If every source failed (network, IP block, shape change) fall back to the
-    // old recency behaviour so the widget still plays something.
+    // old recency behaviour so the widget still plays something. This is a
+    // 100%-familiar shelf, so it is FLAGGED rather than served silently — an
+    // unmeasured fallback is indistinguishable from the repetition bug itself.
+    let degraded = false;
     if (tracks.length === 0) {
+      degraded = true;
       tracks = history.slice(0, SHELF_CAP).map((entry) => ({
         videoId: entry.videoId,
         title: entry.title,
@@ -137,9 +204,20 @@ export async function GET() {
         source: "local" as const,
       }));
     }
+    if (degraded || (diagnostics && diagnostics.emptySources.length > 0)) {
+      console.warn(
+        "[yt/plays] degraded shelf:",
+        JSON.stringify({
+          degraded,
+          emptySources: diagnostics?.emptySources.length ?? 0,
+          backfilled: diagnostics?.backfilled ?? 0,
+          candidates: diagnostics?.candidateCount ?? 0,
+        }),
+      );
+    }
 
     pruneShelfCache(now);
-    const body: ListenAgainResponse = { tracks, seeded: false };
+    const body: ListenAgainResponse = { tracks, seeded: false, degraded };
     shelfCache.set(user.id, { at: now, body });
     return NextResponse.json<ListenAgainResponse>(body);
   }
@@ -158,7 +236,7 @@ export async function GET() {
     if (liked && liked.length > 0) {
       let tracks: MusicTrack[] = [];
       try {
-        tracks = await buildShelf([], { limit: SHELF_CAP, coldStart: shuffle(liked) });
+        tracks = (await buildShelf([], { limit: SHELF_CAP, coldStart: shuffle(liked) })).tracks;
       } catch (err) {
         console.error("[yt/plays] cold-start build failed:", (err as Error)?.message ?? err);
       }

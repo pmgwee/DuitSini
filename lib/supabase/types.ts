@@ -303,6 +303,42 @@ export type Database = {
         }
         Relationships: []
       }
+      music_play_events: {
+        Row: {
+          duration_ratio: number
+          id: number
+          occurred_at: string
+          origin: string
+          outcome: string
+          session_id: string | null
+          surface: string
+          user_id: string
+          video_id: string
+        }
+        Insert: {
+          duration_ratio?: number
+          id?: never
+          occurred_at?: string
+          origin?: string
+          outcome?: string
+          session_id?: string | null
+          surface?: string
+          user_id: string
+          video_id: string
+        }
+        Update: {
+          duration_ratio?: number
+          id?: never
+          occurred_at?: string
+          origin?: string
+          outcome?: string
+          session_id?: string | null
+          surface?: string
+          user_id?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
       music_plays: {
         Row: {
           channel: string
@@ -341,6 +377,51 @@ export type Database = {
           thumbnail?: string | null
           title?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      music_impressions: {
+        Row: {
+          build_id: string
+          id: number
+          language: string
+          model_version: string
+          pool: string
+          position: number
+          retrieval_rank: number
+          score: number
+          shown_at: string
+          source: string
+          user_id: string
+          video_id: string
+        }
+        Insert: {
+          build_id: string
+          id?: never
+          language?: string
+          model_version?: string
+          pool?: string
+          position: number
+          retrieval_rank?: number
+          score?: number
+          shown_at?: string
+          source?: string
+          user_id: string
+          video_id: string
+        }
+        Update: {
+          build_id?: string
+          id?: never
+          language?: string
+          model_version?: string
+          pool?: string
+          position?: number
+          retrieval_rank?: number
+          score?: number
+          shown_at?: string
+          source?: string
+          user_id?: string
+          video_id?: string
         }
         Relationships: []
       }
@@ -391,6 +472,30 @@ export type Database = {
           kind?: string
           until?: string | null
           user_id?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
+      music_track_language: {
+        Row: {
+          confidence: number
+          evidence: Json
+          language: string
+          updated_at: string
+          video_id: string
+        }
+        Insert: {
+          confidence?: number
+          evidence?: Json
+          language: string
+          updated_at?: string
+          video_id: string
+        }
+        Update: {
+          confidence?: number
+          evidence?: Json
+          language?: string
+          updated_at?: string
           video_id?: string
         }
         Relationships: []
@@ -868,6 +973,7 @@ export type Database = {
         Returns: undefined
       }
     }
+      prune_music_exposure: { Args: { p_days?: number }; Returns: undefined }
     Enums: {
       billing_cycle:
         | "weekly"

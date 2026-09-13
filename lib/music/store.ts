@@ -41,6 +41,36 @@ export async function loadHistory(supabase: Client, userId: string): Promise<His
   }));
 }
 
+/**
+ * Every videoId this listener has ever played — ids only, no window.
+ *
+ * `loadHistory` caps at 60 rows because it carries full metadata for seeding.
+ * That cap silently became the recommender's entire memory: a track played 200
+ * times last year fell outside it and was then indistinguishable from a song
+ * the listener had never heard, so the shelf kept "discovering" its own back
+ * catalogue. Ids are cheap — a few thousand rows is tens of kilobytes — so the
+ * durable answer to "have they heard this?" is always available.
+ */
+export async function loadEverPlayed(supabase: Client, userId: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; from < 20_000; from += PAGE) {
+    const { data, error } = await supabase
+      .from("music_plays")
+      .select("video_id")
+      .eq("user_id", userId)
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.error("[music/store] ever-played load failed:", error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    for (const row of data) ids.add(row.video_id);
+    if (data.length < PAGE) break;
+  }
+  return ids;
+}
+
 /** Every track the listener has liked, newest first. `[]` on any error. */
 export async function loadLikes(supabase: Client, userId: string): Promise<LikedTrack[]> {
   const { data, error } = await supabase

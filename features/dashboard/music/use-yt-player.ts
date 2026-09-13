@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { YTPlayer } from "@/types/youtube";
 import type { MusicTrack } from "@/types/music";
+import type { PlayOrigin, PlayOutcome } from "@/lib/music/exposure";
 
 const API_SRC = "https://www.youtube.com/iframe_api";
 
@@ -113,6 +114,17 @@ export function useYTPlayer(
   // Set when a track reached its natural end, so the outgoing-track check
   // doesn't also report it as a skip.
   const completedRef = useRef(false);
+  // How the CURRENT track started. A play the listener chose and one the queue
+  // advanced into are not equal evidence of preference, and recording both as
+  // "played" is how a long background session rewrites the taste profile.
+  const originRef = useRef<PlayOrigin>("manual");
+  // Groups this browsing session's events, so session-level behaviour (an exit
+  // right after a recommendation) stays reconstructable.
+  const sessionIdRef = useRef<string>(
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
 
   // Warm up the IFrame API on mount so the first play can create the player
   // within the click gesture — keeping autoplay allowed.
@@ -225,25 +237,48 @@ export function useYTPlayer(
   const registerSlot = useCallback((el: HTMLElement | null) => setSlotEl(el), []);
 
   /**
-   * Report a skip or completion. Fire-and-forget: the recommender degrades
+   * Report the outcome of a play. Fire-and-forget: the recommender degrades
    * gracefully without these, so a failed request must never disturb playback.
+   *
+   * `signal` stays for the aggregate counters and the transition model, which
+   * only understand skip/complete. `outcome`, `origin` and `durationRatio` carry
+   * the detail the event stream needs — the difference between a track killed
+   * after four seconds, one left half-finished, and one played to the end, and
+   * whether the listener chose it or the queue handed it to them.
    */
   const emitSignal = useCallback(
-    (videoId: string, signal: "skip" | "complete", from: string | null) => {
+    (
+      videoId: string,
+      signal: "skip" | "complete",
+      from: string | null,
+      detail?: { outcome: PlayOutcome; origin: PlayOrigin; durationRatio: number },
+    ) => {
       void fetch("/api/yt/signals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoId, signal, from }),
+        body: JSON.stringify({
+          videoId,
+          signal,
+          from,
+          surface: "listen-again",
+          sessionId: sessionIdRef.current,
+          ...detail,
+        }),
       }).catch(() => {});
     },
     [],
   );
 
   /**
-   * Judge the track we're leaving. Abandoning inside the first 30 seconds is
-   * the strongest negative signal both Spotify and Apple Music record, so it's
-   * the threshold we use too. A track that ended naturally is handled by the
-   * ENDED branch and flagged here so it isn't double-counted.
+   * Judge the track we're leaving.
+   *
+   * Abandoning inside the first 30 seconds stays the strongest negative signal,
+   * as both Spotify and Apple Music treat it. What changed is everything after
+   * 30 seconds: that used to be recorded as NOTHING — neither skip nor
+   * completion — so leaving at 0:31 and listening to 95% were the same event,
+   * which is to say both were invisible. Now a late abandon is a weak negative
+   * and a substantial listen is a real positive, separated by how much of the
+   * track actually played.
    */
   const settleOutgoing = useCallback(() => {
     if (completedRef.current) {
@@ -253,18 +288,45 @@ export function useYTPlayer(
     const outgoing = queueRef.current[indexRef.current];
     if (!outgoing || !startedAtRef.current) return;
     const playedMs = Date.now() - startedAtRef.current;
+    const player = playerRef.current;
+    const totalSec = player?.getDuration?.() || 0;
+    const playedSec = playedMs / 1000;
+    const ratio = totalSec > 0 ? Math.max(0, Math.min(1, playedSec / totalSec)) : 0;
+    const origin = originRef.current;
+
     if (playedMs < 30_000) {
-      emitSignal(outgoing.videoId, "skip", previousIdRef.current);
+      emitSignal(outgoing.videoId, "skip", previousIdRef.current, {
+        outcome: "early_skip",
+        origin,
+        durationRatio: ratio,
+      });
+      return;
     }
+    // Past the skip window. Half the track is the line between "listened to it
+    // and moved on" and "gave up on it"; only the former is evidence of taste.
+    if (ratio >= 0.5) {
+      emitSignal(outgoing.videoId, "complete", previousIdRef.current, {
+        outcome: "substantial",
+        origin,
+        durationRatio: ratio,
+      });
+      return;
+    }
+    emitSignal(outgoing.videoId, "skip", previousIdRef.current, {
+      outcome: "late_skip",
+      origin,
+      durationRatio: ratio,
+    });
   }, [emitSignal]);
 
   const playIndex = useCallback(
-    (i: number) => {
+    (i: number, origin: PlayOrigin = "manual") => {
       const track = queueRef.current[i];
       const player = playerRef.current;
       if (!track || !player) return;
       settleOutgoing();
       previousIdRef.current = queueRef.current[indexRef.current]?.videoId ?? null;
+      originRef.current = origin;
       indexRef.current = i;
       setIndex(i);
       setCurrent(track);
@@ -276,9 +338,9 @@ export function useYTPlayer(
   );
 
   const skip = useCallback(
-    (delta: number) => {
+    (delta: number, origin: PlayOrigin = "manual") => {
       const next = indexRef.current + delta;
-      if (next >= 0 && next < queueRef.current.length) playIndex(next);
+      if (next >= 0 && next < queueRef.current.length) playIndex(next, origin);
     },
     [playIndex],
   );
@@ -399,22 +461,29 @@ export function useYTPlayer(
                         finished.videoId,
                         "complete",
                         previousIdRef.current,
+                        {
+                          outcome: "completed",
+                          // How this track STARTED, which is what decides how
+                          // much the completion is worth as taste evidence.
+                          origin: originRef.current,
+                          durationRatio: 1,
+                        },
                       );
                     }
                     // At the tail of the queue, extend the station instead of
                     // stopping — this is what makes playback endless.
                     if (indexRef.current >= queueRef.current.length - 1) {
                       void extendQueueRef.current().then((extended) => {
-                        if (extended) skip(1);
+                        if (extended) skip(1, "radio");
                       });
                     } else {
-                      skip(1);
+                      skip(1, "autoplay");
                     }
                   }
                 },
                 onError: (e) => {
                   // 2/5 invalid, 100 removed/private, 101/150 embed blocked.
-                  if ([2, 5, 100, 101, 150].includes(e.data)) skip(1);
+                  if ([2, 5, 100, 101, 150].includes(e.data)) skip(1, "autoplay");
                 },
               },
             });

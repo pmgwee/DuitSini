@@ -70,6 +70,16 @@ const useDockLayoutEffect =
  * component, which clears the slot — the video parks off-screen and keeps
  * playing, surfaced instead by the floating mini-bar.
  */
+/**
+ * How long a built shelf may keep being served to the same browser.
+ *
+ * Six hours keeps a listening session — and a working day — entirely stable
+ * while guaranteeing the shelf is rebuilt across sessions. The server-side
+ * 60-second cooldown still caps the InnerTube fan-out, so a remount inside the
+ * window is cheap even when it does refetch.
+ */
+const SHELF_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
 export function MusicWidget() {
   const [shelf, setShelf] = useState<Shelf>("listen");
   const [openPlaylist, setOpenPlaylist] = useState<MusicPlaylist | null>(null);
@@ -131,16 +141,23 @@ export function MusicWidget() {
    * "Update with your new likes" button below, which only appears once a
    * like/skip would actually change the result. Both call `refreshShelf`.
    *
-   * `staleTime: Infinity` + no refetch-on-focus enforces the freeze: within a
-   * session the only way to rebuild is `listenAgain.refetch()` (and the GET
-   * route cools the ~19-call InnerTube fan-out to once a minute, returning the
-   * last shelf unchanged within the window).
+   * Stability within a session is right; permanence is not. `staleTime:
+   * Infinity` meant a desktop session left open for days displayed the identical
+   * forty tracks for ever, with no rebuild unless the listener noticed the
+   * refresh control. That is half of the reported "same songs on a loop" —
+   * the algorithmic half cannot be observed while the list itself never moves.
+   *
+   * So the shelf now has a bounded AGE rather than infinite freshness. Focus
+   * and reconnect refetches stay off, which is what actually protects an active
+   * session: nothing swaps the list while the listener is using it. The shelf
+   * is only rebuilt when the component mounts and the data is older than
+   * SHELF_MAX_AGE_MS — in practice the next visit to the page on a later day.
    */
   const listenAgain = useQuery({
     queryKey: ["yt", "listen-again"],
     queryFn: () =>
       getJSON<ListenAgainResponse>("/api/yt/plays", { tracks: [], seeded: false }),
-    staleTime: Infinity,
+    staleTime: SHELF_MAX_AGE_MS,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
@@ -160,9 +177,9 @@ export function MusicWidget() {
   /** True once a signal has landed that the next rebuild will act on. */
   const [pendingSignals, setPendingSignals] = useState(false);
   /**
-   * A user-initiated rebuild is in flight. `staleTime: Infinity` + no
-   * background refetch means `isFetching` only ever flips true here via the
-   * "Update with your new likes" button — so this is exactly the window we
+   * A user-initiated rebuild is in flight. With focus/reconnect refetches off,
+   * `isFetching` flips true here via the "Update with your new likes" button
+   * or a mount past the shelf's max age — so this is exactly the window we
    * want covered by a spinner (the old list is stale data react-query keeps
    * painting otherwise). `!isLoading` keeps it off the first paint.
    */

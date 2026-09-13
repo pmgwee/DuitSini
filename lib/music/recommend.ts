@@ -6,7 +6,28 @@ import {
   fetchRelated,
   extendRadio,
 } from "./sources";
-import { assemble, pickSeeds, primaryArtist, score, type ScoreContext } from "./ranking";
+import { pickSeeds, primaryArtist, relevance } from "./ranking";
+import {
+  assembleSlate,
+  type ListenerState,
+  type ScoredCandidate,
+  type SlatePool,
+} from "./objective";
+import {
+  exposureFromHistory,
+  type ExposureRecord,
+  isDeliberate,
+  isMeaningful,
+  type ListenEvent,
+} from "./exposure";
+import {
+  inferLanguage,
+  learnLanguageMix,
+  LEARNING_CONFIDENCE,
+  type LanguageLabel,
+  type LanguageObservation,
+  type VocalLanguage,
+} from "./language";
 import { sequence } from "./similarity";
 import { ensureTagVectors } from "./tags";
 import { createDbTagStore } from "./tags-store";
@@ -42,6 +63,17 @@ const LIKE_FANOUT = 4;
 const LIKE_SEED_WEIGHT = 3;
 /** How often the liked-fanout rotation advances (cycles through all likes over time). */
 const LIKE_ROTATION_MS = 2 * 60_000;
+/**
+ * Retrieval reserved for candidates OUTSIDE the taste neighbourhood.
+ *
+ * The old epsilon sampled the unused tail of the same generated pool, so it
+ * could only reorder what retrieval had already decided to fetch. Exploration
+ * that cannot reach a track the ranker never saw is not exploration. These
+ * fan out from the FAR end of the similar-artist and playlist lists — one hop
+ * further from the seed than the adjacent layer.
+ */
+const EXPLORATION_ARTIST_FANOUT = 1;
+const EXPLORATION_PLAYLIST_FANOUT = 1;
 
 class CandidatePool {
   private readonly byId = new Map<string, Candidate>();
@@ -107,6 +139,70 @@ export interface ShelfOptions {
    * back at them, which is precisely the loop this recommender exists to break.
    */
   coldStart?: MusicTrack[];
+  /**
+   * Durable exposure memory. When omitted it is projected from `history`, which
+   * keeps the pipeline working before the event stream has data — but a
+   * projection of a 60-row window cannot know about older plays, so the caller
+   * should pass `everPlayed` too.
+   */
+  exposure?: ReadonlyMap<string, ExposureRecord>;
+  /**
+   * Every videoId this listener has ever played, unwindowed. This is the fix
+   * for the defect where a track played 200 times last year scored identically
+   * to one they had never heard.
+   */
+  everPlayed?: ReadonlySet<string>;
+  /** Deliberate positive plays used to learn the language mix. */
+  listenEvents?: readonly ListenEvent[];
+  /** videoId -> last time it was used as a shelf seed (radio cooldown). */
+  seedCooldown?: ReadonlyMap<string, number>;
+  /** Cached constrained-vocabulary tags, used as language evidence. */
+  tagsByTrack?: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Previously stored language labels. A stored label wins when it is more
+   * confident than what title evidence alone can produce — that is how a
+   * corroborated label (tags, or a future declared source) outlives the build
+   * that discovered it.
+   */
+  languageHints?: ReadonlyMap<string, { language: VocalLanguage; confidence: number }>;
+}
+
+/** One served slot, with everything needed to audit or learn from it later. */
+export interface ShelfSlot {
+  videoId: string;
+  position: number;
+  pool: SlatePool;
+  /** Retrieval origin of the strongest occurrence. */
+  source: string;
+  retrievalRank: number;
+  language: VocalLanguage;
+  /** How much to trust `language`. Carried so a weak guess is never stored as certainty. */
+  languageConfidence: number;
+  relevance: number;
+  readiness: number;
+  total: number;
+  everPlayed: boolean;
+}
+
+export interface ShelfDiagnostics {
+  candidateCount: number;
+  unseenCandidateCount: number;
+  /** Slots a quota could not fill from its own pool — a silent-collapse alarm. */
+  backfilled: number;
+  poolCounts: Record<string, number>;
+  /** Candidate-stage language availability, before ranking. */
+  candidateLanguages: Record<string, number>;
+  slateLanguages: Record<string, number>;
+  languageTarget: Record<string, number>;
+  seedIds: string[];
+  /** Sources that returned nothing. A silent InnerTube failure must be visible. */
+  emptySources: string[];
+}
+
+export interface ShelfResult {
+  tracks: MusicTrack[];
+  slots: ShelfSlot[];
+  diagnostics: ShelfDiagnostics;
 }
 
 /**
@@ -133,6 +229,57 @@ function mergeLikesIntoHistory(history: HistoryEntry[], likes: LikedTrack[]): Hi
   return [...history, ...extra];
 }
 
+/** Label a set of tracks, using cached tags as corroborating evidence. */
+export function labelLanguages(
+  tracks: readonly MusicTrack[],
+  tagsByTrack?: ReadonlyMap<string, readonly string[]>,
+  hints?: ReadonlyMap<string, { language: VocalLanguage; confidence: number }>,
+): Map<string, LanguageLabel> {
+  const labels = new Map<string, LanguageLabel>();
+  for (const track of tracks) {
+    const inferred = inferLanguage({
+      title: track.title,
+      channel: track.channel,
+      tags: tagsByTrack?.get(track.videoId),
+    });
+    const hint = hints?.get(track.videoId);
+    labels.set(
+      track.videoId,
+      hint && hint.confidence > inferred.confidence
+        ? { language: hint.language, confidence: hint.confidence, evidence: [] }
+        : inferred,
+    );
+  }
+  return labels;
+}
+
+/**
+ * Turn playback events into language observations.
+ *
+ * Only meaningful outcomes count, and an autoplay start is damped rather than
+ * dropped: it is weak evidence, not no evidence. Treating every autoplay start
+ * as a full endorsement is how a long background session used to rewrite the
+ * taste profile toward whatever the station happened to play.
+ */
+function languageObservations(
+  events: readonly ListenEvent[],
+  labels: ReadonlyMap<string, LanguageLabel>,
+): LanguageObservation[] {
+  const observations: LanguageObservation[] = [];
+  for (const event of events) {
+    if (!isMeaningful(event.outcome)) continue;
+    const label = labels.get(event.videoId);
+    if (!label || label.language === "unknown") continue;
+    // A coin-flip label must not train the long-term target: the target then
+    // steers retrieval, which produces more of the same label, which confirms
+    // it. That feedback loop is cheap to prevent and expensive to detect.
+    if (label.confidence < LEARNING_CONFIDENCE) continue;
+    const weight = (isDeliberate(event.origin) ? 1 : 0.3) * (event.outcome === "completed" ? 1 : 0.6);
+    observations.push({ language: label.language, at: event.at, weight });
+  }
+  return observations;
+}
+
 /**
  * Build the discovery shelf from the listener's own history.
  *
@@ -146,7 +293,7 @@ function mergeLikesIntoHistory(history: HistoryEntry[], likes: LikedTrack[]): Hi
 export async function buildShelf(
   history: HistoryEntry[],
   options: ShelfOptions = {},
-): Promise<MusicTrack[]> {
+): Promise<ShelfResult> {
   const {
     limit = 40,
     now = Date.now(),
@@ -155,8 +302,30 @@ export async function buildShelf(
     likes = [],
     suppressed = new Set<string>(),
     coldStart = [],
+    exposure,
+    everPlayed = new Set<string>(),
+    listenEvents = [],
+    seedCooldown,
+    tagsByTrack,
+    languageHints,
   } = options;
-  if (history.length === 0 && likes.length === 0 && coldStart.length === 0) return [];
+  const emptySources: string[] = [];
+  const empty = (): ShelfResult => ({
+    tracks: [],
+    slots: [],
+    diagnostics: {
+      candidateCount: 0,
+      unseenCandidateCount: 0,
+      backfilled: 0,
+      poolCounts: {},
+      candidateLanguages: {},
+      slateLanguages: {},
+      languageTarget: {},
+      seedIds: [],
+      emptySources,
+    },
+  });
+  if (history.length === 0 && likes.length === 0 && coldStart.length === 0) return empty();
 
   const likeIds = new Set(likes.map((l) => l.videoId));
   let seedPool = mergeLikesIntoHistory(history, likes);
@@ -177,8 +346,12 @@ export async function buildShelf(
     }));
   }
 
-  const seeds = pickSeeds(seedPool, SEED_COUNT, now, random, likeIds);
-  if (seeds.length === 0) return [];
+  const seeds = pickSeeds(seedPool, SEED_COUNT, now, {
+    random,
+    likes: likeIds,
+    seedCooldown,
+  });
+  if (seeds.length === 0) return empty();
 
   const pool = new CandidatePool();
 
@@ -186,8 +359,10 @@ export async function buildShelf(
   const radios = await settle(seeds.map((seed) => fetchRadio(seed.videoId)));
   radios.forEach((radio, index) => {
     const seed = seeds[index];
+    if (radio.tracks.length === 0) emptySources.push(`radio:${radio.seedId}`);
     pool.addMany(radio.tracks, radio.seedId, "radio", seed?.playCount ?? 1);
   });
+  if (radios.length < seeds.length) emptySources.push(`radio:failed:${seeds.length - radios.length}`);
 
   // --- Stage 1b: the related page across ALL seeds (not just the strongest) --
   // Fetching related per seed (one call each, parallel) means the similar-artist
@@ -237,10 +412,33 @@ export async function buildShelf(
     ),
   ]);
   for (const batch of artistBatches) {
+    if (batch.tracks.length === 0) emptySources.push(`artist:${batch.id}`);
     pool.addMany(batch.tracks, `artist:${batch.id}`, "similar-artist", 1);
   }
   for (const batch of playlistBatches) {
+    if (batch.tracks.length === 0) emptySources.push(`playlist:${batch.id}`);
     pool.addMany(batch.tracks, `playlist:${batch.id}`, "editorial", 1);
+  }
+
+  // --- Stage 1c-bis: exploration retrieval ----------------------------------
+  // Deliberately drawn from the FAR end of the adjacency lists — the artists and
+  // playlists the taste-close layer did not reach. These ids are marked so the
+  // assembler can spend its exploration quota on candidates the ranking would
+  // otherwise never have seen, rather than on the tail of its own output.
+  const explorationIds = new Set<string>();
+  const explorationArtistIds = similarArtistIds.slice(SIMILAR_ARTIST_FANOUT).slice(-EXPLORATION_ARTIST_FANOUT);
+  const explorationPlaylistIds = playlistIds.slice(EDITORIAL_FANOUT).slice(-EXPLORATION_PLAYLIST_FANOUT);
+  const [exploreArtists, explorePlaylists] = await Promise.all([
+    settle(explorationArtistIds.map(async (id) => ({ id, tracks: await fetchArtistSongs(id) }))),
+    settle(explorationPlaylistIds.map(async (id) => ({ id, tracks: await fetchPlaylistTracks(id) }))),
+  ]);
+  for (const batch of exploreArtists) {
+    for (const track of batch.tracks) explorationIds.add(track.videoId);
+    pool.addMany(batch.tracks, `explore-artist:${batch.id}`, "similar-artist", 1);
+  }
+  for (const batch of explorePlaylists) {
+    for (const track of batch.tracks) explorationIds.add(track.videoId);
+    pool.addMany(batch.tracks, `explore-playlist:${batch.id}`, "editorial", 1);
   }
 
   // --- Stage 1d: liked-track fanout (taste-signal fidelity) ------------------
@@ -270,18 +468,68 @@ export async function buildShelf(
     }
   }
 
-  if (pool.size === 0) return [];
+  if (pool.size === 0) return empty();
 
   // --- Stage 2: rank and assemble -------------------------------------------
   // Suppressed tracks are DROPPED, not down-ranked: a listener who said "not
   // this" should not have to keep saying it.
-  const context: ScoreContext = { history: toHistoryMap(seedPool), likes: likeIds, now };
-  const scored = pool
+  const candidates = pool
     .values()
-    .filter((candidate) => !suppressed.has(candidate.track.videoId))
-    .map((candidate) => ({ candidate, value: score(candidate, context) }));
+    .filter((candidate) => !suppressed.has(candidate.track.videoId));
 
-  if (scored.length === 0) return [];
+  if (candidates.length === 0) return empty();
+
+  // Relevance is now pure source evidence. Everything about the listener —
+  // affinity, exposure, readiness, language — is applied by the objective, so
+  // the two cannot silently trade off inside one multiplied number.
+  const scored: ScoredCandidate[] = candidates.map((candidate) => ({
+    candidate,
+    value: relevance(candidate),
+  }));
+
+  const labels = labelLanguages(
+    candidates.map((c) => c.track),
+    tagsByTrack,
+    languageHints,
+  );
+  // History tracks need labels too: the learned mix is built from what the
+  // listener PLAYED, not from what happens to be in today's candidate pool.
+  for (const entry of seedPool) {
+    if (labels.has(entry.videoId)) continue;
+    labels.set(
+      entry.videoId,
+      inferLanguage({ title: entry.title, channel: entry.channel, tags: tagsByTrack?.get(entry.videoId) }),
+    );
+  }
+
+  const languageTarget = learnLanguageMix(languageObservations(listenEvents, labels), { now });
+
+  // Exposure: event-derived when available, otherwise projected from the
+  // aggregate. `everPlayed` is unwindowed either way.
+  const exposureMap =
+    exposure ??
+    exposureFromHistory(
+      seedPool.map((entry) => ({
+        videoId: entry.videoId,
+        playCount: entry.playCount,
+        completeCount: entry.completeCount,
+        skipCount: entry.skipCount,
+        lastPlayedAt: entry.lastPlayedAt,
+      })),
+      everPlayed,
+    );
+
+  const listener: ListenerState = {
+    exposure: exposureMap,
+    likes: likeIds,
+    now,
+    languages: labels,
+    languageTarget,
+    // Artists the listener has explicitly liked get a relaxed per-artist cap —
+    // endorsed taste, not the clumping the cap exists to prevent.
+    endorsedArtists: new Set(likes.map((l) => primaryArtist(l.channel))),
+    explorationIds,
+  };
 
   // Position-aware: open on the track the listener played most recently, so the
   // shelf starts on something trusted before it asks them to explore.
@@ -295,11 +543,7 @@ export async function buildShelf(
       }
     : null;
 
-  // Artists the listener has explicitly liked get a relaxed per-artist cap — an
-  // endorsed artist is taste the listener asked for more of, not the clumping the
-  // cap exists to prevent. Derived from the listener's own likes, never a list.
-  const endorsedArtists = new Set(likes.map((l) => primaryArtist(l.channel)));
-  const slate = assemble(scored, { limit, opener, random, endorsedArtists });
+  const assembled = assembleSlate(scored, { limit, listener, opener, random });
 
   // --- Stage 3: sequence for smooth transitions ------------------------------
   // Tag the final SLATE (not the whole pool) so cold tracks — pairs that share
@@ -307,10 +551,64 @@ export async function buildShelf(
   // the LLM tag prior. Cached per track, so only the first build pays the GLM
   // cost; a missing/failed tag just falls back to pure co-occurrence.
   const tagVectors = await ensureTagVectors(
-    slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
+    assembled.tracks.map((c) => ({
+      videoId: c.track.videoId,
+      title: c.track.title,
+      channel: c.track.channel,
+    })),
     createDbTagStore(),
   );
-  return sequence(slate, 0, { transitionBias, tagVectors }).map((candidate) => candidate.track);
+  const ordered = sequence(assembled.tracks, 0, { transitionBias, tagVectors });
+
+  const breakdownById = new Map(
+    assembled.slots.map((slot) => [slot.candidate.track.videoId, slot]),
+  );
+  const slots: ShelfSlot[] = ordered.map((candidate, position) => {
+    const slot = breakdownById.get(candidate.track.videoId);
+    const best = candidate.occurrences[0];
+    return {
+      videoId: candidate.track.videoId,
+      position,
+      pool: slot?.pool ?? "adjacent-discovery",
+      source: best?.sourceId ?? "opener",
+      retrievalRank: best?.rank ?? -1,
+      language: labels.get(candidate.track.videoId)?.language ?? "unknown",
+      languageConfidence: labels.get(candidate.track.videoId)?.confidence ?? 0,
+      relevance: slot?.breakdown.relevance ?? 0,
+      readiness: slot?.breakdown.readiness ?? 1,
+      total: slot?.breakdown.total ?? 0,
+      everPlayed: exposureMap.get(candidate.track.videoId)?.everPlayed ?? false,
+    };
+  });
+
+  const countBy = <T>(values: readonly T[]): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const value of values) {
+      const key = String(value);
+      out[key] = (out[key] ?? 0) + 1;
+    }
+    return out;
+  };
+
+  return {
+    tracks: ordered.map((candidate) => candidate.track),
+    slots,
+    diagnostics: {
+      candidateCount: candidates.length,
+      unseenCandidateCount: candidates.filter(
+        (c) => !exposureMap.get(c.track.videoId)?.everPlayed,
+      ).length,
+      backfilled: assembled.backfilled,
+      poolCounts: Object.fromEntries([...assembled.poolCounts].map(([k, v]) => [k, v])),
+      candidateLanguages: countBy(
+        candidates.map((c) => labels.get(c.track.videoId)?.language ?? "unknown"),
+      ),
+      slateLanguages: countBy(slots.map((slot) => slot.language)),
+      languageTarget: Object.fromEntries([...languageTarget].map(([k, v]) => [k, v])),
+      seedIds: seeds.map((seed) => seed.videoId),
+      emptySources,
+    },
+  };
 }
 
 export interface RadioOptions {
@@ -324,6 +622,10 @@ export interface RadioOptions {
   likes?: Set<string>;
   /** Tracks to remove entirely (not-interested / active snooze). */
   suppressed?: Set<string>;
+  /** Durable exposure memory; projected from `history` when omitted. */
+  exposure?: ReadonlyMap<string, ExposureRecord>;
+  /** Unwindowed set of everything ever played. */
+  everPlayed?: ReadonlySet<string>;
 }
 
 /**
@@ -358,8 +660,7 @@ export async function buildRadio(
   const pool = new CandidatePool();
   pool.addMany(radio.tracks, radio.seedId, "radio", 1);
 
-  const context: ScoreContext = { history: historyMap, likes, now };
-  const scored = pool
+  const kept = pool
     .values()
     .filter((candidate) => !excluded.has(candidate.track.videoId))
     .filter((candidate) => !suppressed.has(candidate.track.videoId))
@@ -368,14 +669,48 @@ export async function buildRadio(
     .filter((candidate) => {
       const skips = historyMap.get(candidate.track.videoId)?.skipCount ?? 0;
       return skips === 0 || likes.has(candidate.track.videoId);
-    })
-    .map((candidate) => ({ candidate, value: score(candidate, context) }));
+    });
+  const scored: ScoredCandidate[] = kept.map((candidate) => ({
+    candidate,
+    value: relevance(candidate),
+  }));
 
   if (scored.length === 0) return { tracks: [], continuation: radio.continuation };
 
-  // Lower epsilon than the shelf: autoplay should feel like a continuation of
-  // what's playing, not a jump somewhere new.
-  const slate = assemble(scored, { limit, epsilon: 0.05, maxPerArtist: 2 });
+  // Autoplay is deliberately more conservative than the shelf — it should feel
+  // like a continuation, not a jump. But exposure still applies: a long radio
+  // session used to bypass personalisation entirely and re-serve tracks the
+  // listener had just heard, which is the same loop by a different route.
+  const listener: ListenerState = {
+    exposure:
+      options.exposure ??
+      exposureFromHistory(
+        history.map((entry) => ({
+          videoId: entry.videoId,
+          playCount: entry.playCount,
+          completeCount: entry.completeCount,
+          skipCount: entry.skipCount,
+          lastPlayedAt: entry.lastPlayedAt,
+        })),
+        options.everPlayed ?? new Set<string>(),
+      ),
+    likes,
+    now,
+  };
+  const assembled = assembleSlate(scored, {
+    limit,
+    listener,
+    maxPerArtist: 2,
+    temperature: 0.15,
+    quotas: {
+      "familiar-anchor": 0,
+      rediscovery: 0.08,
+      "adjacent-discovery": 0.74,
+      "cross-discovery": 0.08,
+      exploration: 0.1,
+    },
+  });
+  const slate = assembled.tracks;
   const tagVectors = await ensureTagVectors(
     slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
     createDbTagStore(),
@@ -435,8 +770,7 @@ export async function buildArtistCatalog(
   const pool = new CandidatePool();
   pool.addMany(catalog, `artist:${artistId}`, "artist-catalog", 1);
 
-  const context: ScoreContext = { history: historyMap, likes, now };
-  const scored = pool
+  const kept = pool
     .values()
     .filter((candidate) => !excluded.has(candidate.track.videoId))
     .filter((candidate) => !suppressed.has(candidate.track.videoId))
@@ -444,18 +778,37 @@ export async function buildArtistCatalog(
     .filter((candidate) => {
       const skips = historyMap.get(candidate.track.videoId)?.skipCount ?? 0;
       return skips === 0 || likes.has(candidate.track.videoId);
-    })
-    .map((candidate) => ({ candidate, value: score(candidate, context) }));
+    });
+  const scored: ScoredCandidate[] = kept.map((candidate) => ({
+    candidate,
+    value: relevance(candidate),
+  }));
 
   if (scored.length === 0) return { tracks: [] };
 
-  // Pure exploitation (epsilon 0) — the listener wants the TOP songs, not deep
-  // cuts — and no per-artist cap, since one artist is the whole point.
-  const slate = assemble(scored, {
+  // The listener named this artist, so discovery quotas would fight the
+  // request: rank globally and lift the per-artist cap. Exposure still applies,
+  // so a catalog track they just heard still sinks.
+  const listener: ListenerState = {
+    exposure: exposureFromHistory(
+      history.map((entry) => ({
+        videoId: entry.videoId,
+        playCount: entry.playCount,
+        completeCount: entry.completeCount,
+        skipCount: entry.skipCount,
+        lastPlayedAt: entry.lastPlayedAt,
+      })),
+    ),
+    likes,
+    now,
+  };
+  const slate = assembleSlate(scored, {
     limit,
+    listener,
     maxPerArtist: Number.POSITIVE_INFINITY,
-    epsilon: 0,
-  });
+    ignorePools: true,
+    temperature: 0,
+  }).tracks;
   const tagVectors = await ensureTagVectors(
     slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
     createDbTagStore(),
