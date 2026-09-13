@@ -45,6 +45,7 @@ const FATIGUE_WEIGHT = 0.6;
 
 export type SlatePool =
   | "familiar-anchor"
+  | "loved"
   | "rediscovery"
   | "adjacent-discovery"
   | "cross-discovery"
@@ -59,15 +60,23 @@ export const DISCOVERY_POOLS: readonly SlatePool[] = [
 /**
  * Slate composition, as fractions so it scales with any shelf size.
  *
- * Discovery pools take 85% of the slate. That is the product decision the old
- * design never actually made: "Listen Again" was described as discovery but
- * implemented as 88% top-affinity exploitation.
+ * Discovery takes 80%. The remaining fifth is split deliberately, because
+ * "familiar" is not one thing: a track the listener HEARTED and a track that
+ * happened to autoplay past them are different claims, and pooling them is why
+ * likes vanished from the shelf. Measured on a real account: 54 likes against
+ * 680 played tracks, all competing for one 15% familiar allowance, put exactly
+ * ONE liked song on a 40-slot shelf — likes were losing on volume to their own
+ * play history.
+ *
+ * `loved` is therefore reserved and cannot be won by an unhearted track, which
+ * is what makes the guarantee hold as the play history keeps growing.
  */
 export const DEFAULT_QUOTAS: Readonly<Record<SlatePool, number>> = {
   "familiar-anchor": 0.05,
-  rediscovery: 0.1,
-  "adjacent-discovery": 0.4,
-  "cross-discovery": 0.25,
+  loved: 0.1,
+  rediscovery: 0.05,
+  "adjacent-discovery": 0.38,
+  "cross-discovery": 0.22,
   exploration: 0.2,
 };
 
@@ -134,6 +143,11 @@ export function classifyPool(
   const record = state.exposure.get(id);
   const liked = state.likes.has(id);
   const novelty = noveltyClass(record, state.now, { liked });
+
+  // An explicit like outranks every other classification. A hearted track the
+  // listener has never played is still something they asked for, so it belongs
+  // here rather than being counted as a discovery that happens to be liked.
+  if (liked) return "loved";
 
   if (novelty === "unseen") {
     if (state.explorationIds?.has(id)) return "exploration";
@@ -372,6 +386,7 @@ export function assembleSlate(
 
   const resolved: Record<SlatePool, number> = {
     "familiar-anchor": quotas["familiar-anchor"] ?? DEFAULT_QUOTAS["familiar-anchor"],
+    loved: quotas.loved ?? DEFAULT_QUOTAS.loved,
     rediscovery: quotas.rediscovery ?? DEFAULT_QUOTAS.rediscovery,
     "adjacent-discovery": quotas["adjacent-discovery"] ?? DEFAULT_QUOTAS["adjacent-discovery"],
     "cross-discovery": quotas["cross-discovery"] ?? DEFAULT_QUOTAS["cross-discovery"],
@@ -394,6 +409,9 @@ export function assembleSlate(
   // out of familiar ones, not fresh ones.
   const order: SlatePool[] = [
     "familiar-anchor",
+    // Early, so the guarantee survives a thin candidate pool: if likes are only
+    // filled from what discovery leaves behind, they are first to disappear.
+    "loved",
     "adjacent-discovery",
     "cross-discovery",
     "exploration",

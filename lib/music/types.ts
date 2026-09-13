@@ -7,6 +7,7 @@ export type CandidateOrigin =
   | "similar-artist" // top songs of an artist adjacent to the user's taste
   | "artist-catalog" // the named artist's own Songs shelf, popularity-ordered (vibe "top songs by X")
   | "editorial" // YouTube's recommended-playlist shelf
+  | "liked" // a track this listener explicitly hearted
   | "history"; // the user's own play history
 
 /** One appearance of a track in one source, at a given position. */

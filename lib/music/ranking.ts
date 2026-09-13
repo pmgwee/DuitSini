@@ -23,6 +23,7 @@ const ORIGIN_WEIGHT: Record<CandidateOrigin, number> = {
   "also-like": 0.85, // YouTube's own "more like this"
   "similar-artist": 0.6, // one hop out — adjacent taste
   editorial: 0.45, // broad curation, least personal
+  liked: 0.9, // the listener said yes to this one outright
   history: 0, // never scored as a discovery candidate
 };
 

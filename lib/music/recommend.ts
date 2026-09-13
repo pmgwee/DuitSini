@@ -54,11 +54,21 @@ import type {
 
 /** Seeds per shelf build. Each is one HTTP call; the pool grows ~50/seed. */
 const SEED_COUNT = 6;
-/** Extra one-hop sources — an adjacent artist and an editorial playlist. */
+/** Extra one-hop sources — adjacent artists and editorial playlists. */
 const SIMILAR_ARTIST_FANOUT = 2;
-const EDITORIAL_FANOUT = 1;
+/**
+ * Editorial playlists per build.
+ *
+ * One was too few in two separate ways. It capped how much curated material
+ * could reach the pool at all, and because the list was sliced from the front
+ * it was the SAME playlist every build — a deterministic source feeding a shelf
+ * that is supposed to feel different each time. Three, drawn at random from
+ * what the related pages offer (plus the exploration playlist), gives four-plus
+ * distinct playlists per build and a different set between builds.
+ */
+const EDITORIAL_FANOUT = 3;
 /** Liked-track neighbourhoods to fetch per build (taste-signal fidelity). */
-const LIKE_FANOUT = 4;
+const LIKE_FANOUT = 6;
 /** A like carries ~this many plays of seed-trust (cf. W_LIKE "≈ five completed plays"). */
 const LIKE_SEED_WEIGHT = 3;
 /** How often the liked-fanout rotation advances (cycles through all likes over time). */
@@ -74,6 +84,25 @@ const LIKE_ROTATION_MS = 2 * 60_000;
  */
 const EXPLORATION_ARTIST_FANOUT = 1;
 const EXPLORATION_PLAYLIST_FANOUT = 1;
+
+/**
+ * Pick `count` items at random, without replacement.
+ *
+ * Retrieval used `.slice(0, n)`, which is stable: the same related pages yield
+ * the same first ids, so consecutive builds fetched identical neighbourhoods
+ * and the pool barely moved. Sampling instead means the SET of sources rotates
+ * between builds, which is variety created at retrieval — where it can actually
+ * introduce something new — rather than reshuffling a fixed pool afterwards.
+ */
+function sampleN<T>(items: readonly T[], count: number, random: () => number): T[] {
+  if (count >= items.length) return [...items];
+  const pool = [...items];
+  const picked: T[] = [];
+  for (let i = 0; i < count && pool.length > 0; i++) {
+    picked.push(...pool.splice(Math.floor(random() * pool.length), 1));
+  }
+  return picked;
+}
 
 class CandidatePool {
   private readonly byId = new Map<string, Candidate>();
@@ -399,17 +428,11 @@ export async function buildShelf(
   pool.addMany(mergedAlsoLike, "also:multi", "also-like", seeds[0]?.playCount ?? 1);
 
   // --- Stage 1c: one hop out — adjacent artists and editorial curation -------
+  const adjacentArtistIds = sampleN(similarArtistIds, SIMILAR_ARTIST_FANOUT, random);
+  const adjacentPlaylistIds = sampleN(playlistIds, EDITORIAL_FANOUT, random);
   const [artistBatches, playlistBatches] = await Promise.all([
-    settle(
-      similarArtistIds
-        .slice(0, SIMILAR_ARTIST_FANOUT)
-        .map(async (id) => ({ id, tracks: await fetchArtistSongs(id) })),
-    ),
-    settle(
-      playlistIds
-        .slice(0, EDITORIAL_FANOUT)
-        .map(async (id) => ({ id, tracks: await fetchPlaylistTracks(id) })),
-    ),
+    settle(adjacentArtistIds.map(async (id) => ({ id, tracks: await fetchArtistSongs(id) }))),
+    settle(adjacentPlaylistIds.map(async (id) => ({ id, tracks: await fetchPlaylistTracks(id) }))),
   ]);
   for (const batch of artistBatches) {
     if (batch.tracks.length === 0) emptySources.push(`artist:${batch.id}`);
@@ -426,8 +449,18 @@ export async function buildShelf(
   // assembler can spend its exploration quota on candidates the ranking would
   // otherwise never have seen, rather than on the tail of its own output.
   const explorationIds = new Set<string>();
-  const explorationArtistIds = similarArtistIds.slice(SIMILAR_ARTIST_FANOUT).slice(-EXPLORATION_ARTIST_FANOUT);
-  const explorationPlaylistIds = playlistIds.slice(EDITORIAL_FANOUT).slice(-EXPLORATION_PLAYLIST_FANOUT);
+  const usedArtists = new Set(adjacentArtistIds);
+  const usedPlaylists = new Set(adjacentPlaylistIds);
+  const explorationArtistIds = sampleN(
+    similarArtistIds.filter((id) => !usedArtists.has(id)),
+    EXPLORATION_ARTIST_FANOUT,
+    random,
+  );
+  const explorationPlaylistIds = sampleN(
+    playlistIds.filter((id) => !usedPlaylists.has(id)),
+    EXPLORATION_PLAYLIST_FANOUT,
+    random,
+  );
   const [exploreArtists, explorePlaylists] = await Promise.all([
     settle(explorationArtistIds.map(async (id) => ({ id, tracks: await fetchArtistSongs(id) }))),
     settle(explorationPlaylistIds.map(async (id) => ({ id, tracks: await fetchPlaylistTracks(id) }))),
@@ -454,18 +487,42 @@ export async function buildShelf(
   const seededIds = new Set(seeds.map((s) => s.videoId));
   const likedCandidates = likes.filter((l) => !seededIds.has(l.videoId));
   if (likedCandidates.length > 0) {
+    // Rotation walks the whole liked set over time so an older minority-taste
+    // cluster still gets its turn; the sample then varies which of the window's
+    // likes actually lead this build.
     const start =
       likedCandidates.length > LIKE_FANOUT
         ? Math.floor(now / LIKE_ROTATION_MS) % likedCandidates.length
         : 0;
-    const picks: string[] = [];
-    for (let i = 0; i < LIKE_FANOUT && i < likedCandidates.length; i++) {
-      picks.push(likedCandidates[(start + i) % likedCandidates.length]!.videoId);
+    const window: string[] = [];
+    for (let i = 0; i < LIKE_FANOUT * 2 && i < likedCandidates.length; i++) {
+      window.push(likedCandidates[(start + i) % likedCandidates.length]!.videoId);
     }
+    const picks = sampleN(window, LIKE_FANOUT, random);
     const likeRadios = await settle(picks.map((id) => fetchRadio(id)));
     for (const radio of likeRadios) {
       pool.addMany(radio.tracks, `liked:${radio.seedId}`, "radio", LIKE_SEED_WEIGHT);
     }
+  }
+
+  // --- Stage 1e: the listener's own liked tracks --------------------------
+  // Retrieval can only offer what the sources happen to return, and a liked
+  // song is usually absent from its OWN radio — so the reserved `loved` pool
+  // had no guaranteed material and quietly went unfilled. Injecting the likes
+  // directly is what makes that quota a floor rather than a hope. They can only
+  // ever land in `loved` (an explicit like decides the pool), so this cannot
+  // take slots from discovery.
+  for (const like of likes) {
+    pool.add(
+      {
+        videoId: like.videoId,
+        title: like.title,
+        channel: like.channel,
+        thumbnail: like.thumbnail,
+        source: "local",
+      },
+      { sourceId: "liked-library", origin: "liked", rank: 0, seedWeight: LIKE_SEED_WEIGHT },
+    );
   }
 
   if (pool.size === 0) return empty();

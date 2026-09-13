@@ -151,6 +151,10 @@ interface SimulationResult {
   languagesAccepted: Map<VocalLanguage, number>;
   repeatWithin7d: number;
   everPlayedSlots: number;
+  likedSlots: number;
+  lovedPoolSlots: number;
+  shelvesWithEnoughLikes: number;
+  shelvesMeetingLovedQuota: number;
   servedSlots: number;
   backfilled: number;
   backfilledFamiliar: number;
@@ -175,6 +179,10 @@ function simulate(days: number, seed: number): SimulationResult {
   let newArtistsOverTime = 0;
   let repeatWithin7d = 0;
   let everPlayedSlots = 0;
+  let likedSlots = 0;
+  let lovedPoolSlots = 0;
+  let shelvesWithEnoughLikes = 0;
+  let shelvesMeetingLovedQuota = 0;
   let servedSlots = 0;
   let backfilled = 0;
   let backfilledFamiliar = 0;
@@ -231,6 +239,18 @@ function simulate(days: number, seed: number): SimulationResult {
     };
     for (const s of seeds) addMany(radioFor(s.videoId), `radio:${s.videoId}`, s.playCount || 1);
     addMany(explorationFor(day), `explore:${day}`, 1, true);
+    // Mirrors `buildShelf` stage 1e: a liked song is usually absent from its own
+    // radio, so the reserved pool only has guaranteed material if the likes are
+    // injected directly. Modelling retrieval without this made the simulation
+    // disagree with production about whether the quota could be met at all.
+    for (const id of likes) {
+      const entry = BY_ID.get(id);
+      if (!entry) continue;
+      const existing = pool.get(id);
+      const occurrence = { sourceId: "liked-library", origin: "liked" as const, rank: 0, seedWeight: 3 };
+      if (existing) existing.occurrences.push(occurrence);
+      else pool.set(id, { track: entry.track, occurrences: [occurrence] });
+    }
 
     const candidates = [...pool.values()];
     const scored = candidates.map((candidate) => ({ candidate, value: relevance(candidate) }));
@@ -270,6 +290,19 @@ function simulate(days: number, seed: number): SimulationResult {
     backfilledFamiliar += assembled.backfilledFamiliar;
     shelves.push(assembled.tracks.map((c) => c.track.videoId));
 
+    // A shelf can only honour the liked quota if the listener HAS that many
+    // likes; below that the pool is simply short, which is not a failure.
+    const lovedTarget = Math.round(SHELF * 0.1);
+    if (likes.size >= lovedTarget) shelvesWithEnoughLikes += 1;
+    const lovedOnThisShelf = assembled.slots.filter((slot) => slot.pool === "loved").length;
+    if (likes.size >= lovedTarget) {
+      // Counted only on shelves that COULD honour the quota. Averaging over the
+      // early days, when the listener had fewer than four likes, measures how
+      // fast they accumulate likes rather than whether the floor holds.
+      lovedPoolSlots += lovedOnThisShelf;
+      if (lovedOnThisShelf >= lovedTarget) shelvesMeetingLovedQuota += 1;
+    }
+
     // Serve: every slot is an impression, whether or not it is played.
     assembled.slots.forEach((slot, position) => {
       const id = slot.candidate.track.videoId;
@@ -283,6 +316,7 @@ function simulate(days: number, seed: number): SimulationResult {
         discoverySlots += 1;
         if (!wasPlayed) unseenDiscoverySlots += 1;
       }
+      if (likes.has(id)) likedSlots += 1;
       if (wasPlayed) {
         everPlayedSlots += 1;
         const record = exposure.get(id);
@@ -340,6 +374,10 @@ function simulate(days: number, seed: number): SimulationResult {
     languagesAccepted,
     repeatWithin7d,
     everPlayedSlots,
+    likedSlots,
+    lovedPoolSlots,
+    shelvesWithEnoughLikes,
+    shelvesMeetingLovedQuota,
     servedSlots,
     backfilled,
     backfilledFamiliar,
@@ -365,6 +403,19 @@ describe("Listen Again over 90 days of use", () => {
     days: result.shelves.length,
     unseenDiscoveryShare: result.unseenDiscoverySlots / result.discoverySlots,
     everPlayedSlateShare: result.everPlayedSlots / result.servedSlots,
+    // Split, because these are two different claims: music the listener
+    // explicitly hearted, and music the ranker simply drifted back to.
+    likedSlateShare: result.likedSlots / result.servedSlots,
+    unrequestedRepeatShare: (result.everPlayedSlots - result.likedSlots) / result.servedSlots,
+    lovedSlotsPerEligibleShelf:
+      result.shelvesWithEnoughLikes === 0
+        ? 0
+        : result.lovedPoolSlots / result.shelvesWithEnoughLikes,
+    shelvesWithEnoughLikes: result.shelvesWithEnoughLikes,
+    lovedQuotaMetShare:
+      result.shelvesWithEnoughLikes === 0
+        ? 1
+        : result.shelvesMeetingLovedQuota / result.shelvesWithEnoughLikes,
     repeatWithin7dShare: result.repeatWithin7d / result.servedSlots,
     meanConsecutiveJaccard: meanJaccard(result.shelves),
     meanWeeklyJaccard: meanJaccard(result.shelves, 7),
@@ -421,19 +472,31 @@ describe("Listen Again over 90 days of use", () => {
 
   it("keeps the shelf mostly unfamiliar after three months of use", () => {
     /*
-     * The headline outcome, measured directly on what the listener sees.
+     * The headline outcome, measured on what the listener sees — and split,
+     * because "familiar" covers two different things.
      *
-     * An earlier version of this test bounded `backfillShare` instead. That was
-     * measuring the wrong thing twice over: backfill counts slots that left
-     * their designated pool, which is dominated here by the per-artist cap
-     * redirecting one unseen track to another — the cap working, not a failure
-     * — and it says nothing about what actually reached the shelf. The defect
-     * is familiar music filling the shelf, so the bound is on familiar music
-     * filling the shelf. The quotas intend ~15% (familiar-anchor plus
-     * rediscovery), so 30% is a real ceiling, not a formality: the broken
-     * architecture measured 96.9% on the equivalent probe.
+     * The DEFECT is the shelf drifting back to music the listener never asked
+     * for; that is what `unrequestedRepeatShare` bounds. Serving a track they
+     * explicitly hearted is the opposite: it is the shelf doing as it was told,
+     * and pooling the two would mean honouring likes could only ever look like
+     * a regression. The broken architecture measured 96.9% on the equivalent
+     * probe, essentially none of it requested.
      */
-    expect(report.everPlayedSlateShare).toBeLessThan(0.3);
+    expect(report.unrequestedRepeatShare).toBeLessThan(0.25);
+    expect(report.everPlayedSlateShare).toBeLessThan(0.35);
+  });
+
+  it("puts the listener's liked music on the shelf", () => {
+    // The regression this replaces: 54 likes against 680 played tracks, all
+    // competing for one shared familiar allowance, produced exactly ONE liked
+    // song on a 40-slot shelf. A reserved pool is what makes the floor hold as
+    // play history keeps growing.
+    // Measured only where the quota is achievable — a listener with two likes
+    // cannot be given four, and counting those shelves would measure how fast
+    // likes accumulate rather than whether the floor holds.
+    expect(report.shelvesWithEnoughLikes).toBeGreaterThan(50);
+    expect(report.lovedSlotsPerEligibleShelf).toBeGreaterThanOrEqual(4);
+    expect(report.lovedQuotaMetShare).toBeGreaterThan(0.9);
   });
 
   it("attributes where familiar slots come from", () => {
