@@ -108,7 +108,7 @@ const tagBatchSchema = z.object({
  * Tag a batch of tracks (≤ BATCH_SIZE) in one LLM call. Returns videoId → tags.
  * Never throws for individual tracks: on any failure the map is just shorter.
  */
-async function tagBatch(batch: TrackInput[]): Promise<Map<string, string[]>> {
+async function tagBatch(batch: TrackInput[], timeoutMs?: number): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   if (!isLlmConfigured() || batch.length === 0) return out;
 
@@ -136,6 +136,10 @@ async function tagBatch(batch: TrackInput[]): Promise<Map<string, string[]>> {
       schemaDescription: "Constrained-vocabulary tags for a batch of tracks.",
       temperature: 0,
       reasoning: "xhigh",
+      // Measured ~16s per batch at this effort, so the adapter's default 20s
+      // ceiling leaves no room for a retry. The warm path raises it; nothing
+      // is waiting on that request.
+      timeoutMs,
       // Headroom: xhigh spends ~400-650 tokens reasoning before it writes a
       // token of output, and this call tags a whole batch.
       maxTokens: 2500,
@@ -163,10 +167,36 @@ async function tagBatch(batch: TrackInput[]): Promise<Map<string, string[]>> {
  * simply absent from the result — callers must treat a missing vector as
  * "use behavioural signal only", which `similarity.ts` already does.
  */
+export interface TagVectorOptions {
+  /**
+   * Never call the LLM — return only what is already cached.
+   *
+   * REQUIRED on any request-blocking path. Tagging is a reasoning-model call:
+   * measured 2026-09-14, one batch takes ~16s at `xhigh` effort, and a 40-track
+   * slate is three sequential batches (~48s) against a 30-second route budget.
+   * That timed out every build whose slate contained uncached tracks — which,
+   * once the shelf became discovery-heavy, is essentially every build. The
+   * route returned non-OK, the client fell back to its empty default, and the
+   * listener saw an empty shelf.
+   *
+   * Tags are only a SEQUENCING PRIOR (`similarity.ts` treats a missing vector
+   * as "use co-occurrence alone"), so serving without them is a slightly less
+   * smooth running order — never a missing or wrong shelf. They are not worth
+   * one second of the listener's wait, let alone eighteen.
+   */
+  cacheOnly?: boolean;
+  /** Cap on batches computed in one call, for the warm path. */
+  maxBatches?: number;
+  /** Per-call wall-clock ceiling. Defaults to the adapter's (20s). */
+  timeoutMs?: number;
+}
+
 export async function ensureTagVectors(
   tracks: TrackInput[],
   store: TagStore | null,
+  options: TagVectorOptions = {},
 ): Promise<Map<string, TagVector>> {
+  const { cacheOnly = false, maxBatches = Number.POSITIVE_INFINITY, timeoutMs } = options;
   const out = new Map<string, TagVector>();
   if (tracks.length === 0) return out;
 
@@ -187,12 +217,15 @@ export async function ensureTagVectors(
     }
   }
 
+  if (cacheOnly) return out;
+
   // 2. Compute the rest in batches, persist as we go.
   const missing = tracks.filter((t) => !cachedIds.has(t.videoId));
   const newlyComputed: Array<{ videoId: string; tags: string[] }> = [];
-  for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+  let batches = 0;
+  for (let i = 0; i < missing.length && batches < maxBatches; i += BATCH_SIZE, batches++) {
     const batch = missing.slice(i, i + BATCH_SIZE);
-    const result = await tagBatch(batch);
+    const result = await tagBatch(batch, timeoutMs);
     for (const [id, tags] of result) {
       out.set(id, tagVectorOf(tags));
       newlyComputed.push({ videoId: id, tags });
@@ -207,4 +240,18 @@ export async function ensureTagVectors(
   }
 
   return out;
+}
+
+/** Which of these tracks have no cached tags yet? Cheap; no LLM call. */
+export async function untaggedTracks(
+  tracks: TrackInput[],
+  store: TagStore | null,
+): Promise<TrackInput[]> {
+  if (!store || tracks.length === 0) return tracks.slice();
+  try {
+    const cached = await store.get(tracks.map((t) => t.videoId));
+    return tracks.filter((t) => !cached.has(t.videoId));
+  } catch {
+    return tracks.slice();
+  }
 }

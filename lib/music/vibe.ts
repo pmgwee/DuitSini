@@ -121,6 +121,10 @@ export async function parseVibe(prompt: string): Promise<VibeConstraints | null>
       schemaDescription: "Structured music-request constraints for the recommender.",
       temperature: 0,
       reasoning: "xhigh",
+      // This one IS on a request path (`/api/yt/vibe`, maxDuration 30). Budget
+      // it below the route so a slow model degrades to "no vibe parsed" rather
+      // than taking the whole request down with a 504.
+      timeoutMs: 24_000,
       // Headroom: reasoning tokens bill against this budget (~400-650 at xhigh).
       maxTokens: 2000,
     });

@@ -115,11 +115,11 @@ describe("provider configuration", () => {
     expect(isLlmConfigured()).toBe(true);
   });
 
-  it("defaults to OpenCode Go's base URL and gpt-5.6-luna", () => {
+  it("defaults to OpenCode Go's base URL and grok-4.6", () => {
     process.env.LLM_API_KEY = TEST_KEY;
     expect(describeLlmConfig()).toEqual({
       baseUrl: "https://opencode.ai/zen/go/v1",
-      model: "gpt-5.6-luna",
+      model: "grok-4.6",
     });
   });
 
@@ -173,7 +173,7 @@ describe("Responses API routing", () => {
     expect(captured[0].url).toBe("https://opencode.ai/zen/go/v1/responses");
     expect(captured[0].url).not.toContain("/responses/responses");
     expect(captured[0].url).not.toContain("chat/completions");
-    expect(captured[0].body.model).toBe("gpt-5.6-luna");
+    expect(captured[0].body.model).toBe("grok-4.6");
   });
 
   it("never emits /responses/responses even when the full endpoint is configured", async () => {
@@ -191,7 +191,7 @@ describe("Responses API routing", () => {
     expect(JSON.stringify(captured[0].body)).not.toContain(TEST_KEY);
   });
 
-  it("maps system messages and the reasoning knob (no Z.ai `thinking` field)", async () => {
+  it("maps system messages and omits reasoning for \"none\" (no Z.ai `thinking` field)", async () => {
     stubFetch(() => jsonResponse(responsesPayload("ok")));
     await generateWithLLM({
       messages: [
@@ -205,9 +205,24 @@ describe("Responses API routing", () => {
     expect(body).not.toHaveProperty("thinking");
     expect(body).not.toHaveProperty("messages"); // Responses API uses `input`
     expect(body).toHaveProperty("input");
-    expect(body.reasoning).toMatchObject({ effort: "none" });
+    // `grok-4.6` rejects `reasoning: "none"` with a 400, so the adapter omits
+    // the field rather than sending it. Note the consequence: the provider then
+    // applies its OWN default effort, so "none" is not actually "no reasoning"
+    // on this model — use "low" for a cheap pass.
+    expect(body.reasoning).toBeUndefined();
     expect(body.max_output_tokens).toBe(42);
     expect(JSON.stringify(body)).toContain("be terse");
+  });
+
+  it("sends the requested effort when reasoning is enabled", async () => {
+    stubFetch(() => jsonResponse(responsesPayload("ok")));
+    await generateWithLLM({
+      messages: [{ role: "user", content: "hi" }],
+      reasoning: "xhigh",
+    });
+    // `forceReasoning` is load-bearing: without it @ai-sdk/openai classifies
+    // `grok-4.6` as non-reasoning and drops the field entirely.
+    expect(captured[0].body.reasoning).toMatchObject({ effort: "xhigh" });
   });
 });
 

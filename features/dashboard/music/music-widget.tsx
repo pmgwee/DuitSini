@@ -163,6 +163,35 @@ export function MusicWidget() {
   });
 
   /**
+   * Warm the tag cache after the shelf is on screen, never before.
+   *
+   * Tagging is a ~16s-per-batch reasoning call. It used to run inside the shelf
+   * build and blow the route's 30s budget, which is what made the shelf come
+   * back empty. Firing it from here means the listener already has their music
+   * and the cost lands on a request nothing is waiting for. Failure is ignored:
+   * a missing tag vector only costs a slightly less smooth running order.
+   */
+  const warmedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const tracks = listenAgain.data?.tracks ?? [];
+    if (tracks.length === 0) return;
+    const signature = tracks.map((t) => t.videoId).join(",");
+    if (warmedRef.current === signature) return;
+    warmedRef.current = signature;
+    void fetch("/api/yt/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tracks: tracks.slice(0, 60).map((t) => ({
+          videoId: t.videoId,
+          title: t.title,
+          channel: t.channel,
+        })),
+      }),
+    }).catch(() => {});
+  }, [listenAgain.data]);
+
+  /**
    * Rows removed by the listener this session (blocked tracks).
    *
    * Applied locally so the row disappears instantly — that IS the direct

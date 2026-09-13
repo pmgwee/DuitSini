@@ -557,6 +557,7 @@ export async function buildShelf(
       channel: c.track.channel,
     })),
     createDbTagStore(),
+    { cacheOnly: true },
   );
   const ordered = sequence(assembled.tracks, 0, { transitionBias, tagVectors });
 
@@ -714,6 +715,7 @@ export async function buildRadio(
   const tagVectors = await ensureTagVectors(
     slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
     createDbTagStore(),
+    { cacheOnly: true },
   );
   const ordered = sequence(slate, 0, { transitionBias, tagVectors });
 
@@ -812,6 +814,7 @@ export async function buildArtistCatalog(
   const tagVectors = await ensureTagVectors(
     slate.map((c) => ({ videoId: c.track.videoId, title: c.track.title, channel: c.track.channel })),
     createDbTagStore(),
+    { cacheOnly: true },
   );
   const ordered = sequence(slate, 0, { transitionBias, tagVectors });
   return { tracks: ordered.map((candidate) => candidate.track) };
