@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/types";
 import {
   buildExposure,
+  exposureFromHistory,
+  mergeExposure,
   type ExposureRecord,
   type ImpressionEvent,
   type ListenEvent,
@@ -60,6 +62,19 @@ export async function loadExposure(
   userId: string,
   everPlayed: ReadonlySet<string>,
   now: number = Date.now(),
+  /**
+   * Legacy play counters. The event stream only starts when this code ships, so
+   * without these every pre-existing play collapses to a bare "ever played"
+   * flag and years of completions and skips are thrown away at exactly the
+   * moment the recommender starts trusting exposure.
+   */
+  aggregates: readonly {
+    videoId: string;
+    playCount: number;
+    completeCount: number;
+    skipCount: number;
+    lastPlayedAt: string;
+  }[] = [],
 ): Promise<Map<string, ExposureRecord>> {
   const client = supabase;
   const since = sinceIso(WINDOW_DAYS);
@@ -83,13 +98,14 @@ export async function loadExposure(
       ,
   ]);
 
+  const legacy = exposureFromHistory(aggregates, everPlayed, now);
+
   if (events.error || impressions.error) {
-    // Expected until migration 0021 is applied; not an error worth alarming on.
     console.warn(
       "[music/events] exposure unavailable, falling back to aggregates:",
       events.error?.message ?? impressions.error?.message,
     );
-    return buildExposure({ listens: [], impressions: [] }, now, everPlayed);
+    return legacy;
   }
 
   const listens: ListenEvent[] = (events.data ?? []).map((row) => ({
@@ -105,7 +121,9 @@ export async function loadExposure(
     position: row.position,
   }));
 
-  return buildExposure({ listens, impressions: shown }, now, everPlayed);
+  // Events win where they exist; the aggregates carry everything that happened
+  // before the stream did.
+  return mergeExposure(legacy, buildExposure({ listens, impressions: shown }, now, everPlayed));
 }
 
 /** Recent playback events, for learning the language mix. */

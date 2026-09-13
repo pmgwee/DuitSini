@@ -12,7 +12,7 @@ import {
   saveTrackLanguages,
 } from "@/lib/music/events-store";
 import {
-  loadEverPlayed,
+  loadPlayAggregates,
   loadHistory,
   loadLikes,
   loadSuppressions,
@@ -109,19 +109,20 @@ export async function GET() {
     });
   }
 
-  const [history, likes, suppressions, everPlayed] = await Promise.all([
+  const [history, likes, suppressions, aggregates] = await Promise.all([
     loadHistory(supabase, user.id),
     loadLikes(supabase, user.id),
     loadSuppressions(supabase, user.id),
-    loadEverPlayed(supabase, user.id),
+    loadPlayAggregates(supabase, user.id),
   ]);
+  const everPlayed = new Set(aggregates.map((row) => row.videoId));
 
   // Exposure and events come from the immutable stream (migration 0021). Both
   // degrade to empty when the tables are absent, in which case `buildShelf`
   // projects exposure from the aggregates instead — a thinner memory, but still
   // one that knows what has ever been played.
   const [exposure, listenEvents, languageHints] = await Promise.all([
-    loadExposure(supabase, user.id, everPlayed, now),
+    loadExposure(supabase, user.id, everPlayed, now, aggregates),
     loadListenEvents(supabase, user.id),
     // Labels for tracks already in history: the learned language mix is built
     // from what was PLAYED, so those are the ones whose labels must be right.

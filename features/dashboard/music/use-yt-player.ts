@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { YTPlayer } from "@/types/youtube";
 import type { MusicTrack } from "@/types/music";
-import type { PlayOrigin, PlayOutcome } from "@/lib/music/exposure";
+import { classifyPlayback, type PlayOrigin, type PlayOutcome } from "@/lib/music/exposure";
 
 const API_SRC = "https://www.youtube.com/iframe_api";
 
@@ -288,34 +288,29 @@ export function useYTPlayer(
     const outgoing = queueRef.current[indexRef.current];
     if (!outgoing || !startedAtRef.current) return;
     const playedMs = Date.now() - startedAtRef.current;
-    const player = playerRef.current;
-    const totalSec = player?.getDuration?.() || 0;
-    const playedSec = playedMs / 1000;
-    const ratio = totalSec > 0 ? Math.max(0, Math.min(1, playedSec / totalSec)) : 0;
-    const origin = originRef.current;
-
-    if (playedMs < 30_000) {
-      emitSignal(outgoing.videoId, "skip", previousIdRef.current, {
-        outcome: "early_skip",
-        origin,
-        durationRatio: ratio,
-      });
-      return;
+    /*
+     * The duration read must not be able to stop playback.
+     *
+     * `getDuration` is an IFrame-API call that postMessages into the embed, and
+     * it throws outright when the iframe has been re-parented or torn down —
+     * which this player does routinely, since the stage moves between the
+     * dashboard slot and the mini-player portal. Optional chaining guards a
+     * missing method, not a throwing one, and `settleOutgoing` runs inside
+     * `playIndex` BEFORE the next track loads: one throw here aborted the track
+     * change and swallowed the signal, so the player froze and nothing was
+     * recorded. Telemetry must never be able to break playback.
+     */
+    let totalSec = 0;
+    try {
+      totalSec = playerRef.current?.getDuration?.() || 0;
+    } catch {
+      totalSec = 0;
     }
-    // Past the skip window. Half the track is the line between "listened to it
-    // and moved on" and "gave up on it"; only the former is evidence of taste.
-    if (ratio >= 0.5) {
-      emitSignal(outgoing.videoId, "complete", previousIdRef.current, {
-        outcome: "substantial",
-        origin,
-        durationRatio: ratio,
-      });
-      return;
-    }
-    emitSignal(outgoing.videoId, "skip", previousIdRef.current, {
-      outcome: "late_skip",
-      origin,
-      durationRatio: ratio,
+    const { outcome, signal, durationRatio } = classifyPlayback(playedMs, totalSec);
+    emitSignal(outgoing.videoId, signal, previousIdRef.current, {
+      outcome,
+      origin: originRef.current,
+      durationRatio,
     });
   }, [emitSignal]);
 
@@ -324,7 +319,14 @@ export function useYTPlayer(
       const track = queueRef.current[i];
       const player = playerRef.current;
       if (!track || !player) return;
-      settleOutgoing();
+      // Belt and braces: settling is telemetry, and advancing the queue is the
+      // user's actual request. The latter never waits on the former.
+      try {
+        settleOutgoing();
+      } catch {
+        // Ignored on purpose — a lost signal costs a little ranking accuracy,
+        // a stuck player costs the feature.
+      }
       previousIdRef.current = queueRef.current[indexRef.current]?.videoId ?? null;
       originRef.current = origin;
       indexRef.current = i;

@@ -51,24 +51,55 @@ export async function loadHistory(supabase: Client, userId: string): Promise<His
  * catalogue. Ids are cheap — a few thousand rows is tens of kilobytes — so the
  * durable answer to "have they heard this?" is always available.
  */
-export async function loadEverPlayed(supabase: Client, userId: string): Promise<Set<string>> {
-  const ids = new Set<string>();
+export interface PlayAggregate {
+  videoId: string;
+  playCount: number;
+  completeCount: number;
+  skipCount: number;
+  lastPlayedAt: string;
+}
+
+/**
+ * Every play row this listener has, unwindowed.
+ *
+ * `loadHistory` caps at 60 rows because it carries full metadata for seeding.
+ * That cap silently became the recommender's entire memory: a track played 200
+ * times last year fell outside it and was then indistinguishable from a song
+ * they had never heard. It also meant the counters on the other 600 rows —
+ * completions, skips, last-played — were simply unavailable to scoring.
+ *
+ * Counters are cheap (no titles or thumbnails), so the durable answer to both
+ * "have they heard this?" and "how did it go?" is always available.
+ */
+export async function loadPlayAggregates(
+  supabase: Client,
+  userId: string,
+): Promise<PlayAggregate[]> {
+  const rows: PlayAggregate[] = [];
   const PAGE = 1000;
   for (let from = 0; from < 20_000; from += PAGE) {
     const { data, error } = await supabase
       .from("music_plays")
-      .select("video_id")
+      .select("video_id, play_count, complete_count, skip_count, last_played_at")
       .eq("user_id", userId)
       .range(from, from + PAGE - 1);
     if (error) {
-      console.error("[music/store] ever-played load failed:", error.message);
+      console.error("[music/store] play aggregates load failed:", error.message);
       break;
     }
     if (!data || data.length === 0) break;
-    for (const row of data) ids.add(row.video_id);
+    for (const row of data) {
+      rows.push({
+        videoId: row.video_id,
+        playCount: row.play_count,
+        completeCount: row.complete_count ?? 0,
+        skipCount: row.skip_count ?? 0,
+        lastPlayedAt: row.last_played_at,
+      });
+    }
     if (data.length < PAGE) break;
   }
-  return ids;
+  return rows;
 }
 
 /** Every track the listener has liked, newest first. `[]` on any error. */

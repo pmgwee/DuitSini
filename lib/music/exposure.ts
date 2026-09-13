@@ -121,6 +121,38 @@ export function emptyExposure(videoId: string): ExposureRecord {
   };
 }
 
+/** The skip window both Spotify and Apple treat as the strongest negative. */
+export const EARLY_SKIP_MS = 30_000;
+/** Below this share of a track, leaving reads as giving up rather than moving on. */
+export const SUBSTANTIAL_RATIO = 0.5;
+
+/**
+ * Classify a play the listener has left, from elapsed time and track length.
+ *
+ * Pure and separate from the player on purpose. The IFrame API call that
+ * supplies `totalSec` can throw when the embed has been re-parented, and this
+ * runs inside the track-change path — so the decision lives here where it can
+ * be tested, and the throwing call stays at the edge where it can be caught.
+ *
+ * `totalSec <= 0` means the duration was unavailable (or unreadable). Ratio is
+ * then 0, which degrades to the old time-only behaviour rather than inventing
+ * a number: under the skip window it is an early skip, past it a late skip.
+ */
+export function classifyPlayback(
+  playedMs: number,
+  totalSec: number,
+): { outcome: PlayOutcome; signal: "skip" | "complete"; durationRatio: number } {
+  const ratio =
+    totalSec > 0 ? Math.max(0, Math.min(1, playedMs / 1000 / totalSec)) : 0;
+  if (playedMs < EARLY_SKIP_MS) {
+    return { outcome: "early_skip", signal: "skip", durationRatio: ratio };
+  }
+  if (ratio >= SUBSTANTIAL_RATIO) {
+    return { outcome: "substantial", signal: "complete", durationRatio: ratio };
+  }
+  return { outcome: "late_skip", signal: "skip", durationRatio: ratio };
+}
+
 /** A play the listener chose, as opposed to one the player handed them. */
 export function isDeliberate(origin: PlayOrigin): boolean {
   return origin === "manual" || origin === "search" || origin === "playlist";
@@ -212,6 +244,7 @@ export function exposureFromHistory(
     lastPlayedAt: string;
   }[],
   everPlayedIds: ReadonlySet<string> = new Set(),
+  now: number = Date.now(),
 ): Map<string, ExposureRecord> {
   const records = new Map<string, ExposureRecord>();
   for (const id of everPlayedIds) {
@@ -230,6 +263,20 @@ export function exposureFromHistory(
     record.lastPlayAt = lastPlayedAt;
     // A completion is the only evidence of real consumption the aggregate has.
     record.lastMeaningfulPlayAt = entry.completeCount > 0 ? lastPlayedAt : null;
+    /*
+     * The aggregate cannot say HOW MANY plays fell in each window — it keeps
+     * one timestamp — but it can say that at least one did. Leaving these at
+     * zero made every impression look unconverted, so a track the listener had
+     * just played accrued fatigue as though they had ignored it.
+     */
+    if (lastPlayedAt !== null) {
+      const age = now - lastPlayedAt;
+      if (age >= 0) {
+        if (age <= 7 * DAY_MS) record.plays7d = Math.max(record.plays7d, 1);
+        if (age <= 30 * DAY_MS) record.plays30d = Math.max(record.plays30d, 1);
+        if (age <= 90 * DAY_MS) record.plays90d = Math.max(record.plays90d, 1);
+      }
+    }
     records.set(entry.videoId, record);
   }
   return records;
@@ -256,6 +303,11 @@ export function mergeExposure(
       completions: base.completions + record.completions,
       earlySkips: base.earlySkips + record.earlySkips,
       passivePlays: base.passivePlays + record.passivePlays,
+      // Windowed counts: the aggregate contributes "at least one", the events
+      // contribute exact counts. Taking the max keeps whichever knows more.
+      plays7d: Math.max(base.plays7d, record.plays7d),
+      plays30d: Math.max(base.plays30d, record.plays30d),
+      plays90d: Math.max(base.plays90d, record.plays90d),
       lastPlayAt: Math.max(base.lastPlayAt ?? 0, record.lastPlayAt ?? 0) || null,
       lastMeaningfulPlayAt:
         Math.max(base.lastMeaningfulPlayAt ?? 0, record.lastMeaningfulPlayAt ?? 0) || null,
