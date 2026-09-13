@@ -2,6 +2,19 @@
 
 - **Status:** Accepted — implemented 2026-08-24
 - **Scope:** `lib/ai/llm.ts` (new, replaces `lib/ai/zai.ts`), `lib/music/tags.ts`, `lib/music/vibe.ts`, `lib/serenity/analyzer.ts`, `lib/serenity/index.ts`, `app/api/yt/vibe/route.ts`, the Music widget + Serenity posts feed copy, `.env.example`
+- **Amended 2026-09-14:** model moved `gpt-5.6-luna` → **`grok-4.6`** (same provider, same
+  adapter, same contract — D1/D2/D3 all stand). Two provider facts were discovered while
+  verifying the swap and are now absorbed at the adapter boundary per D1: OpenCode Go
+  requires an **`x-opencode-session`** header on every request (absent → `400
+  MissingSessionID`; the app had never sent one, so the LLM path was failing silently
+  through the D4 degrade), and **`grok-4.6` rejects `reasoning: "none"`** with a 400, so the
+  three call sites moved to `"xhigh"` with raised `maxTokens` (reasoning tokens bill against
+  that budget). A third quirk is in the SDK rather than the provider: `@ai-sdk/openai`
+  classifies reasoning models by matching OpenAI's own id patterns, so it treated `grok-4.6`
+  as non-reasoning and **stripped `reasoning` from the request body** — the call ran at the
+  provider default while appearing configured. The adapter now sends `forceReasoning: true`,
+  confirmed on the wire. Also noted: `LLM_MODEL` must name a model the *plan* serves — `gpt-5.6-sol`
+  is Zen-only and 401s on a Go key, which D4 turns into a silent degrade rather than an alarm.
 - **Supersedes (in part):** ADR-0007 — the *roles* the LLM plays are unchanged; only the vendor, the wire protocol and the naming change.
 
 ## Context

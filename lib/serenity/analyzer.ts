@@ -81,9 +81,10 @@ const llmExtractCached = unstable_cache(
       schema: extractSchema,
       schemaName: "post_analysis",
       schemaDescription: "Topics, tickers with stance, and a one-line insight for one post.",
-      reasoning: "none",
+      reasoning: "xhigh",
       temperature: 0,
-      maxTokens: 700,
+      // Headroom: reasoning tokens bill against this budget (~400-650 at xhigh).
+      maxTokens: 2500,
     });
     // Re-validate locally: the adapter enforces the schema, this keeps the
     // contract explicit at the call site (and normalises defaults).

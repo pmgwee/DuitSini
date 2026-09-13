@@ -120,8 +120,9 @@ export async function parseVibe(prompt: string): Promise<VibeConstraints | null>
       schemaName: "vibe_constraints",
       schemaDescription: "Structured music-request constraints for the recommender.",
       temperature: 0,
-      reasoning: "none",
-      maxTokens: 500,
+      reasoning: "xhigh",
+      // Headroom: reasoning tokens bill against this budget (~400-650 at xhigh).
+      maxTokens: 2000,
     });
   } catch {
     return null; // provider error or malformed/invalid output → degrade silently

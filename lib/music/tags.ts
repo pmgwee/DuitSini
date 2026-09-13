@@ -135,8 +135,10 @@ async function tagBatch(batch: TrackInput[]): Promise<Map<string, string[]>> {
       schemaName: "track_tags",
       schemaDescription: "Constrained-vocabulary tags for a batch of tracks.",
       temperature: 0,
-      reasoning: "none",
-      maxTokens: 800,
+      reasoning: "xhigh",
+      // Headroom: xhigh spends ~400-650 tokens reasoning before it writes a
+      // token of output, and this call tags a whole batch.
+      maxTokens: 2500,
     });
   } catch {
     // network / model / malformed-output error → degrade silently, no tags for
