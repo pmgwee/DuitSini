@@ -38,8 +38,22 @@ type CodexDesktopCapability = {
 
 type SwitchLog = { at: number; label: string; result: string };
 
-function connectionStatus(stream: UsageStream | undefined, account: CodexAccountMetadata): string {
-  if (stream?.state === "auth_stale") return "Sign in again";
+function connectionStatus(
+  stream: UsageStream | undefined,
+  account: CodexAccountMetadata,
+  credentialActive: boolean,
+): string {
+  /*
+   * A parked seat's access token stops answering the usage endpoint once Codex
+   * stops using it — measured 2026-09-13: a 401 while the token's own `exp` was
+   * still eight days out, so this is a server-side invalidation, not a local
+   * expiry. Its refresh token is intact, and Codex renews it as soon as the
+   * seat is active again. Calling that "Sign in again" reads as "you must log
+   * in before you can switch", which is the opposite of what is needed.
+   */
+  if (stream?.state === "auth_stale") {
+    return credentialActive ? "Sign in again" : "Stored · renews when you switch to it";
+  }
   if (stream?.state === "rate_limited") return "Connected · provider cooldown";
   if (stream?.state === "offline" || stream?.cached) return "Connected · companion offline";
   if (stream) return "Connected";
@@ -189,7 +203,10 @@ export function CodexAccountsPanel({
           const stream = streamsByAccount.get(account.account_key);
           const credentialActive = runtimeAccount?.account_key === account.account_key;
           const verifiedActive = credentialActive && runtime?.state === "detected";
-          const needsSignin = !stream || stream.state === "auth_stale";
+          // "Has a sign-in stored on this computer" — a seat that has ever
+          // reported does, even if its parked token has since gone stale.
+          const neverConnected = !stream && account.status !== "connected";
+          const staleSignIn = stream?.state === "auth_stale";
           return (
             <article key={account.account_key} className={cn("flex min-w-0 flex-col gap-3 rounded-xl border p-3", credentialActive ? "border-primary ring-1 ring-primary/50" : "border-border/60 bg-background/20")}>
               <div className="flex items-start justify-between gap-2">
@@ -205,16 +222,23 @@ export function CodexAccountsPanel({
 
               {/* Connection state only: quota lives in this seat's tracker below. */}
               <div className="text-[11px] text-muted-foreground">
-                <span className={cn("font-medium", needsSignin ? "text-warning" : "text-foreground/80")}>{connectionStatus(stream, account)}</span>
+                <span className={cn("font-medium", neverConnected || (credentialActive && stream?.state === "auth_stale") ? "text-warning" : "text-foreground/80")}>
+                  {connectionStatus(stream, account, credentialActive)}
+                </span>
               </div>
 
+              {/*
+                Order is the instruction. A seat with a sign-in already stored is
+                switched to directly — signing in again is the fallback for when
+                its refresh token is genuinely dead, not a prerequisite.
+              */}
               <div className="mt-auto flex flex-wrap gap-2">
-                {needsSignin ? compatibleDesktop ? (
-                  <button type="button" onClick={() => void connect(account)} disabled={switching !== null} className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-[11px] font-semibold text-warning hover:bg-warning/15 disabled:opacity-60"><LockKeyhole className="size-3.5" /> {switching === account.account_key ? "Opening sign-in…" : stream?.state === "auth_stale" ? "Sign in again" : "Connect account"}</button>
+                {neverConnected ? compatibleDesktop ? (
+                  <button type="button" onClick={() => void connect(account)} disabled={switching !== null} className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-[11px] font-semibold text-warning hover:bg-warning/15 disabled:opacity-60"><LockKeyhole className="size-3.5" /> {switching === account.account_key ? "Opening sign-in…" : "Connect account"}</button>
                 ) : (
                   <a href="/download" className="inline-flex min-h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-[11px] font-semibold text-warning hover:bg-warning/15"><LockKeyhole className="size-3.5" /> {desktop ? "Update Desktop to connect" : "Open Desktop to connect"}</a>
                 ) : null}
-                {compatibleDesktop ? (
+                {!neverConnected && compatibleDesktop ? (
                   <button
                     type="button"
                     onClick={() => void switchTo(account)}
@@ -232,9 +256,21 @@ export function CodexAccountsPanel({
                     {switching === account.account_key ? <RefreshCw className="size-3.5 animate-spin" /> : credentialActive ? <Check className="size-3.5" /> : null}
                     {switching === account.account_key ? "Switching…" : credentialActive ? "Currently in use" : switchReady ? `Use ${account.label}` : "Switch unavailable"}
                   </button>
-                ) : (
+                ) : !neverConnected ? (
                   <a href="/download" className="inline-flex min-h-8 flex-1 items-center justify-center rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90">{desktop ? "Update Desktop" : "Open/Update Desktop"}</a>
-                )}
+                ) : null}
+                {!neverConnected && staleSignIn && compatibleDesktop ? (
+                  <button
+                    type="button"
+                    onClick={() => void connect(account)}
+                    disabled={switching !== null}
+                    title="Only needed if this account's stored sign-in has expired for good — switching to it normally renews it."
+                    className="inline-flex min-h-8 basis-full items-center justify-center gap-1.5 rounded-lg border border-border/60 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+                  >
+                    <LockKeyhole className="size-3.5" />
+                    {switching === account.account_key ? "Opening sign-in…" : "Sign in again instead"}
+                  </button>
+                ) : null}
               </div>
             </article>
           );
