@@ -24,17 +24,17 @@ missing, that's a signal — either reconsider the language, or note the gap for
 - Every LLM feature (Serenity post analysis, music track tagging, Vibe intent parsing)
   goes through `lib/ai/llm.ts`. Features are provider-agnostic; the vendor is named in
   exactly one file plus three env vars (`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`).
-- Current provider: OpenCode Go, model `grok-4.6` at `xhigh` reasoning, via the
-  OpenAI-compatible **Responses API** (`@ai-sdk/openai`). `LLM_BASE_URL` is the base — the
-  SDK appends `/responses`. (ADR-0011; supersedes the Z.ai/GLM chat-completions client in
-  ADR-0007. Model moved `gpt-5.6-luna` → `grok-4.6` on 2026-09-14.)
-- Three provider/SDK constraints live in the adapter so features never learn them: an
-  **`x-opencode-session`** header is mandatory (missing → `400 MissingSessionID`);
-  `grok-4.6` **rejects `reasoning: "none"`** (400); and the adapter must pass
-  **`forceReasoning: true`**, because `@ai-sdk/openai` only recognises *OpenAI* ids as
-  reasoning models and otherwise strips `reasoning` from the body — the effort would
-  silently degrade to the provider default. Reasoning tokens bill against `maxTokens`, so
-  every call site budgets headroom above the answer it expects.
+- Current provider: OpenRouter prepaid credits, model `z-ai/glm-5.3-flash` at `high`
+  reasoning, via the OpenAI-compatible **Chat Completions API** (`@ai-sdk/openai`).
+  `LLM_BASE_URL` is the base — the SDK appends `/chat/completions`.
+  (ADR-0012 supersedes the OpenCode Go adapter in ADR-0011.)
+- The adapter sends an OpenRouter `x-session-id` for provider/cache affinity and passes
+  **`forceReasoning: true`** when a caller requests high/xhigh, because
+  `@ai-sdk/openai` only recognises *OpenAI* ids as reasoning models and otherwise strips
+  `reasoning_effort` from the body. Reasoning tokens bill against `maxTokens`, so every
+  call site budgets headroom above the answer it expects. High is intentional here:
+  these are short structured extraction calls where xhigh would mostly add latency and
+  prepaid-credit spend.
 - Absence of a key is a supported state: every path degrades silently rather than failing.
 
 ## Claude-usage bridge (the sharer subsystem)

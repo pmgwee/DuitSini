@@ -8,9 +8,9 @@ import { z } from "zod";
  * Everything here runs against a STUBBED `globalThis.fetch` — no network, no
  * key, no billable request. The point is to pin down:
  *   - configuration (which env vars, what happens when they're missing/bad)
- *   - routing (the request must land on <base>/responses, exactly once)
+ *   - routing (the request must land on <base>/chat/completions, exactly once)
  *   - model selection
- *   - Responses-API result parsing (NOT the old chat-completions shape)
+ *   - Chat Completions result parsing
  *   - structured-output validation + malformed-output handling
  *   - auth failure / provider failure / abort
  *   - the features' silent fallback when the LLM is unavailable
@@ -26,21 +26,15 @@ import {
 
 const TEST_KEY = "test-key-not-a-real-secret";
 
-/** A minimal but valid OpenAI Responses API payload. */
-function responsesPayload(text: string) {
+/** A minimal but valid OpenAI-compatible Chat Completions payload. */
+function chatPayload(text: string) {
   return {
-    id: "resp_test",
-    created_at: 1,
-    model: "gpt-5.6-luna",
-    output: [
-      {
-        type: "message",
-        role: "assistant",
-        id: "msg_test",
-        content: [{ type: "output_text", text, annotations: [] }],
-      },
+    id: "chatcmpl_test",
+    model: "z-ai/glm-5.3-flash",
+    choices: [
+      { index: 0, finish_reason: "stop", message: { role: "assistant", content: text } },
     ],
-    usage: { input_tokens: 1, output_tokens: 1 },
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   };
 }
 
@@ -115,11 +109,11 @@ describe("provider configuration", () => {
     expect(isLlmConfigured()).toBe(true);
   });
 
-  it("defaults to OpenCode Go's base URL and grok-4.6", () => {
+  it("defaults to OpenRouter's base URL and GLM 5.3 Flash", () => {
     process.env.LLM_API_KEY = TEST_KEY;
     expect(describeLlmConfig()).toEqual({
-      baseUrl: "https://opencode.ai/zen/go/v1",
-      model: "grok-4.6",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "z-ai/glm-5.3-flash",
     });
   });
 
@@ -133,10 +127,10 @@ describe("provider configuration", () => {
     });
   });
 
-  it("normalises a base URL that already carries the endpoint (no /responses/responses)", () => {
+  it("normalises a base URL that already carries the endpoint", () => {
     process.env.LLM_API_KEY = TEST_KEY;
-    process.env.LLM_BASE_URL = "https://opencode.ai/zen/go/v1/responses/";
-    expect(describeLlmConfig().baseUrl).toBe("https://opencode.ai/zen/go/v1");
+    process.env.LLM_BASE_URL = "https://openrouter.ai/api/v1/chat/completions/";
+    expect(describeLlmConfig().baseUrl).toBe("https://openrouter.ai/api/v1");
   });
 
   it("throws a secret-safe error when the key is missing", () => {
@@ -159,40 +153,41 @@ describe("provider configuration", () => {
 
 // ── Routing + model selection ──────────────────────────────────────────────
 
-describe("Responses API routing", () => {
+describe("Chat Completions routing", () => {
   beforeEach(() => {
     process.env.LLM_API_KEY = TEST_KEY;
   });
 
-  it("posts to <base>/responses with the configured model", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("hello")));
+  it("posts to <base>/chat/completions with the configured model", async () => {
+    stubFetch(() => jsonResponse(chatPayload("hello")));
     const text = await generateWithLLM({ messages: [{ role: "user", content: "hi" }] });
 
     expect(text).toBe("hello");
     expect(captured).toHaveLength(1);
-    expect(captured[0].url).toBe("https://opencode.ai/zen/go/v1/responses");
-    expect(captured[0].url).not.toContain("/responses/responses");
-    expect(captured[0].url).not.toContain("chat/completions");
-    expect(captured[0].body.model).toBe("grok-4.6");
+    expect(captured[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(captured[0].url).not.toContain("/chat/completions/chat/completions");
+    expect(captured[0].url).not.toContain("/responses");
+    expect(captured[0].body.model).toBe("z-ai/glm-5.3-flash");
+    expect(captured[0].headers["x-session-id"]).toBeTruthy();
   });
 
-  it("never emits /responses/responses even when the full endpoint is configured", async () => {
-    process.env.LLM_BASE_URL = "https://opencode.ai/zen/go/v1/responses";
-    stubFetch(() => jsonResponse(responsesPayload("ok")));
+  it("never emits a duplicated chat endpoint when the full endpoint is configured", async () => {
+    process.env.LLM_BASE_URL = "https://openrouter.ai/api/v1/chat/completions";
+    stubFetch(() => jsonResponse(chatPayload("ok")));
     await generateWithLLM({ messages: [{ role: "user", content: "hi" }] });
-    expect(captured[0].url).toBe("https://opencode.ai/zen/go/v1/responses");
+    expect(captured[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
   });
 
   it("sends the key as a bearer token and nowhere else", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("ok")));
+    stubFetch(() => jsonResponse(chatPayload("ok")));
     await generateWithLLM({ messages: [{ role: "user", content: "hi" }] });
     expect(captured[0].headers.authorization).toBe(`Bearer ${TEST_KEY}`);
     expect(captured[0].url).not.toContain(TEST_KEY);
     expect(JSON.stringify(captured[0].body)).not.toContain(TEST_KEY);
   });
 
-  it("maps system messages and omits reasoning for \"none\" (no Z.ai `thinking` field)", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("ok")));
+  it("maps system messages and omits reasoning for \"none\"", async () => {
+    stubFetch(() => jsonResponse(chatPayload("ok")));
     await generateWithLLM({
       messages: [
         { role: "system", content: "be terse" },
@@ -203,26 +198,21 @@ describe("Responses API routing", () => {
     });
     const body = captured[0].body;
     expect(body).not.toHaveProperty("thinking");
-    expect(body).not.toHaveProperty("messages"); // Responses API uses `input`
-    expect(body).toHaveProperty("input");
-    // `grok-4.6` rejects `reasoning: "none"` with a 400, so the adapter omits
-    // the field rather than sending it. Note the consequence: the provider then
-    // applies its OWN default effort, so "none" is not actually "no reasoning"
-    // on this model — use "low" for a cheap pass.
-    expect(body.reasoning).toBeUndefined();
-    expect(body.max_output_tokens).toBe(42);
+    expect(body).toHaveProperty("messages");
+    expect(body.reasoning_effort).toBeUndefined();
+    expect(body.max_tokens).toBe(42);
     expect(JSON.stringify(body)).toContain("be terse");
   });
 
   it("sends the requested effort when reasoning is enabled", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("ok")));
+    stubFetch(() => jsonResponse(chatPayload("ok")));
     await generateWithLLM({
       messages: [{ role: "user", content: "hi" }],
       reasoning: "xhigh",
     });
     // `forceReasoning` is load-bearing: without it @ai-sdk/openai classifies
-    // `grok-4.6` as non-reasoning and drops the field entirely.
-    expect(captured[0].body.reasoning).toMatchObject({ effort: "xhigh" });
+    // the GLM id as non-reasoning and drops the field entirely.
+    expect(captured[0].body.reasoning_effort).toBe("xhigh");
   });
 });
 
@@ -233,8 +223,8 @@ describe("generation", () => {
     process.env.LLM_API_KEY = TEST_KEY;
   });
 
-  it("parses the Responses API result shape (not chat-completions `choices`)", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("the answer")));
+  it("parses the Chat Completions result shape", async () => {
+    stubFetch(() => jsonResponse(chatPayload("the answer")));
     await expect(generateWithLLM({ messages: [{ role: "user", content: "q" }] })).resolves.toBe(
       "the answer",
     );
@@ -243,17 +233,17 @@ describe("generation", () => {
   const schema = z.object({ genres: z.array(z.string()).default([]), length: z.number() });
 
   it("returns a schema-validated object", async () => {
-    stubFetch(() => jsonResponse(responsesPayload(JSON.stringify({ genres: ["indie"], length: 25 }))));
+    stubFetch(() => jsonResponse(chatPayload(JSON.stringify({ genres: ["indie"], length: 25 }))));
     const out = await generateStructuredWithLLM({
       messages: [{ role: "user", content: "q" }],
       schema,
     });
     expect(out).toEqual({ genres: ["indie"], length: 25 });
-    expect(captured[0].body).toHaveProperty("text"); // structured-output format requested
+    expect(captured[0].body).toHaveProperty("response_format"); // structured-output format requested
   });
 
   it("throws when the model returns malformed JSON (after the plain-text retry)", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("not json at all")));
+    stubFetch(() => jsonResponse(chatPayload("not json at all")));
     await expect(
       generateStructuredWithLLM({ messages: [{ role: "user", content: "q" }], schema }),
     ).rejects.toThrow();
@@ -261,7 +251,7 @@ describe("generation", () => {
   });
 
   it("throws when the output parses but violates the schema — validation is not weakened", async () => {
-    stubFetch(() => jsonResponse(responsesPayload(JSON.stringify({ genres: "indie", length: "lots" }))));
+    stubFetch(() => jsonResponse(chatPayload(JSON.stringify({ genres: "indie", length: "lots" }))));
     await expect(
       generateStructuredWithLLM({ messages: [{ role: "user", content: "q" }], schema }),
     ).rejects.toThrow(/schema/i);
@@ -273,11 +263,11 @@ describe("generation", () => {
       call += 1;
       if (call === 1) {
         return jsonResponse(
-          { error: { message: "unsupported parameter: text.format", type: "invalid_request_error", code: "x" } },
+          { error: { message: "unsupported parameter: response_format", type: "invalid_request_error", code: "x" } },
           400,
         );
       }
-      return jsonResponse(responsesPayload('```json\n{"genres":["rock"],"length":10}\n```'));
+      return jsonResponse(chatPayload('```json\n{"genres":["rock"],"length":10}\n```'));
     });
     const out = await generateStructuredWithLLM({
       messages: [{ role: "user", content: "q" }],
@@ -334,7 +324,7 @@ describe("failure modes", () => {
 
 describe("graceful degradation", () => {
   it("parseVibe returns null with no key configured (no request made)", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("{}")));
+    stubFetch(() => jsonResponse(chatPayload("{}")));
     const { parseVibe } = await import("@/lib/music/vibe");
     await expect(parseVibe("rainy-day indie folk")).resolves.toBeNull();
     expect(captured).toHaveLength(0);
@@ -353,7 +343,7 @@ describe("graceful degradation", () => {
     process.env.LLM_API_KEY = TEST_KEY;
     stubFetch(() =>
       jsonResponse(
-        responsesPayload(
+        chatPayload(
           JSON.stringify({
             genres: ["indie", "NOT-A-GENRE"],
             moods: ["chill"],
@@ -377,7 +367,7 @@ describe("graceful degradation", () => {
   });
 
   it("ensureTagVectors yields no vectors (rather than throwing) with no key configured", async () => {
-    stubFetch(() => jsonResponse(responsesPayload("{}")));
+    stubFetch(() => jsonResponse(chatPayload("{}")));
     const { ensureTagVectors } = await import("@/lib/music/tags");
     const out = await ensureTagVectors(
       [{ videoId: "abc", title: "Wonderwall", channel: "Oasis" }],
@@ -391,7 +381,7 @@ describe("graceful degradation", () => {
     process.env.LLM_API_KEY = TEST_KEY;
     stubFetch(() =>
       jsonResponse(
-        responsesPayload(
+        chatPayload(
           JSON.stringify({ tracks: [{ id: "abc", tags: ["rock", "1990s", "made-up-tag"] }] }),
         ),
       ),

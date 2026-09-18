@@ -135,13 +135,11 @@ async function tagBatch(batch: TrackInput[], timeoutMs?: number): Promise<Map<st
       schemaName: "track_tags",
       schemaDescription: "Constrained-vocabulary tags for a batch of tracks.",
       temperature: 0,
-      reasoning: "xhigh",
-      // Measured ~16s per batch at this effort, so the adapter's default 20s
-      // ceiling leaves no room for a retry. The warm path raises it; nothing
-      // is waiting on that request.
+      reasoning: "high",
+      // High is enough for this constrained tag vocabulary while keeping the
+      // warm path's provider spend and latency bounded.
       timeoutMs,
-      // Headroom: xhigh spends ~400-650 tokens reasoning before it writes a
-      // token of output, and this call tags a whole batch.
+      // Leave headroom for reasoning before the model writes the batch JSON.
       maxTokens: 2500,
     });
   } catch {

@@ -96,7 +96,7 @@ How much of your Claude, GLM, and ChatGPT Codex plans have you burned — **live
 | Backend | Supabase (Postgres, Auth, Row-Level Security, Realtime) |
 | Cloud / APIs | Google Cloud — YouTube Data API v3 (music search), Google OAuth 2.0 (Google sign-in identity) |
 | Market data | Yahoo Finance public chart endpoint (keyless, 1-day cache) |
-| LLM | OpenCode Go (`gpt-5.6-luna`) via the OpenAI-compatible **Responses API**, `@ai-sdk/openai` + `ai` — behind one provider-neutral adapter (`lib/ai/llm.ts`) |
+| LLM | OpenRouter prepaid credits (`z-ai/glm-5.3-flash`) via the OpenAI-compatible **Chat Completions API**, `@ai-sdk/openai` + `ai` — behind one provider-neutral adapter (`lib/ai/llm.ts`) |
 | Forms / validation | React Hook Form + Zod |
 | Testing | Vitest (pure `lib/` modules — the sharer policy modules + protocol schema) |
 | Language | TypeScript (strict) |
@@ -136,13 +136,17 @@ Features call `generateWithLLM` / `generateStructuredWithLLM`; they never name a
 vendor, so switching providers is three env vars plus that one file.
 
 ```
-LLM_API_KEY=<your OpenCode Go API key>     # SERVER-ONLY, never NEXT_PUBLIC_
-LLM_BASE_URL=https://opencode.ai/zen/go/v1 # base only - the SDK appends /responses
-LLM_MODEL=gpt-5.6-luna
+LLM_API_KEY=<your OpenRouter API key>       # SERVER-ONLY, never NEXT_PUBLIC_
+LLM_BASE_URL=https://openrouter.ai/api/v1  # base only - SDK appends /chat/completions
+LLM_MODEL=z-ai/glm-5.3-flash              # paid credits route; not :free or :batch
 ```
 
 `LLM_BASE_URL` is the **base**, not the full endpoint: `@ai-sdk/openai` appends
-`/responses`, so requests land on `https://opencode.ai/zen/go/v1/responses`.
+`/chat/completions`, so requests land on `https://openrouter.ai/api/v1/chat/completions`.
+
+The app uses `high` reasoning for its short, schema-constrained extraction calls.
+That keeps response time and prepaid-credit spend bounded; the adapter still
+supports `xhigh` for a caller that genuinely needs deeper reasoning.
 
 Leaving `LLM_API_KEY` unset is fully supported — every feature degrades
 gracefully: Serenity falls back to its deterministic topic/ticker tagger, music
