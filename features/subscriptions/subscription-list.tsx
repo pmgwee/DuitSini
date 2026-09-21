@@ -136,7 +136,10 @@ export function SubscriptionList({ subscriptions }: { subscriptions: Subscriptio
 
 export function SubscriptionRow({ sub }: { sub: Subscription }) {
   const status = getStatus(sub);
-  const meta = STATUS_META[status];
+  // A live trial is still an active subscription. Keep the existing `trial`
+  // status for sorting, but show both facts in the row instead of replacing
+  // the green Active badge with Trial.
+  const meta = status === "trial" ? STATUS_META.active : STATUS_META[status];
   const monthlyMYR = roundMoney(toMYR(grossMonthlyCost(sub), sub.currency));
   const myr = myrEquivalentOf(sub.amount, sub.currency);
   const next = getNextChargeDate(sub, toISODate(new Date()));
@@ -146,7 +149,7 @@ export function SubscriptionRow({ sub }: { sub: Subscription }) {
       <SubscriptionIcon sub={sub} size="lg" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{sub.name}</span>
+          <span className="min-w-0 truncate text-sm font-medium">{sub.name}</span>
           <span
             className={cn(
               "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
@@ -155,6 +158,16 @@ export function SubscriptionRow({ sub }: { sub: Subscription }) {
           >
             {meta.label}
           </span>
+          {status === "trial" ? (
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                STATUS_META.trial.className,
+              )}
+            >
+              {STATUS_META.trial.label}
+            </span>
+          ) : null}
           {sub.reminderOffsetsDays != null ? (
             <span className="shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               Custom schedule
