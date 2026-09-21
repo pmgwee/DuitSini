@@ -136,9 +136,9 @@ export function SubscriptionList({ subscriptions }: { subscriptions: Subscriptio
 
 export function SubscriptionRow({ sub }: { sub: Subscription }) {
   const status = getStatus(sub);
-  // A live trial is still an active subscription. Keep the existing `trial`
-  // status for sorting, but show both facts in the row instead of replacing
-  // the green Active badge with Trial.
+  // The persistent `isTrial` flag is the source of truth for the Trial badge.
+  // Keep the derived `trial` status for sorting and use Active as the primary
+  // badge, so current and already-ended free trials show both facts.
   const meta = status === "trial" ? STATUS_META.active : STATUS_META[status];
   const monthlyMYR = roundMoney(toMYR(grossMonthlyCost(sub), sub.currency));
   const myr = myrEquivalentOf(sub.amount, sub.currency);
@@ -158,7 +158,7 @@ export function SubscriptionRow({ sub }: { sub: Subscription }) {
           >
             {meta.label}
           </span>
-          {status === "trial" ? (
+          {sub.isTrial ? (
             <span
               className={cn(
                 "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
