@@ -59,6 +59,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   // ── AI ──────────────────────────────────────────────────────────────
   { name: "OpenAI", category: "ai", color: "#10a37f", domain: "openai.com", keywords: ["chatgpt", "gpt", "chat gpt", "dall-e"] },
   { name: "Anthropic", category: "ai", color: "#d97757", icon: "anthropic", domain: "anthropic.com", keywords: ["claude"] },
+  { name: "OpenRouter", category: "ai", color: "#7c3aed", icon: "openrouter", domain: "openrouter.ai", keywords: ["open router", "router"] },
+  { name: "OpenCode", category: "ai", color: "#000000", icon: "opencode", domain: "opencode.ai", keywords: ["open code", "opencode go"] },
+  { name: "Grok", category: "ai", color: "#000000", domain: "grok.com", keywords: ["grok ai", "supergrok", "xai"] },
   { name: "Google", category: "ai", color: "#4285f4", icon: "google", domain: "google.com", keywords: ["gemini", "bard", "youtube", "youtube premium", "youtube music", "yt music", "google one", "google workspace", "google storage"] },
   { name: "Microsoft", category: "productivity", color: "#0078d4", domain: "microsoft.com", keywords: ["github", "copilot", "github copilot", "xbox", "xbox game pass", "game pass", "office", "office 365", "microsoft 365", "linkedin", "linkedin premium", "azure", "windows"] },
   { name: "Perplexity", category: "ai", color: "#20808d", icon: "perplexity", domain: "perplexity.ai", keywords: ["perplexity ai"] },

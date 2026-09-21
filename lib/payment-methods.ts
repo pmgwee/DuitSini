@@ -144,7 +144,7 @@ export const PAYMENT_ISSUERS: PaymentIssuer[] = [
   { slug: "boost_bank", label: "Boost Bank", type: "digital_bank", color: "#f7941d", domain: "myboost.com.my", keywords: ["boost bank"] },
   { slug: "aeon_bank", label: "AEON Bank", type: "digital_bank", color: "#d50032", domain: "aeonbank.com.my", keywords: ["aeon bank malaysia"] },
   { slug: "kaf_digital", label: "KAF Digital Bank", type: "digital_bank", color: "#0d4d3a", domain: "kafdigitalbank.com", keywords: ["kaf digital", "kaf"] },
-  { slug: "ryt_bank", label: "Ryt Bank", type: "digital_bank", color: "#0a5cae", domain: "rytbank.com.my", keywords: ["ryt bank", "ytl bank", "sea bank"] },
+  { slug: "ryt_bank", label: "Ryt Bank", type: "digital_bank", color: "#0a5cae", domain: "rytbank.my", keywords: ["ryt bank", "ytl bank", "sea bank"] },
 
   // ── International digital bank ────────────────────────────────────────
   { slug: "wise", label: "Wise", type: "intl_digital_bank", color: "#163300", domain: "wise.com", keywords: ["wise malaysia", "transferwise"] },
