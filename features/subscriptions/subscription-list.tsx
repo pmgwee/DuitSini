@@ -18,7 +18,7 @@ import { SubscriptionIcon } from "./subscription-icon";
 import { EditSubscriptionButton } from "./subscription-dialogs";
 import { PaymentMethodBadge } from "./payment-method-badge";
 
-const STATUS_META: Record<
+export const STATUS_META: Record<
   SubscriptionStatus,
   { label: string; className: string }
 > = {

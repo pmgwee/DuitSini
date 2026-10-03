@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { Dialog } from "@/components/ui/dialog";
 import { SubscriptionIcon } from "./subscription-icon";
 import { PaymentMethodBadge } from "./payment-method-badge";
-import { SubscriptionRow } from "./subscription-list";
+import { STATUS_META, SubscriptionRow } from "./subscription-list";
 import {
   AddSubscriptionButton,
   EditSubscriptionButton,
@@ -391,6 +391,16 @@ function DayCharges({ iso, charges }: { iso: string; charges: DayCharge[] }) {
                     {c.isTrialConversion && (
                       <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
                         Trial converts
+                      </span>
+                    )}
+                    {c.sub.cancelledAt && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                          STATUS_META.cancelled.className,
+                        )}
+                      >
+                        {STATUS_META.cancelled.label}
                       </span>
                     )}
                     {c.isTrialStart && (
