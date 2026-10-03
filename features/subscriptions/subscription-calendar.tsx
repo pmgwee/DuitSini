@@ -5,7 +5,11 @@ import { addMonths } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Subscription } from "@/types/subscription";
 import { CATEGORY_META } from "@/lib/constants";
-import { chargeDatesInRange, subscriptionsChargingInRange } from "@/lib/domain/subscription";
+import {
+  chargeDatesInRange,
+  subscriptionsChargingInRange,
+  trialStartInRange,
+} from "@/lib/domain/subscription";
 import { compareSubs, type SubscriptionSortKey } from "./subscription-sort";
 import { SubscriptionSortControl } from "./subscription-sort-control";
 import { calendarGrid, monthBounds, WEEKDAY_LABELS } from "@/lib/domain/calendar";
@@ -26,6 +30,12 @@ interface DayCharge {
   sub: Subscription;
   /** True when this charge is the trial converting to paid (first paid date). */
   isTrialConversion: boolean;
+  /**
+   * True for a free trial's start marker — NOT a charge (no money moves). Shown
+   * so a trial cancelled before converting still leaves a record in its month;
+   * excluded from charge counts and totals.
+   */
+  isTrialStart?: boolean;
 }
 
 const MAX_ICONS_PER_CELL = 3;
@@ -75,6 +85,13 @@ export function SubscriptionCalendar({
         const list = map.get(iso);
         if (list) list.push(entry);
         else map.set(iso, [entry]);
+      }
+      const trialISO = trialStartInRange(sub, firstISO, lastISO);
+      if (trialISO) {
+        const entry: DayCharge = { sub, isTrialConversion: false, isTrialStart: true };
+        const list = map.get(trialISO);
+        if (list) list.push(entry);
+        else map.set(trialISO, [entry]);
       }
     }
     return map;
@@ -165,6 +182,7 @@ export function SubscriptionCalendar({
           const charges = chargesByDay.get(cell.iso) ?? [];
           const isSelected = cell.iso === selectedISO;
           const hasTrial = charges.some((c) => c.isTrialConversion);
+          const paidCount = charges.filter((c) => !c.isTrialStart).length;
           return (
             <button
               key={cell.iso}
@@ -172,9 +190,10 @@ export function SubscriptionCalendar({
               onClick={() => openDay(cell.iso)}
               aria-label={
                 formatLongDate(cell.iso) +
-                (charges.length
-                  ? `, ${charges.length} ${charges.length === 1 ? "charge" : "charges"}`
+                (paidCount
+                  ? `, ${paidCount} ${paidCount === 1 ? "charge" : "charges"}`
                   : ", no charges") +
+                (charges.length > paidCount ? ", trial starts" : "") +
                 (hasTrial ? ", trial converts" : "")
               }
               className={cn(
@@ -288,6 +307,14 @@ function MonthChargeList({
   const items = useMemo(() => {
     const { startISO, endISO } = monthBounds(year, month);
     const list = subscriptionsChargingInRange(subscriptions, startISO, endISO);
+    // Trials that started this month are listed too (by start date) so one
+    // cancelled before converting keeps its record here. A trial that also
+    // converts this month is already listed via its charge.
+    const listed = new Set(list.map((it) => it.sub.id));
+    for (const sub of subscriptions) {
+      const trialISO = trialStartInRange(sub, startISO, endISO);
+      if (trialISO && !listed.has(sub.id)) list.push({ sub, dates: [trialISO] });
+    }
     list.sort((a, b) => {
       // "date" = the month's first charge date; other keys compare the sub and
       // fall back to charge date for a stable, month-meaningful order.
@@ -325,19 +352,21 @@ function DayCharges({ iso, charges }: { iso: string; charges: DayCharge[] }) {
   // Total is always MYR: convert every charge (whatever its currency) to MYR,
   // sum at full precision, round once. Each line keeps its original currency
   // with an "≈ RM" hint for foreign amounts.
+  // Trial-start markers are not charges: they add nothing to the total/count.
+  const paid = charges.filter((c) => !c.isTrialStart);
   const totalMYR = roundMoney(
-    charges.reduce((sum, c) => sum + toMYR(c.sub.amount, c.sub.currency), 0),
+    paid.reduce((sum, c) => sum + toMYR(c.sub.amount, c.sub.currency), 0),
   );
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
-          {charges.length === 0
+          {paid.length === 0
             ? "No charges on this date."
-            : `${charges.length} ${charges.length === 1 ? "charge" : "charges"}`}
+            : `${paid.length} ${paid.length === 1 ? "charge" : "charges"}`}
         </div>
-        {charges.length > 0 && (
+        {paid.length > 0 && (
           <div className="text-right">
             <div className="text-[11px] text-muted-foreground">Total</div>
             <div className="text-sm font-semibold">{formatCurrency(totalMYR, "MYR")}</div>
@@ -348,7 +377,7 @@ function DayCharges({ iso, charges }: { iso: string; charges: DayCharge[] }) {
       {charges.length > 0 && (
         <ul className="flex flex-col divide-y divide-border/50">
           {charges.map((c, i) => {
-            const myr = myrEquivalentOf(c.sub.amount, c.sub.currency);
+            const myr = c.isTrialStart ? null : myrEquivalentOf(c.sub.amount, c.sub.currency);
             return (
               <li
                 key={c.sub.id + "-" + i}
@@ -364,13 +393,18 @@ function DayCharges({ iso, charges }: { iso: string; charges: DayCharge[] }) {
                         Trial converts
                       </span>
                     )}
+                    {c.isTrialStart && (
+                      <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                        Trial started
+                      </span>
+                    )}
                     {c.sub.paymentMethod ? <PaymentMethodBadge method={c.sub.paymentMethod} /> : null}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-right">
                     <div className="text-sm font-medium">
-                      {formatCurrency(c.sub.amount, c.sub.currency)}
+                      {c.isTrialStart ? "Free" : formatCurrency(c.sub.amount, c.sub.currency)}
                     </div>
                     {myr && <div className="text-[11px] text-muted-foreground">≈ {myr}</div>}
                   </div>

@@ -111,6 +111,23 @@ export function subscriptionsChargingInRange(
 }
 
 /**
+ * A free trial's start date when it falls within [startISO, endISO], else null.
+ * A trial's first charge is its conversion date (`freeTrialEndAt`), so a trial
+ * cancelled before converting has no charges at all — without this marker it
+ * would leave no trace on date-ranged surfaces (calendar), unlike a cancelled
+ * paid sub whose past charges stay visible. Not a charge: callers must keep it
+ * out of counts and money totals.
+ */
+export function trialStartInRange(
+  sub: Subscription,
+  startISO: string,
+  endISO: string,
+): string | null {
+  if (!sub.isTrial || !sub.freeTrialEndAt || sub.startDate >= sub.freeTrialEndAt) return null;
+  return sub.startDate >= startISO && sub.startDate <= endISO ? sub.startDate : null;
+}
+
+/**
  * Total MYR value of every charge landing in [startISO, endISO] across the given
  * subscriptions: each subscription contributes (its charge count in the window) ×
  * (its amount in MYR), summed at full float precision and rounded ONCE. This is
