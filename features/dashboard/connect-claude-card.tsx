@@ -248,7 +248,8 @@ function ConnectedView({
           <p className="mb-2.5 text-xs text-muted-foreground">Usage sources tracking now:</p>
           <div className="flex flex-wrap gap-2">
             {sources.map((s) => (
-              <SourceCard key={s.source} source={s.source} label={s.label} />
+              // Both Codex seats share source "codex"; the label tells them apart.
+              <SourceCard key={`${s.source}:${s.label}`} source={s.source} label={s.label} />
             ))}
           </div>
         </>

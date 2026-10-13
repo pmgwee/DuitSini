@@ -40,6 +40,22 @@ describe("Codex account usage sections", () => {
     expect(codex[1].five_hour).toEqual({ utilization: null, resets_at: null });
   });
 
+  it("keeps Codex seats above the Google AI Pro pools", () => {
+    const streams: UsageStream[] = [
+      { source: "claude_pro", label: "Claude Pro", five_hour: null, seven_day: null },
+      { source: "google_gemini", label: "Google AI Pro · Gemini", five_hour: null, seven_day: null },
+      { source: "google_claude", label: "Google AI Pro · Claude + GPT-OSS", five_hour: null, seven_day: null },
+    ];
+
+    expect(streamsWithCodexAccounts(streams, accounts()).map((stream) => stream.label)).toEqual([
+      "Claude Pro",
+      "Codex (Business)",
+      "Codex (Member)",
+      "Google AI Pro · Gemini",
+      "Google AI Pro · Claude + GPT-OSS",
+    ]);
+  });
+
   it("does not flash a legacy Member assignment before owner metadata loads", () => {
     const memberKey = CODEX_ACCOUNT_SLOTS.find((slot) => slot.slot === "member")!.account_key;
     const result = streamsWithCodexAccounts(

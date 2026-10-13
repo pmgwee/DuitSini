@@ -31,6 +31,11 @@ const MASCOTS: Record<string, MascotDefinition> = {
     staticSrc: "/mascots/gemini-mascot-static.png",
     wrapperClass: "bg-purple-50/80 dark:bg-purple-950/30",
   },
+  google_claude: {
+    src: "/mascots/gemini-mascot.gif",
+    staticSrc: "/mascots/gemini-mascot-static.png",
+    wrapperClass: "bg-purple-50/80 dark:bg-purple-950/30",
+  },
 };
 
 /** Decorative animated companion for a provider's weekly usage limit. */

@@ -1,5 +1,8 @@
 import { codexStreamsByAccount, type CodexAccountMetadata } from "@/lib/claude-usage/codex-accounts";
+import { SUPPORTED_SOURCES } from "@/lib/claude-usage/protocol";
 import type { UsageStream } from "./use-claude-usage-live";
+
+const sourceRank = (stream: UsageStream) => SUPPORTED_SOURCES[stream.source] ?? Number.MAX_SAFE_INTEGER;
 
 /** Keep the original ring UI and render one fixed section per enrolled seat. */
 export function streamsWithCodexAccounts(
@@ -35,5 +38,10 @@ export function streamsWithCodexAccounts(
       status_message: `${account.label} is not connected yet.`,
     };
   });
-  return [...nonCodex, ...codex];
+  // Re-apply the dashboard's provider order so seats sit in Codex's slot
+  // (above Google AI Pro), not after every other provider. Stable within a rank.
+  return [...nonCodex, ...codex]
+    .map((stream, index) => ({ stream, index }))
+    .sort((a, b) => sourceRank(a.stream) - sourceRank(b.stream) || a.index - b.index)
+    .map(({ stream }) => stream);
 }

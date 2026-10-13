@@ -24,7 +24,6 @@ import { CodexAccountsPanel } from "./codex-accounts-panel";
 import { useCodexAccounts } from "./use-codex-accounts";
 import { streamsWithCodexAccounts } from "./codex-usage-streams";
 import { usageStreamKey } from "@/lib/claude-usage/codex-accounts";
-import { GoogleAiImportDialog } from "./google-ai-import-dialog";
 
 const SESSION_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -45,7 +44,6 @@ export function ClaudeUsageTracker() {
   const now = useNow(1000);
   const [mounted, setMounted] = useState(false);
   const [mode, setMode] = useState<"live" | "manual">("live");
-  const [importOpen, setImportOpen] = useState(false);
   useEffect(() => setMounted(true), []);
   const live = useClaudeUsageLive();
   const { accounts: codexAccounts, devices: codexDevices, loaded: codexAccountsLoaded } = useCodexAccounts();
@@ -115,18 +113,10 @@ export function ClaudeUsageTracker() {
           onPull={live.pull}
           pulling={live.pulling}
           pullCooldownEndsAt={live.pullCooldownEndsAt}
-          onImport={() => setImportOpen(true)}
         />
       ) : (
-        <ManualView now={now} liveStatus={live.status} liveError={live.error} onImport={() => setImportOpen(true)} />
+        <ManualView now={now} liveStatus={live.status} liveError={live.error} />
       )}
-      <GoogleAiImportDialog
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        onImported={() => {
-          live.pull();
-        }}
-      />
     </WidgetShell>
   );
 }
@@ -230,7 +220,6 @@ function LiveView({
   onPull,
   pulling,
   pullCooldownEndsAt,
-  onImport,
 }: {
   streams: UsageStream[];
   refreshedAt?: string;
@@ -238,7 +227,6 @@ function LiveView({
   onPull: () => void;
   pulling: boolean;
   pullCooldownEndsAt: number | null;
-  onImport: () => void;
 }) {
   // Server-enforced pull cooldown mirrored as a countdown: each honored pull
   // costs one call against the member's own Anthropic rate-limit budget, so
@@ -264,16 +252,6 @@ function LiveView({
           Last updated: {formatAgo(refreshedAt, now)}
         </span>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onImport}
-            aria-label="Import Google AI Pro Quota"
-            title="The desktop app tracks this automatically. Use this only on a computer without the desktop app: paste the output of agy -p &quot;/usage&quot;"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <Sparkles className="size-3.5 text-primary" />
-            Import Google AI Pro
-          </button>
           <button
             type="button"
             onClick={onPull}
@@ -484,12 +462,10 @@ function ManualView({
   now,
   liveStatus,
   liveError,
-  onImport,
 }: {
   now: number;
   liveStatus: LiveStatus;
   liveError?: string;
-  onImport?: () => void;
 }) {
   const {
     sessionStartedAt,
@@ -636,22 +612,6 @@ function ManualView({
 
       <NotesEditor notes={notes} onAdd={addNote} onRemove={removeNote} />
 
-      {onImport ? (
-        <div className="flex items-center justify-between border-t border-border/50 pt-3">
-          <span className="text-[11px] text-muted-foreground/80">
-            Google AI Pro / Antigravity allowance
-          </span>
-          <button
-            type="button"
-            onClick={onImport}
-            aria-label="Import Google AI Pro Quota"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <Sparkles className="size-3.5 text-primary" />
-            Import Google AI Pro
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }

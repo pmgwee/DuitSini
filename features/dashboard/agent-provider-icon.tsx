@@ -19,11 +19,11 @@ const MARKS = {
     color: "#10a37f",
     domain: "openai.com",
   },
-  google: {
-    name: "Google",
+  antigravity: {
+    name: "Antigravity",
     color: "#4285f4",
-    slug: "google",
-    domain: "google.com",
+    logoUrl: "/logos/antigravity.png",
+    domain: "antigravity.google",
   },
 } as const;
 
@@ -34,7 +34,7 @@ function markFor(source: string) {
     normalized.includes("gemini") ||
     normalized.includes("antigravity")
   ) {
-    return MARKS.google;
+    return MARKS.antigravity;
   }
   if (normalized === "codex" || normalized.includes("openai")) return MARKS.openai;
   if (normalized === "glm" || normalized.includes("zai") || normalized.includes("z.ai")) {
@@ -59,6 +59,7 @@ export function AgentProviderIcon({
       color={mark.color}
       slug={"slug" in mark ? mark.slug : undefined}
       domain={mark.domain}
+      logoUrl={"logoUrl" in mark ? mark.logoUrl : undefined}
       size={size}
       className={className}
     />
