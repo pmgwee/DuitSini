@@ -24,6 +24,7 @@ import { CodexAccountsPanel } from "./codex-accounts-panel";
 import { useCodexAccounts } from "./use-codex-accounts";
 import { streamsWithCodexAccounts } from "./codex-usage-streams";
 import { usageStreamKey } from "@/lib/claude-usage/codex-accounts";
+import { GoogleAiImportDialog } from "./google-ai-import-dialog";
 
 const SESSION_MS = 5 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -44,6 +45,7 @@ export function ClaudeUsageTracker() {
   const now = useNow(1000);
   const [mounted, setMounted] = useState(false);
   const [mode, setMode] = useState<"live" | "manual">("live");
+  const [importOpen, setImportOpen] = useState(false);
   useEffect(() => setMounted(true), []);
   const live = useClaudeUsageLive();
   const { accounts: codexAccounts, devices: codexDevices, loaded: codexAccountsLoaded } = useCodexAccounts();
@@ -113,10 +115,18 @@ export function ClaudeUsageTracker() {
           onPull={live.pull}
           pulling={live.pulling}
           pullCooldownEndsAt={live.pullCooldownEndsAt}
+          onImport={() => setImportOpen(true)}
         />
       ) : (
-        <ManualView now={now} liveStatus={live.status} liveError={live.error} />
+        <ManualView now={now} liveStatus={live.status} liveError={live.error} onImport={() => setImportOpen(true)} />
       )}
+      <GoogleAiImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          live.pull();
+        }}
+      />
     </WidgetShell>
   );
 }
@@ -195,7 +205,9 @@ function utilizationColor(pct: number | null | undefined): string {
 
 function formatUntil(iso: string | null | undefined, now: number): string {
   if (!iso) return "—";
-  let remaining = Math.max(0, new Date(iso).getTime() - now);
+  const diff = new Date(iso).getTime() - now;
+  if (diff <= 0) return "just now";
+  let remaining = diff;
   const days = Math.floor(remaining / 86_400_000);
   remaining -= days * 86_400_000;
   const hours = Math.floor(remaining / 3_600_000);
@@ -218,6 +230,7 @@ function LiveView({
   onPull,
   pulling,
   pullCooldownEndsAt,
+  onImport,
 }: {
   streams: UsageStream[];
   refreshedAt?: string;
@@ -225,6 +238,7 @@ function LiveView({
   onPull: () => void;
   pulling: boolean;
   pullCooldownEndsAt: number | null;
+  onImport: () => void;
 }) {
   // Server-enforced pull cooldown mirrored as a countdown: each honored pull
   // costs one call against the member's own Anthropic rate-limit budget, so
@@ -249,21 +263,33 @@ function LiveView({
         <span className="text-[11px] text-muted-foreground/80">
           Last updated: {formatAgo(refreshedAt, now)}
         </span>
-        <button
-          type="button"
-          onClick={onPull}
-          disabled={pulling || cooldownS > 0}
-          aria-label="Pull latest usage from the bridge"
-          title={
-            cooldownS > 0
-              ? "Just refreshed — manual pulls are limited to protect your account quota endpoints. Usage still updates automatically."
-              : undefined
-          }
-          className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-        >
-          <RefreshCw className={cn("size-3.5", pulling && "animate-spin")} />
-          {pulling ? "Pulling…" : cooldownS > 0 ? `Pull latest (${cooldownS}s)` : "Pull latest"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onImport}
+            aria-label="Import Google AI Pro Quota"
+            title="Import your Antigravity coding allowance from agy -p &quot;/usage&quot;"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Sparkles className="size-3.5 text-primary" />
+            Import Google AI Pro
+          </button>
+          <button
+            type="button"
+            onClick={onPull}
+            disabled={pulling || cooldownS > 0}
+            aria-label="Pull latest usage from the bridge"
+            title={
+              cooldownS > 0
+                ? "Just refreshed — manual pulls are limited to protect your account quota endpoints. Usage still updates automatically."
+                : undefined
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+          >
+            <RefreshCw className={cn("size-3.5", pulling && "animate-spin")} />
+            {pulling ? "Pulling…" : cooldownS > 0 ? `Pull latest (${cooldownS}s)` : "Pull latest"}
+          </button>
+        </div>
       </div>
       <p className="-mt-2 text-[11px] text-muted-foreground/60">
         Live · updates automatically · account quota data via local sign-ins (endpoints may change).
@@ -426,12 +452,15 @@ function UsageGauge({
   limit: UsageLimit;
   now: number;
 }) {
-  const pct = limit.percent;
+  const resetMs = limit.resets_at ? new Date(limit.resets_at).getTime() : null;
+  const hasReset = resetMs !== null && !Number.isNaN(resetMs) && now > resetMs;
+  const pct = hasReset ? null : limit.percent;
+
   return (
     <div className="flex flex-col items-center gap-1.5 text-center">
       <ProgressRing
-        progress={(pct ?? 0) / 100}
-        color={utilizationColor(pct)}
+        progress={pct != null ? pct / 100 : 0}
+        color={hasReset ? "var(--muted-foreground)" : utilizationColor(pct)}
         size={92}
         stroke={8}
       >
@@ -441,7 +470,7 @@ function UsageGauge({
       </ProgressRing>
       <div className="text-[11px] font-medium leading-tight">{limit.label}</div>
       <div className="text-[10px] text-muted-foreground">
-        resets {formatUntil(limit.resets_at, now)}
+        {hasReset ? "reset since last reading" : `resets ${formatUntil(limit.resets_at, now)}`}
       </div>
     </div>
   );
@@ -455,10 +484,12 @@ function ManualView({
   now,
   liveStatus,
   liveError,
+  onImport,
 }: {
   now: number;
   liveStatus: LiveStatus;
   liveError?: string;
+  onImport?: () => void;
 }) {
   const {
     sessionStartedAt,
@@ -604,6 +635,23 @@ function ManualView({
       </div>
 
       <NotesEditor notes={notes} onAdd={addNote} onRemove={removeNote} />
+
+      {onImport ? (
+        <div className="flex items-center justify-between border-t border-border/50 pt-3">
+          <span className="text-[11px] text-muted-foreground/80">
+            Google AI Pro / Antigravity allowance
+          </span>
+          <button
+            type="button"
+            onClick={onImport}
+            aria-label="Import Google AI Pro Quota"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Sparkles className="size-3.5 text-primary" />
+            Import Google AI Pro
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -42,7 +42,7 @@ export function mergeUsageStreams(
       state: "offline",
       status_message: "Collector unavailable; showing the last reading.",
     });
-    if (next.length >= 6) break;
+    if (next.length >= 8) break;
   }
 
   return next;

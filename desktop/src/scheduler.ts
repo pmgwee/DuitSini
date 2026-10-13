@@ -35,6 +35,10 @@ import {
   safeProvider,
   type DetectedProvider,
 } from "./collectors/glm";
+import {
+  collectAntigravityStreams,
+  defaultAntigravityQuotaPath,
+} from "./collectors/antigravity";
 import type { Store } from "./store";
 import { safeFetch } from "./net";
 import type { UsageTracker } from "./tracker";
@@ -78,6 +82,8 @@ export interface SchedulerDeps {
   codexDeviceId?: string;
   /** Read-only account/read probe; injected so tests never spawn Codex. */
   codexAccountReader?: CodexAccountReader;
+  /** Optional override path to the sanitized Antigravity quota JSON. */
+  antigravityQuotaPath?: string;
 }
 
 const jitter = (n: number) => Math.floor(Math.random() * n);
@@ -248,7 +254,11 @@ export class Scheduler {
       if (glm) streams.push(glm);
       const codex = await this.collectCodex();
       streams.push(...codex);
-      this.deps.log(`collected: claude=${!!claude} glm=${!!glm} codex=${codex.length}`);
+      const antigravity = await this.collectAntigravity();
+      streams.push(...antigravity);
+      this.deps.log(
+        `collected: claude=${!!claude} glm=${!!glm} codex=${codex.length} antigravity=${antigravity.length}`,
+      );
 
       if (streams.length === 0) {
         this.deps.log("no usage streams this cycle — nothing to push");
@@ -777,6 +787,24 @@ export class Scheduler {
       }
       this.deps.log(`[${profile.label}] ${err.message}`);
       return streamFromLast("offline", `${profile.label} is temporarily unreachable; showing the last reading.`);
+    }
+  }
+
+  /**
+   * Google AI Pro (Antigravity coding allowance) streams.
+   * Acquired passively from the local status-line adapter output.
+   * Stalled or missing Antigravity telemetry never blocks other collectors.
+   */
+  private async collectAntigravity(): Promise<UsageStream[]> {
+    try {
+      const quotaPath =
+        this.deps.antigravityQuotaPath ||
+        process.env.DUITSINI_ANTIGRAVITY_QUOTA_FILE ||
+        defaultAntigravityQuotaPath(this.deps.store.userDataDir);
+      return await collectAntigravityStreams(quotaPath);
+    } catch (e) {
+      this.deps.log(`[Antigravity] ${(e as Error).message}`);
+      return [];
     }
   }
 

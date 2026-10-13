@@ -19,10 +19,23 @@ const MARKS = {
     color: "#10a37f",
     domain: "openai.com",
   },
+  google: {
+    name: "Google",
+    color: "#4285f4",
+    slug: "google",
+    domain: "google.com",
+  },
 } as const;
 
 function markFor(source: string) {
   const normalized = source.toLowerCase();
+  if (
+    normalized.startsWith("google") ||
+    normalized.includes("gemini") ||
+    normalized.includes("antigravity")
+  ) {
+    return MARKS.google;
+  }
   if (normalized === "codex" || normalized.includes("openai")) return MARKS.openai;
   if (normalized === "glm" || normalized.includes("zai") || normalized.includes("z.ai")) {
     return MARKS.glm;

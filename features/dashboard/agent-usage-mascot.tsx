@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 
 interface MascotDefinition {
   src: string;
+  staticSrc?: string;
   wrapperClass: string;
   repairEyes?: boolean;
 }
@@ -24,6 +25,11 @@ const MASCOTS: Record<string, MascotDefinition> = {
   codex: {
     src: "/mascots/codex-mascot.gif",
     wrapperClass: "bg-blue-50/80 dark:bg-blue-950/30",
+  },
+  google_gemini: {
+    src: "/mascots/gemini-mascot.gif",
+    staticSrc: "/mascots/gemini-mascot-static.png",
+    wrapperClass: "bg-purple-50/80 dark:bg-purple-950/30",
   },
 };
 
@@ -49,12 +55,24 @@ export function AgentUsageMascot({ source }: { source: string }) {
           <span className="absolute left-[62%] top-[56%] z-30 size-[4%] bg-black" />
         </>
       ) : null}
-      {/* Plain img intentionally preserves animated GIF frames. */}
-      <img
-        src={mascot.src}
-        alt=""
-        className="pointer-events-none relative z-10 size-full object-contain [image-rendering:pixelated]"
-      />
+      {mascot.staticSrc ? (
+        <picture className="pointer-events-none relative z-10 size-full">
+          <source media="(prefers-reduced-motion: reduce)" srcSet={mascot.staticSrc} />
+          {/* Plain img intentionally preserves animated GIF frames. */}
+          <img
+            src={mascot.src}
+            alt=""
+            className="pointer-events-none relative z-10 size-full object-contain [image-rendering:pixelated]"
+          />
+        </picture>
+      ) : (
+        /* Plain img intentionally preserves animated GIF frames. */
+        <img
+          src={mascot.src}
+          alt=""
+          className="pointer-events-none relative z-10 size-full object-contain [image-rendering:pixelated]"
+        />
+      )}
     </span>
   );
 }

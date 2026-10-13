@@ -91,6 +91,10 @@ export class Store {
 
   constructor(private readonly file: string) {}
 
+  get userDataDir(): string {
+    return dirname(this.file);
+  }
+
   static pathFor(userDataDir: string): string {
     return join(userDataDir, "desktop-state.json");
   }
