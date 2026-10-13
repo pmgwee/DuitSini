@@ -1,10 +1,13 @@
+import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   buildGoogleUsageStreams,
+  parseManualUsageImport,
   parseQuotaBuckets,
+  type GoogleQuotaPools,
   type SanitizedAntigravitySnapshot,
 } from "../../../lib/claude-usage/google-ai-pro";
 import type { UsageStream } from "../types";
@@ -304,6 +307,133 @@ export async function disconnectAntigravity(
   } catch (err) {
     return { ok: false, message: (err as Error).message };
   }
+}
+
+/**
+ * Active collection: run the official Antigravity CLI's `/usage` command.
+ *
+ * `/usage` is answered by the CLI itself (verified 2026-10-13: num_turns 0,
+ * total_tokens 0), so polling it spends no quota. We never read Antigravity's
+ * OAuth material or call Google's backend ourselves — that is what got AI Pro
+ * accounts banned in Feb 2026 — the official binary does all network work.
+ */
+export const AGY_POLL_MS = 300_000;
+export const AGY_USAGE_ARGS = ["-p", "/usage", "--output-format", "json", "--print-timeout", "30s"] as const;
+const AGY_TIMEOUT_MS = 45_000;
+
+export class AgyNotInstalledError extends Error {
+  constructor() {
+    super("Antigravity CLI (agy) was not found on this computer.");
+  }
+}
+
+export class AgyAuthError extends Error {
+  constructor() {
+    super("Antigravity CLI is not signed in. Run agy once in a terminal to sign in.");
+  }
+}
+
+/** `/usage` started a model turn. Polling must never spend quota, so stop. */
+export class AgyModelTurnError extends Error {
+  constructor() {
+    super("Antigravity CLI answered /usage with a model turn; automatic polling is paused to protect your quota.");
+  }
+}
+
+export function agyBinaryCandidates(
+  home = homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const list: string[] = [];
+  if (env.DUITSINI_AGY_PATH) list.push(env.DUITSINI_AGY_PATH);
+  if (platform === "win32") {
+    list.push(join(home, "Tools", "agy", "bin", "agy.exe"));
+    list.push(join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "agy", "bin", "agy.exe"));
+  } else {
+    list.push(join(home, ".local", "bin", "agy"), "/opt/homebrew/bin/agy", "/usr/local/bin/agy");
+  }
+  return list;
+}
+
+/** First existing known install location, else the bare name for a PATH lookup. */
+export function resolveAgyBinary(candidates = agyBinaryCandidates()): string {
+  return candidates.find((p) => existsSync(p)) ?? (process.platform === "win32" ? "agy.exe" : "agy");
+}
+
+export type AgyRunner = (
+  binary: string,
+  args: string[],
+  options: { timeoutMs: number; cwd: string },
+) => Promise<{ stdout: string; stderr: string }>;
+
+type RunnerError = Error & { code?: string | number; killed?: boolean; stdout?: string; stderr?: string };
+
+const defaultAgyRunner: AgyRunner = (binary, args, { timeoutMs, cwd }) =>
+  new Promise((resolve, reject) => {
+    execFile(
+      binary,
+      args,
+      { timeout: timeoutMs, cwd, windowsHide: true, maxBuffer: 1024 * 1024, env: { ...process.env, NO_COLOR: "1" } },
+      (error, stdout, stderr) => {
+        if (error) {
+          const err = error as RunnerError;
+          err.stdout = String(stdout ?? "");
+          err.stderr = String(stderr ?? "");
+          reject(err);
+          return;
+        }
+        resolve({ stdout: String(stdout), stderr: String(stderr) });
+      },
+    );
+  });
+
+/** Parse `agy -p /usage --output-format json`, refusing anything that spent tokens. */
+export function parseAgyUsageOutput(stdout: string, nowMs: number = Date.now()): GoogleQuotaPools {
+  const text = stdout.trim();
+  let envelope: {
+    status?: unknown;
+    num_turns?: unknown;
+    usage?: { total_tokens?: unknown };
+    command?: { name?: unknown };
+  };
+  try {
+    envelope = JSON.parse(text);
+  } catch {
+    throw new Error("Antigravity CLI returned unreadable usage output.");
+  }
+  const turns = typeof envelope.num_turns === "number" ? envelope.num_turns : 0;
+  const tokens = typeof envelope.usage?.total_tokens === "number" ? envelope.usage.total_tokens : 0;
+  if (turns > 0 || tokens > 0 || envelope.command?.name !== "usage") throw new AgyModelTurnError();
+  if (envelope.status !== "SUCCESS") {
+    throw new Error(`Antigravity CLI usage check did not succeed (${String(envelope.status ?? "unknown")}).`);
+  }
+  const pools = parseManualUsageImport(text, nowMs);
+  const hasWindow =
+    pools &&
+    (pools.gemini.five_hour || pools.gemini.weekly || pools.claudePartner.five_hour || pools.claudePartner.weekly);
+  if (!pools || !hasWindow) throw new Error("Antigravity CLI returned no recognizable usage windows.");
+  return pools;
+}
+
+export async function fetchAntigravityUsage(
+  options: { binary?: string; runner?: AgyRunner; cwd?: string; nowMs?: number } = {},
+): Promise<GoogleQuotaPools> {
+  const binary = options.binary ?? resolveAgyBinary();
+  const runner = options.runner ?? defaultAgyRunner;
+  let stdout: string;
+  try {
+    ({ stdout } = await runner(binary, [...AGY_USAGE_ARGS], {
+      timeoutMs: AGY_TIMEOUT_MS,
+      cwd: options.cwd ?? homedir(),
+    }));
+  } catch (error) {
+    const err = error as RunnerError;
+    if (err.code === "ENOENT") throw new AgyNotInstalledError();
+    if (/auth/i.test(err.stderr ?? "")) throw new AgyAuthError();
+    throw new Error(`Antigravity CLI usage check failed${err.killed ? " (timed out)" : ""}.`);
+  }
+  return parseAgyUsageOutput(stdout, options.nowMs ?? Date.now());
 }
 
 /**

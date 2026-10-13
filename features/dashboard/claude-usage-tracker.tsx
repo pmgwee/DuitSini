@@ -268,7 +268,7 @@ function LiveView({
             type="button"
             onClick={onImport}
             aria-label="Import Google AI Pro Quota"
-            title="Import your Antigravity coding allowance from agy -p &quot;/usage&quot;"
+            title="The desktop app tracks this automatically. Use this only on a computer without the desktop app: paste the output of agy -p &quot;/usage&quot;"
             className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-surface/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <Sparkles className="size-3.5 text-primary" />

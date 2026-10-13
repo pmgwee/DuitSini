@@ -446,8 +446,10 @@ function DesktopPanel({ os }: { os: OS }) {
           usage appears alongside the other agents on the same update interval.
         </Step>
         <Step n={3}>
-          Google AI Pro: track your Antigravity coding allowance (Gemini and Claude+GPT partner pools)
-          passively through the Antigravity CLI status-line hook.
+          Google AI Pro: sign in to Antigravity CLI once (run{" "}
+          <code className="font-mono text-[11px]">agy</code>). The desktop app then reads your
+          Gemini and Claude+GPT pools automatically through agy&apos;s own{" "}
+          <code className="font-mono text-[11px]">/usage</code> command, which spends no quota.
         </Step>
       </ol>
 
@@ -564,10 +566,10 @@ function AntigravityDesktopControl() {
         <span className="font-medium text-foreground">Google AI Pro (Antigravity)</span>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
           {status.connected
-            ? "Status-line tracking active — updates automatically when agy runs."
+            ? "Instant updates on — readings also refresh while you work in agy."
             : status.existingCommand
               ? `Another status line is configured: ${status.existingCommand}`
-              : "Track 5h and weekly quota passively via Antigravity CLI status line."}
+              : "Tracked automatically every 5 min. Optional: add instant updates while agy is open."}
         </p>
         {error ? <p className="mt-1 text-[11px] text-danger">{error}</p> : null}
       </div>

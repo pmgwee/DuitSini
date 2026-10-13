@@ -36,9 +36,20 @@ import {
   type DetectedProvider,
 } from "./collectors/glm";
 import {
+  AGY_POLL_MS,
+  AgyAuthError,
+  AgyModelTurnError,
+  AgyNotInstalledError,
   collectAntigravityStreams,
   defaultAntigravityQuotaPath,
+  fetchAntigravityUsage,
+  type AgyRunner,
 } from "./collectors/antigravity";
+import {
+  GOOGLE_CLAUDE_SOURCE,
+  GOOGLE_GEMINI_SOURCE,
+  buildGoogleUsageStreams,
+} from "../../lib/claude-usage/google-ai-pro";
 import type { Store } from "./store";
 import { safeFetch } from "./net";
 import type { UsageTracker } from "./tracker";
@@ -84,6 +95,10 @@ export interface SchedulerDeps {
   codexAccountReader?: CodexAccountReader;
   /** Optional override path to the sanitized Antigravity quota JSON. */
   antigravityQuotaPath?: string;
+  /** Runs the official `agy` binary; injected so tests never spawn it. */
+  agyRunner?: AgyRunner;
+  /** Override the `agy` binary path (tests / unusual installs). */
+  agyBinary?: string;
 }
 
 const jitter = (n: number) => Math.floor(Math.random() * n);
@@ -254,7 +269,7 @@ export class Scheduler {
       if (glm) streams.push(glm);
       const codex = await this.collectCodex();
       streams.push(...codex);
-      const antigravity = await this.collectAntigravity();
+      const antigravity = await this.collectAntigravity(manual);
       streams.push(...antigravity);
       this.deps.log(
         `collected: claude=${!!claude} glm=${!!glm} codex=${codex.length} antigravity=${antigravity.length}`,
@@ -792,19 +807,81 @@ export class Scheduler {
 
   /**
    * Google AI Pro (Antigravity coding allowance) streams.
-   * Acquired passively from the local status-line adapter output.
-   * Stalled or missing Antigravity telemetry never blocks other collectors.
+   *
+   * Primary: poll the official `agy -p /usage` (0 tokens) every AGY_POLL_MS,
+   * and on manual pulls (dashboard opened / Refresh) once the last reading is
+   * over a minute old. Fallback: the passive status-line snapshot, then the
+   * last stored reading — always with its original observation time.
+   * Isolated like every other source: a failing agy never blocks the push.
    */
-  private async collectAntigravity(): Promise<UsageStream[]> {
-    try {
+  private async collectAntigravity(manual = false): Promise<UsageStream[]> {
+    const st = this.deps.store.source("antigravity");
+    const now = Date.now();
+    const stored = [GOOGLE_GEMINI_SOURCE, GOOGLE_CLAUDE_SOURCE]
+      .map((source) => this.deps.store.snapshot(source))
+      .filter((v): v is { stream: UsageStream; observedAt: number } => v !== null);
+    const lastObservedAt = stored.reduce((max, v) => Math.max(max, v.observedAt), 0);
+
+    const fallback = async (
+      state: UsageStream["state"],
+      message: string,
+    ): Promise<UsageStream[]> => {
+      // A status-line reading from a running agy session beats an older poll.
       const quotaPath =
         this.deps.antigravityQuotaPath ||
         process.env.DUITSINI_ANTIGRAVITY_QUOTA_FILE ||
         defaultAntigravityQuotaPath(this.deps.store.userDataDir);
-      return await collectAntigravityStreams(quotaPath);
+      const passive = await collectAntigravityStreams(quotaPath).catch(() => []);
+      const passiveAt = passive.reduce((max, s) => Math.max(max, Date.parse(s.observed_at ?? "") || 0), 0);
+      if (passive.length > 0 && passiveAt > lastObservedAt) return passive;
+      return stored.map(({ stream, observedAt }) => ({
+        ...stream,
+        cached: state !== "live",
+        observed_at: new Date(observedAt).toISOString(),
+        state,
+        status_message: state === "live" ? null : message,
+      }));
+    };
+
+    const modelTurnHold = st.message === new AgyModelTurnError().message;
+    if (now < st.nextAt && (!manual || modelTurnHold)) {
+      return fallback("offline", st.message || "Waiting before checking Antigravity again.");
+    }
+    const cacheMs = manual ? MIN_GAP_MS : AGY_POLL_MS;
+    if (stored.length > 0 && now - lastObservedAt < cacheMs) return fallback("live", "");
+
+    try {
+      const pools = await fetchAntigravityUsage({ runner: this.deps.agyRunner, binary: this.deps.agyBinary });
+      const observedAt = Date.parse(pools.observedAt) || Date.now();
+      const streams = buildGoogleUsageStreams(pools, { state: "live", deviceId: this.deps.codexDeviceId ?? null });
+      for (const stream of streams) this.deps.store.setSnapshot(stream.source, stream, observedAt);
+      st.nextAt = 0;
+      st.streak = 0;
+      st.message = undefined;
+      this.deps.log(`[Antigravity] quota ok (${streams.length} pools)`);
+      return streams;
     } catch (e) {
-      this.deps.log(`[Antigravity] ${(e as Error).message}`);
-      return [];
+      const err = e as Error;
+      this.deps.log(`[Antigravity] ${err.message}`);
+      if (e instanceof AgyModelTurnError) {
+        st.nextAt = Date.now() + 24 * 60 * 60_000;
+        st.message = err.message;
+        return fallback("offline", err.message);
+      }
+      if (e instanceof AgyNotInstalledError) {
+        st.nextAt = Date.now() + 30 * 60_000;
+        st.message = err.message;
+        return fallback("offline", "Antigravity CLI not found; showing the last reading.");
+      }
+      if (e instanceof AgyAuthError) {
+        st.nextAt = Date.now() + 10 * 60_000;
+        st.message = err.message;
+        return fallback("auth_stale", "Antigravity CLI sign-in needed; run agy once to sign in.");
+      }
+      st.streak += 1;
+      st.nextAt = Date.now() + Math.min(30 * 60_000, AGY_POLL_MS * 2 ** (st.streak - 1));
+      st.message = "Antigravity CLI usage check failed";
+      return fallback("offline", "Antigravity is temporarily unreachable; showing the last reading.");
     }
   }
 

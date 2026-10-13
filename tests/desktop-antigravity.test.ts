@@ -3,8 +3,15 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AGY_USAGE_ARGS,
+  AgyAuthError,
+  AgyModelTurnError,
+  AgyNotInstalledError,
   buildAdapterScriptSource,
   collectAntigravityStreams,
+  fetchAntigravityUsage,
+  parseAgyUsageOutput,
+  type AgyRunner,
   connectAntigravity,
   defaultAdapterCmdPath,
   defaultAdapterScriptPath,
@@ -236,6 +243,85 @@ describe("desktop antigravity collector and statusline adapter", () => {
         const streams = await collectAntigravityStreams(quotaPath);
         expect(streams).toEqual([]);
       });
+    });
+  });
+
+  describe("agy /usage poller", () => {
+    // Real `agy -p "/usage" --output-format json` envelope captured 2026-10-13 (agy 1.3.3).
+    const realEnvelope = {
+      conversation_id: "",
+      status: "SUCCESS",
+      response: "Gemini Models\tWeekly Limit Remaining\t96%\t2026-10-19T17:19:49Z\n",
+      duration_seconds: 0,
+      num_turns: 0,
+      usage: { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0 },
+      command: {
+        name: "usage",
+        data: {
+          groups: [
+            {
+              name: "Gemini Models",
+              buckets: [
+                { id: "gemini-weekly", window: "weekly", remaining_fraction: 0.9582148790359497, reset_time: "2026-10-19T17:19:49Z" },
+                { id: "gemini-5h", window: "5h", remaining_fraction: 0.8010379076004028, reset_time: "2026-10-13T07:52:55Z" },
+              ],
+            },
+            {
+              name: "Claude and GPT models",
+              buckets: [
+                { id: "3p-weekly", window: "weekly", remaining_fraction: 1, reset_time: "2026-10-20T04:17:17Z" },
+                { id: "3p-5h", window: "5h", remaining_fraction: 1, reset_time: "2026-10-13T09:17:17Z" },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    it("parses the real envelope into all four windows as percent used", () => {
+      const pools = parseAgyUsageOutput(JSON.stringify(realEnvelope), 1780000000000);
+      expect(pools.gemini.weekly?.utilization).toBe(4.2);
+      expect(pools.gemini.five_hour?.utilization).toBe(19.9);
+      expect(pools.gemini.five_hour?.resets_at).toBe("2026-10-13T07:52:55.000Z");
+      expect(pools.claudePartner.weekly?.utilization).toBe(0);
+      expect(pools.claudePartner.five_hour?.utilization).toBe(0);
+      expect(pools.observedAt).toBe(new Date(1780000000000).toISOString());
+    });
+
+    it("refuses output that spent tokens or ran a model turn", () => {
+      const spent = { ...realEnvelope, usage: { ...realEnvelope.usage, total_tokens: 42 } };
+      expect(() => parseAgyUsageOutput(JSON.stringify(spent))).toThrow(AgyModelTurnError);
+      const turn = { ...realEnvelope, num_turns: 1 };
+      expect(() => parseAgyUsageOutput(JSON.stringify(turn))).toThrow(AgyModelTurnError);
+      const notUsage = { ...realEnvelope, command: undefined };
+      expect(() => parseAgyUsageOutput(JSON.stringify(notUsage))).toThrow(AgyModelTurnError);
+    });
+
+    it("rejects unreadable or empty output instead of fabricating readings", () => {
+      expect(() => parseAgyUsageOutput("not json")).toThrow(/unreadable/);
+      const empty = { ...realEnvelope, command: { name: "usage", data: { groups: [] } } };
+      expect(() => parseAgyUsageOutput(JSON.stringify(empty))).toThrow(/no recognizable/);
+    });
+
+    it("runs only the official /usage command and maps runner failures", async () => {
+      const calls: string[][] = [];
+      const ok: AgyRunner = async (_bin, args) => {
+        calls.push(args);
+        return { stdout: JSON.stringify(realEnvelope), stderr: "" };
+      };
+      const pools = await fetchAntigravityUsage({ binary: "agy", runner: ok, cwd: "." });
+      expect(calls).toEqual([[...AGY_USAGE_ARGS]]);
+      expect(pools.gemini.weekly).not.toBeNull();
+
+      const missing: AgyRunner = async () => {
+        throw Object.assign(new Error("spawn agy ENOENT"), { code: "ENOENT" });
+      };
+      await expect(fetchAntigravityUsage({ binary: "agy", runner: missing, cwd: "." })).rejects.toThrow(AgyNotInstalledError);
+
+      const unauthenticated: AgyRunner = async () => {
+        throw Object.assign(new Error("exit 1"), { code: 1, stderr: "Error: authentication required" });
+      };
+      await expect(fetchAntigravityUsage({ binary: "agy", runner: unauthenticated, cwd: "." })).rejects.toThrow(AgyAuthError);
     });
   });
 });
