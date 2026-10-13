@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { AgentProviderIcon } from "./agent-provider-icon";
-import { isSupportedSource } from "@/lib/claude-usage/protocol";
+import { SUPPORTED_SOURCES, isSupportedSource } from "@/lib/claude-usage/protocol";
 
 type OS = "windows" | "mac";
 
@@ -73,10 +73,14 @@ export function ConnectClaudeCard() {
                 source: String(s.source || "claude"),
                 label: String(s.label || "Claude"),
               }))
-              // Drop untracked sources (e.g. a stale `gemini` stream left in the
-              // row by a retired build) — this app has no Gemini tracking. Same
-              // allowlist as the usage tracker (SUPPORTED_SOURCES).
-              .filter((s) => isSupportedSource(s.source)),
+              // Drop untracked sources (e.g. the stale legacy `gemini` stream a
+              // retired build left in the row). Same allowlist as the usage
+              // tracker (SUPPORTED_SOURCES).
+              .filter((s) => isSupportedSource(s.source))
+              // A shared default Codex profile and its enrolled seat can both
+              // report the same account, so one label may appear twice.
+              .filter((s, i, all) => all.findIndex((o) => o.source === s.source && o.label === s.label) === i)
+              .sort((a, b) => SUPPORTED_SOURCES[a.source] - SUPPORTED_SOURCES[b.source]),
           );
         }
       } catch {
