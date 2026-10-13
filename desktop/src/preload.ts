@@ -169,3 +169,14 @@ expose("duitsiniClaudeRenewal", () => ({
     return () => ipcRenderer.removeListener("duitsini:claude-renew-result", listener);
   },
 }));
+
+/**
+ * `window.duitsiniAntigravity` — Antigravity status-line adapter controls.
+ * Present only in the desktop shell; enables user-controlled connect/disconnect
+ * of the local status-line hook.
+ */
+expose("duitsiniAntigravity", () => ({
+  getStatus: (): Promise<unknown> => ipcRenderer.invoke("duitsini:antigravity-status"),
+  connect: (): Promise<unknown> => ipcRenderer.invoke("duitsini:antigravity-connect"),
+  disconnect: (): Promise<unknown> => ipcRenderer.invoke("duitsini:antigravity-disconnect"),
+}));

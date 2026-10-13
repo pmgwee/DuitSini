@@ -95,6 +95,8 @@ export const SUPPORTED_SOURCES: Readonly<Record<string, number>> = {
   claude: 0,
   glm: 1,
   codex: 2,
+  google_gemini: 3,
+  google_claude: 4,
 };
 
 /** True if `source` is a provider this dashboard renders. */
@@ -154,7 +156,7 @@ export const streamSchema = z.object({
   status_message: z.string().max(200).nullable().optional(),
 });
 
-export const streamArraySchema = z.array(streamSchema).max(6).superRefine((streams, ctx) => {
+export const streamArraySchema = z.array(streamSchema).max(8).superRefine((streams, ctx) => {
   const seen = new Set<string>();
   streams.forEach((stream, index) => {
     const key = usageStreamKey(stream);

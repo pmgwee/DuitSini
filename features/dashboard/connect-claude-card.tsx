@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { AgentProviderIcon } from "./agent-provider-icon";
-import { isSupportedSource } from "@/lib/claude-usage/protocol";
+import { SUPPORTED_SOURCES, isSupportedSource } from "@/lib/claude-usage/protocol";
 
 type OS = "windows" | "mac";
 
@@ -73,10 +73,14 @@ export function ConnectClaudeCard() {
                 source: String(s.source || "claude"),
                 label: String(s.label || "Claude"),
               }))
-              // Drop untracked sources (e.g. a stale `gemini` stream left in the
-              // row by a retired build) — this app has no Gemini tracking. Same
-              // allowlist as the usage tracker (SUPPORTED_SOURCES).
-              .filter((s) => isSupportedSource(s.source)),
+              // Drop untracked sources (e.g. the stale legacy `gemini` stream a
+              // retired build left in the row). Same allowlist as the usage
+              // tracker (SUPPORTED_SOURCES).
+              .filter((s) => isSupportedSource(s.source))
+              // A shared default Codex profile and its enrolled seat can both
+              // report the same account, so one label may appear twice.
+              .filter((s, i, all) => all.findIndex((o) => o.source === s.source && o.label === s.label) === i)
+              .sort((a, b) => SUPPORTED_SOURCES[a.source] - SUPPORTED_SOURCES[b.source]),
           );
         }
       } catch {
@@ -248,7 +252,8 @@ function ConnectedView({
           <p className="mb-2.5 text-xs text-muted-foreground">Usage sources tracking now:</p>
           <div className="flex flex-wrap gap-2">
             {sources.map((s) => (
-              <SourceCard key={s.source} source={s.source} label={s.label} />
+              // Both Codex seats share source "codex"; the label tells them apart.
+              <SourceCard key={`${s.source}:${s.label}`} source={s.source} label={s.label} />
             ))}
           </div>
         </>
@@ -445,7 +450,15 @@ function DesktopPanel({ os }: { os: OS }) {
           Already signed in to Codex CLI? There is nothing else to do — its 7-day subscription
           usage appears alongside the other agents on the same update interval.
         </Step>
+        <Step n={3}>
+          Google AI Pro: sign in to Antigravity CLI once (run{" "}
+          <code className="font-mono text-[11px]">agy</code>). The desktop app then reads your
+          Gemini and Claude+GPT pools automatically through agy&apos;s own{" "}
+          <code className="font-mono text-[11px]">/usage</code> command, which spends no quota.
+        </Step>
       </ol>
+
+      <AntigravityDesktopControl />
 
       <details className="mt-3 rounded-lg border border-border/40 bg-surface/30 px-3 py-2 text-[11px] text-muted-foreground/80">
         <summary className="cursor-pointer select-none font-medium text-muted-foreground">
@@ -479,6 +492,102 @@ function DesktopPanel({ os }: { os: OS }) {
         </p>
       </details>
     </>
+  );
+}
+
+function AntigravityDesktopControl() {
+  const [status, setStatus] = useState<{
+    installed?: boolean;
+    connected?: boolean;
+    statusLineConfigured?: boolean;
+    isOurCommand?: boolean;
+    conflict?: boolean;
+    existingCommand?: string | null;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const w = window as unknown as {
+      duitsiniAntigravity?: {
+        getStatus: () => Promise<{
+          installed?: boolean;
+          connected?: boolean;
+          statusLineConfigured?: boolean;
+          isOurCommand?: boolean;
+          conflict?: boolean;
+          existingCommand?: string | null;
+        }>;
+        connect: () => Promise<{ ok: boolean; message?: string }>;
+        disconnect: () => Promise<{ ok: boolean; message?: string }>;
+      };
+    };
+    if (w.duitsiniAntigravity) {
+      w.duitsiniAntigravity.getStatus().then(setStatus).catch(() => {});
+    }
+  }, []);
+
+  const handleToggle = async () => {
+    const w = window as unknown as {
+      duitsiniAntigravity?: {
+        getStatus: () => Promise<{
+          installed?: boolean;
+          connected?: boolean;
+          statusLineConfigured?: boolean;
+          isOurCommand?: boolean;
+          conflict?: boolean;
+          existingCommand?: string | null;
+        }>;
+        connect: () => Promise<{ ok: boolean; message?: string }>;
+        disconnect: () => Promise<{ ok: boolean; message?: string }>;
+      };
+    };
+    if (!w.duitsiniAntigravity) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (status?.connected) {
+        await w.duitsiniAntigravity.disconnect();
+      } else {
+        const res = await w.duitsiniAntigravity.connect();
+        if (!res.ok) {
+          setError(res.message || "Could not connect Antigravity");
+        }
+      }
+      const nextStatus = await w.duitsiniAntigravity.getStatus();
+      setStatus(nextStatus);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!status?.installed && status?.connected !== true) return null;
+
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-surface/30 p-3 text-xs">
+      <div>
+        <span className="font-medium text-foreground">Google AI Pro (Antigravity)</span>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {status.connected
+            ? "Instant updates on — readings also refresh while you work in agy."
+            : status.existingCommand
+              ? `Another status line is configured: ${status.existingCommand}`
+              : "Tracked automatically every 5 min. Optional: add instant updates while agy is open."}
+        </p>
+        {error ? <p className="mt-1 text-[11px] text-danger">{error}</p> : null}
+      </div>
+      <Button
+        size="sm"
+        variant={status.connected ? "outline" : "default"}
+        onClick={handleToggle}
+        disabled={busy}
+        className="shrink-0"
+      >
+        {busy ? "Working…" : status.connected ? "Disconnect" : "Connect Antigravity"}
+      </Button>
+    </div>
   );
 }
 

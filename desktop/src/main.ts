@@ -22,6 +22,11 @@ import { codexCliInvocation, createCodexAppServerAccountReader } from "./codex-a
 import type { CodexAccountProfile } from "./collectors/codex";
 import { CODEX_ACCOUNT_SLOTS, type CodexAccountMetadata } from "../../lib/claude-usage/codex-accounts";
 import { Store } from "./store";
+import {
+  getAntigravityStatus,
+  connectAntigravity,
+  disconnectAntigravity,
+} from "./collectors/antigravity";
 import { TokenHolder } from "./mint";
 import { startLoopback, type LoopbackHandle } from "./loopback";
 import { createUsageTracker } from "./tracker";
@@ -981,6 +986,29 @@ ipcMain.handle("duitsini:codex-sync-accounts", async (event, value: unknown) => 
   if (!(await tokens.get())) return { ok: false, code: "not_signed_in" };
   codexRuntime.syncAccounts(accounts);
   return { ok: true };
+});
+
+ipcMain.handle("duitsini:antigravity-status", async (event) => {
+  assertCodexRenderer(event);
+  return getAntigravityStatus(app.getPath("userData"));
+});
+
+ipcMain.handle("duitsini:antigravity-connect", async (event) => {
+  assertCodexRenderer(event);
+  const result = await connectAntigravity(app.getPath("userData"));
+  if (result.ok) {
+    void scheduler?.pullNow();
+  }
+  return result;
+});
+
+ipcMain.handle("duitsini:antigravity-disconnect", async (event) => {
+  assertCodexRenderer(event);
+  const result = await disconnectAntigravity(app.getPath("userData"));
+  if (result.ok) {
+    void scheduler?.pullNow();
+  }
+  return result;
 });
 
 /**
